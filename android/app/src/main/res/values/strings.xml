@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zara AI</string>
+    <string name="accessibility_service_description">Allows Zara AI Assistant, only when explicitly enabled by the device owner, to execute hands-free voice navigation (Back, Home, Recents, Scroll, Lock Screen) and tap confirmed Send actions inside messaging apps. Password and sensitive fields are strictly ignored.</string>
+    <string name="wake_word_channel_name">Zara Wake-Word Engine</string>
+    <string name="voice_service_channel_name">Zara Foreground Voice Assistant</string>
+</resources>
+

@@ -1,0 +1,80 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.zara.ai.assistant'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.zara.ai.assistant'
+        minSdk 24
+        targetSdk 35
+        versionCode 103
+        versionName '10.3.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+
+        manifestPlaceholders = [
+            hostName: 'ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app',
+            defaultUrl: 'https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app',
+            launcherName: 'Zara AI',
+            assetStatements: '[{ "relation": ["delegate_permission/common.handle_all_urls"], "target": { "namespace": "android_app", "package_name": "com.zara.ai.assistant", "sha256_cert_fingerprints": ["82:76:83:8B:25:A8:DF:4D:45:C9:36:1B:FF:4C:E5:A2:8A:2C:9F:44:8D:18:23:40:99:98:81:49:15:3F:8A:23"] }}]'
+        ]
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('zara-release.keystore')
+            storePassword System.getenv('ZARA_KEYSTORE_PASSWORD') ?: 'zara_ai_2026_secure'
+            keyAlias System.getenv('ZARA_KEY_ALIAS') ?: 'zara_release'
+            keyPassword System.getenv('ZARA_KEY_PASSWORD') ?: 'zara_ai_2026_secure'
+        }
+    }
+
+    bundle {
+        abi {
+            enableSplit = true
+        }
+        density {
+            enableSplit = true
+        }
+        language {
+            enableSplit = false
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix '.debug'
+            debuggable true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.activity:activity-ktx:1.9.3'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    implementation 'com.android.billingclient:billing-ktx:7.1.1'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

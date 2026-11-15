@@ -1,0 +1,16 @@
+{
+  "verify-script": {
+    "plan": "pro",
+    "source": "trial_7d",
+    "active": true,
+    "sku": "zara_pro_monthly",
+    "expiresAtIso": "2026-11-21T21:54:39.042Z",
+    "features": {
+      "priorityBrains": true,
+      "ultraPremiumTts": true,
+      "androidAutomation": true,
+      "customWakeWordNative": true,
+      "unlimitedResearchAndDev": true
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "packageId": "com.zara.ai.assistant",
+  "host": "ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app",
+  "name": "Zara - Personal AI Girlfriend & Voice Assistant",
+  "launcherName": "Zara AI",
+  "themeColor": "#070313",
+  "themeColorDark": "#070313",
+  "navigationColor": "#070313",
+  "navigationColorDark": "#070313",
+  "navigationDividerColor": "#1e1035",
+  "navigationDividerColorDark": "#1e1035",
+  "backgroundColor": "#070313",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app/pwa-512x512.png",
+  "maskableIconUrl": "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app/pwa-maskable-512x512.png",
+  "appVersionCode": 103,
+  "appVersionName": "10.3.0",
+  "splashScreenFadeOutDuration": 300,
+  "enableSiteSettingsShortcut": true,
+  "shortcuts": [
+    {
+      "name": "Office & PC AI Studio",
+      "shortName": "Office AI",
+      "url": "/?studio=office",
+      "icon": "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app/pwa-192x192.png"
+    },
+    {
+      "name": "Ethical Security Lab",
+      "shortName": "Security Lab",
+      "url": "/?studio=security",
+      "icon": "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app/pwa-192x192.png"
+    },
+    {
+      "name": "Chat with Zara",
+      "shortName": "Chat",
+      "url": "/?action=chat",
+      "icon": "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app/pwa-192x192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    },
+    "playBilling": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  }
+}

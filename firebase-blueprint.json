@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "OwnerVault": {
+      "title": "OwnerVault",
+      "description": "Encrypted/isolated private romantic chat history and 100+ day memories belonging exclusively to the authenticated app owner.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the verified app owner."
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 120,
+          "pattern": "^hdfhhg41@gmail\\.com$",
+          "description": "Verified Google email address of the sole authorized owner."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "minLength": 10,
+          "maxLength": 64,
+          "description": "ISO-8601 timestamp when the vault was last updated."
+        },
+        "messagesJson": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 600000,
+          "description": "Serialized JSON array of the owner's private chat messages."
+        },
+        "memoriesJson": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 250000,
+          "description": "Serialized JSON array of the owner's private 100+ day memories."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "ownerEmail",
+        "updatedAt",
+        "messagesJson",
+        "memoriesJson"
+      ]
+    }
+  },
+  "firestore": {
+    "/ownerVault/{userId}": {
+      "schema": "OwnerVault",
+      "description": "Strict single-owner private vault storing romantic conversations and long-term memories."
+    }
+  }
+}

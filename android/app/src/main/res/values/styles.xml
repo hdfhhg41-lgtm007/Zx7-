@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="zara_status_bar">#070313</color>
+    <color name="zara_nav_bar">#070313</color>
+    <style name="Theme.ZaraApp" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@color/zara_status_bar</item>
+        <item name="android:navigationBarColor">@color/zara_nav_bar</item>
+    </style>
+    <style name="Theme.ZaraApp.Splash" parent="Theme.ZaraApp" />
+</resources>

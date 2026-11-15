@@ -1,0 +1,6 @@
+{
+  "name": "Zara - AI Girlfriend & Voice Assistant",
+  "description": "Personal Pakistani female AI assistant and romantic girlfriend with Urdu, Punjabi, Hindi, and English voice interaction.",
+  "requestFramePermissions": ["microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

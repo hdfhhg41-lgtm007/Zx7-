@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zara - AI Girlfriend &amp; Voice Assistant</title>
+    <meta
+      name="description"
+      content="Personal Pakistani female AI assistant and romantic girlfriend with Urdu, Punjabi, Hindi, and English voice interaction."
+    />
+    <meta property="og:title" content="Zara - AI Girlfriend &amp; Voice Assistant" />
+    <meta
+      property="og:description"
+      content="Personal Pakistani female AI assistant and romantic girlfriend with Urdu, Punjabi, Hindi, and English voice interaction."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#070313" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Zara AI" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap"
+      />
+    </noscript>
+    <script>
+      window.__deferredPwaPrompt = null;
+      window.__zaraMainLoaded = false;
+      window.__zaraBooted = false;
+      window.__zaraRecoveryActive = false;
+
+      var LEGACY_CACHES = [
+        'zara-4d-direct-package-v2',
+        'zara-pages-cache-v3',
+        'zara-pages-cache-v4',
+        'zara-pages-cache-v5',
+        'zara-app-shell-v6',
+        'zara-app-shell-v7',
+        'zara-app-shell-v8',
+        'zara-static-assets-v8',
+        'zara-app-shell-v9',
+        'zara-static-assets-v9',
+        'zara-app-shell-v10',
+        'zara-static-assets-v10',
+        'zara-app-shell-v11',
+        'zara-static-assets-v11'
+      ];
+
+      function withHardTimeout(promise, ms) {
+        return new Promise(function (resolve) {
+          var settled = false;
+          var timer = window.setTimeout(function () {
+            if (!settled) {
+              settled = true;
+              resolve();
+            }
+          }, ms);
+          Promise.resolve(promise)
+            .catch(function () {})
+            .finally(function () {
+              if (!settled) {
+                settled = true;
+                window.clearTimeout(timer);
+                resolve();
+              }
+            });
+        });
+      }
+
+      function safeSessionGet(key) {
+        try {
+          return window.sessionStorage.getItem(key);
+        } catch (e) {
+          return null;
+        }
+      }
+      function safeSessionSet(key, val) {
+        try {
+          window.sessionStorage.setItem(key, val);
+        } catch (e) {}
+      }
+
+      // Rolling 3-minute auto-recovery budget (max 2 auto-recoveries per 3 mins)
+      function canRunAutoBootRecovery() {
+        try {
+          var now = Date.now();
+          var raw = safeSessionGet('zara_boot_recover_ts_v3') || '';
+          var recent = raw
+            .split(',')
+            .map(function (s) {
+              return parseInt(s, 10);
+            })
+            .filter(function (n) {
+              return !isNaN(n) && now - n < 180000;
+            });
+          if (recent.length >= 2) return false;
+          recent.push(now);
+          safeSessionSet('zara_boot_recover_ts_v3', recent.join(','));
+          return true;
+        } catch (e) {
+          return true;
+        }
+      }
+
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__deferredPwaPrompt = e;
+        window.dispatchEvent(new Event('zara-pwa-ready'));
+      });
+
+      // Purge legacy HTTP page caches only (NEVER touch localStorage / IndexedDB user chat history!)
+      function purgeLegacyPageCaches() {
+        try {
+          if ('caches' in window && window.caches) {
+            return Promise.all(
+              LEGACY_CACHES.map(function (legacyKey) {
+                return window.caches.delete(legacyKey).catch(function () {});
+              })
+            );
+          }
+        } catch (e) {}
+        return Promise.resolve();
+      }
+
+      // Purge all HTTP asset caches (strictly preserving 100% of localStorage & IndexedDB chats/memories!)
+      function purgeAllHttpAssetCachesOnly() {
+        try {
+          if ('caches' in window && window.caches) {
+            return window.caches
+              .keys()
+              .then(function (keys) {
+                return Promise.all(
+                  keys.map(function (k) {
+                    return window.caches.delete(k).catch(function () {});
+                  })
+                );
+              })
+              .catch(function () {});
+          }
+        } catch (e) {}
+        return Promise.resolve();
+      }
+
+      purgeLegacyPageCaches();
+
+      // Non-blocking Service Worker upgrade check + clean wakeup query parameters
+      try {
+        if ('serviceWorker' in navigator && navigator.serviceWorker) {
+          navigator.serviceWorker
+            .getRegistrations()
+            .then(function (regs) {
+              regs.forEach(function (r) {
+                var swUrl = String(
+                  (r.active && r.active.scriptURL) ||
+                    (r.waiting && r.waiting.scriptURL) ||
+                    (r.installing && r.installing.scriptURL) ||
+                    ''
+                );
+                if (swUrl.indexOf('dev-sw.js') !== -1) {
+                  r.unregister().catch(function () {});
+                  return;
+                }
+                if (r.waiting) r.waiting.postMessage({ type: 'SKIP_WAITING' });
+              });
+            })
+            .catch(function () {});
+        }
+        if (
+          window.location.search.indexOf('_zdirect=') !== -1 ||
+          window.location.search.indexOf('_zwake=') !== -1
+        ) {
+          var cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete('_zdirect');
+          cleanUrl.searchParams.delete('_zwake');
+          window.history.replaceState(
+            {},
+            '',
+            (cleanUrl.pathname + cleanUrl.search + cleanUrl.hash) || '/'
+          );
+        }
+      } catch (e) {}
+
+      function setBootStatusText(txt, showButton, btnLabel) {
+        var msg = document.getElementById('zara-boot-msg');
+        var btn = document.getElementById('zara-boot-retry-btn');
+        if (msg && txt) msg.textContent = txt;
+        if (btn) {
+          if (showButton) btn.style.display = 'inline-flex';
+          if (btnLabel) btn.textContent = btnLabel;
+        }
+      }
+
+      function navigateFreshPreservingChats() {
+        try {
+          var url = new URL(window.location.href);
+          url.searchParams.set('_zdirect', '1');
+          url.searchParams.set('_zwake', String(Date.now()));
+          window.location.replace(url.toString());
+        } catch (e) {
+          window.location.href = '/?_zdirect=1&_zwake=' + Date.now();
+        }
+      }
+
+      // Non-blocking, Timeout-Guarded Smart Recovery (NEVER hangs on Service Worker or half-open sockets!)
+      window.__zaraForceFreshOpen = function (manualClick, reason) {
+        if (window.__zaraBooted && !manualClick) return;
+        if (!manualClick && typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        if (window.__zaraRecoveryActive && !manualClick) return;
+        window.__zaraRecoveryActive = true;
+
+        var shouldDeepPurgeHttpCaches = Boolean(manualClick || reason === 'script_error');
+
+        setBootStatusText(
+          manualClick
+            ? 'زارا فریش کنکشن کھول رہی ہے (آپ کی چیٹ ہسٹری مکمل محفوظ ہے)...'
+            : 'اپ ڈیٹ چیک ہو رہا ہے — زارا کھل رہی ہے (چیٹ ہسٹری محفوظ ہے)...',
+          true,
+          manualClick ? 'Opening Zara Now...' : 'Open Zara Fresh Now (Chat Safe)'
+        );
+
+        var cleanupJob = (function () {
+          var tasks = [
+            shouldDeepPurgeHttpCaches ? purgeAllHttpAssetCachesOnly() : purgeLegacyPageCaches()
+          ];
+          try {
+            if ('serviceWorker' in navigator && navigator.serviceWorker) {
+              tasks.push(
+                navigator.serviceWorker
+                  .getRegistrations()
+                  .then(function (regs) {
+                    return Promise.all(
+                      regs.map(function (r) {
+                        if (r.active) {
+                          try {
+                            r.active.postMessage({ type: 'ZARA_PURGE_CACHES' });
+                          } catch (e) {}
+                        }
+                        if (shouldDeepPurgeHttpCaches) {
+                          return r.unregister().catch(function () {});
+                        }
+                        if (r.waiting) {
+                          r.waiting.postMessage({ type: 'SKIP_WAITING' });
+                        }
+                        return r.update().catch(function () {});
+                      })
+                    );
+                  })
+                  .catch(function () {})
+              );
+            }
+          } catch (e) {}
+          return Promise.all(tasks);
+        })();
+
+        // Hard 850ms ceiling: NEVER allow stalled SW transactions on Android WebAPK to block boot!
+        withHardTimeout(cleanupJob, 850).then(function () {
+          var attempts = 0;
+          function pollUntilReady() {
+            if (window.__zaraBooted && !manualClick) {
+              window.__zaraRecoveryActive = false;
+              return;
+            }
+            attempts++;
+            var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            var abortTimer = ctrl
+              ? window.setTimeout(function () {
+                  ctrl.abort();
+                }, 3200)
+              : null;
+
+            fetch('/api/health?_recover=' + Date.now(), {
+              method: 'GET',
+              cache: 'no-store',
+              credentials: 'include',
+              signal: ctrl ? ctrl.signal : undefined
+            })
+              .then(function (res) {
+                if (abortTimer) window.clearTimeout(abortTimer);
+                if (res.redirected) {
+                  navigateFreshPreservingChats();
+                  return;
+                }
+                if (res.status === 200) {
+                  if (res.headers.get('x-zara-app') === 'ready') {
+                    setBootStatusText('سرور تیار ہے — زارا کھل رہی ہے ✓', true);
+                    navigateFreshPreservingChats();
+                    return;
+                  }
+                  return res
+                    .json()
+                    .then(function (data) {
+                      if (data && (data.service === 'zara' || data.ok === true)) {
+                        setBootStatusText('سرور تیار ہے — زارا کھل رہی ہے ✓', true);
+                        navigateFreshPreservingChats();
+                        return;
+                      }
+                      if (manualClick && attempts >= 2) {
+                        navigateFreshPreservingChats();
+                        return;
+                      }
+                      window.setTimeout(pollUntilReady, 1400);
+                    })
+                    .catch(function () {
+                      if (manualClick) {
+                        navigateFreshPreservingChats();
+                        return;
+                      }
+                      window.setTimeout(pollUntilReady, 1400);
+                    });
+                }
+                if (manualClick && attempts >= 2) {
+                  navigateFreshPreservingChats();
+                  return;
+                }
+                setBootStatusText(
+                  'سرور جاگ رہا ہے، زارا خودکار طور پر کھل جائے گی... (' + attempts + ')',
+                  true,
+                  'Open Zara Fresh Now (Chat Safe)'
+                );
+                window.setTimeout(pollUntilReady, 1500);
+              })
+              .catch(function () {
+                if (abortTimer) window.clearTimeout(abortTimer);
+                if (
+                  manualClick &&
+                  attempts >= 2 &&
+                  (typeof navigator === 'undefined' || navigator.onLine !== false)
+                ) {
+                  navigateFreshPreservingChats();
+                  return;
+                }
+                setBootStatusText(
+                  'انٹرنیٹ / سرور کنیکٹ ہو رہا ہے (' + attempts + ') — ٹچ کریں یا انتظار کریں',
+                  true,
+                  'Open Zara Fresh Now (Chat Safe)'
+                );
+                window.setTimeout(pollUntilReady, 1800);
+              });
+          }
+          pollUntilReady();
+        });
+      };
+
+      // Instant recovery ONLY when a critical <script> or modulepreload actually fails (404 / MIME mismatch)
+      window.addEventListener(
+        'error',
+        function (evt) {
+          var t = evt && evt.target;
+          if (!t || window.__zaraBooted) return;
+          var isScriptTag = t.tagName === 'SCRIPT';
+          var isModulePreload =
+            t.tagName === 'LINK' && String(t.rel || '').toLowerCase() === 'modulepreload';
+          if (isScriptTag || isModulePreload) {
+            var src = String(t.src || t.href || '');
+            if (src.indexOf('_aistudio-iframe.js') !== -1 || src.indexOf('fonts.googleapis') !== -1) {
+              return;
+            }
+            if (canRunAutoBootRecovery()) {
+              window.setTimeout(function () {
+                if (!window.__zaraBooted) {
+                  window.__zaraForceFreshOpen(false, 'script_error');
+                }
+              }, 250);
+            } else {
+              setBootStatusText(
+                'اپ ڈیٹ لوڈ کرنے کے لیے نیچے بٹن دبائیں (آپ کی چیٹ محفوظ ہے)',
+                true,
+                'Open Zara Fresh Now (Chat Safe)'
+              );
+            }
+          }
+        },
+        true
+      );
+
+      // Slow-Network Friendly Progress Updates: NEVER kill an active 3G/4G download mid-flight!
+      window.setTimeout(function () {
+        if (!window.__zaraBooted && !window.__zaraRecoveryActive) {
+          if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            setBootStatusText('آف لائن موڈ میں زارا کھل رہی ہے...', false);
+            return;
+          }
+          setBootStatusText(
+            'زارا لائیو اسٹوڈیو لوڈ ہو رہا ہے (آپ کی چیٹ ہسٹری مکمل محفوظ ہے)...',
+            false
+          );
+        }
+      }, 4000);
+
+      window.setTimeout(function () {
+        if (!window.__zaraBooted && !window.__zaraRecoveryActive) {
+          setBootStatusText(
+            'سلو نیٹ ورک پر زارا لوڈ ہو رہی ہے — انتظار کریں یا نیچے بٹن دبائیں',
+            true,
+            'Open Zara Fresh Now (Chat Safe)'
+          );
+        }
+      }, 11000);
+
+      // Only run fallback auto-recovery if 45 full seconds pass without main.tsx ever executing
+      window.setTimeout(function () {
+        if (
+          !window.__zaraMainLoaded &&
+          !window.__zaraBooted &&
+          !window.__zaraRecoveryActive &&
+          (typeof navigator === 'undefined' || navigator.onLine !== false) &&
+          canRunAutoBootRecovery()
+        ) {
+          window.__zaraForceFreshOpen(false, 'watchdog_45s');
+        }
+      }, 45000);
+    </script>
+  </head>
+  <body
+    style="margin:0;background:#070512;color:#f8fafc;font-family:'Plus Jakarta Sans',system-ui,sans-serif;"
+  >
+    <div id="root">
+      <div
+        style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;background:#070512;"
+      >
+        <div
+          style="width:68px;height:68px;border-radius:9999px;background:rgba(244,63,94,0.18);border:2px solid rgba(244,63,94,0.65);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fda4af;margin-bottom:14px;"
+        >
+          ZARA
+        </div>
+        <div style="font-size:16px;font-weight:700;color:#ffffff;margin-bottom:6px;">
+          Zara AI
+        </div>
+        <div
+          id="zara-boot-msg"
+          style="font-size:12px;color:#94a3b8;max-width:280px;line-height:1.5;"
+        >
+          لائیو اسٹوڈیو کھل رہا ہے...
+        </div>
+        <button
+          id="zara-boot-retry-btn"
+          type="button"
+          onclick="window.__zaraForceFreshOpen && window.__zaraForceFreshOpen(true)"
+          style="display:none;margin-top:18px;min-height:44px;padding:10px 20px;border-radius:14px;border:1px solid rgba(244,63,94,0.6);background:#e11d48;color:#fff;font-size:13px;font-weight:700;align-items:center;justify-content:center;cursor:pointer;"
+        >
+          Open Zara Fresh Now (Chat Safe)
+        </button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
