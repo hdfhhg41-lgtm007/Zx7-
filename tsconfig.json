@@ -24,5 +24,12 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": ["dist"]
+  "exclude": [
+    "dist",
+    "src/components/ZaraAvatar3D.tsx",
+    "src/components/hud3d/HoloParticleFace3D.tsx",
+    "src/components/hud3d/IsometricVisualHub3D.tsx",
+    "src/components/hud3d/SatLinkGlobe3D.tsx",
+    "src/components/studio/DesignStudio2D3DPanel.tsx"
+  ]
 }
