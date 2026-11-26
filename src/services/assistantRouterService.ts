@@ -83,6 +83,15 @@ export function detectAssistantOrLanguageCommand(rawText: string): AssistantSwit
     return { type: 'switch_assistant', assistantId: 'mother' };
   }
 
+  // 8. Roman Urdu / Roman Style explicit switch command
+  if (
+    /\b(switch|change|set|use|talk|speak|reply|write)\s*(to|in)?\s*roman\s*(urdu|style|desi)?\b/i.test(lower) ||
+    /\broman\s*(urdu|style)\s*(lagao|kardo|karo|on|enable)\b/i.test(lower) ||
+    /(رومن\s*(اردو|سٹائل|اسٹائل)|roman\s*style)/i.test(txt)
+  ) {
+    return { type: 'language_switch', targetLanguage: 'roman_urdu' };
+  }
+
   return null;
 }
 

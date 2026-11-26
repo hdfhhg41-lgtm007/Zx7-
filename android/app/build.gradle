@@ -44,16 +44,26 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig = false
+        aidl = false
+        renderScript = false
+        resValues = false
+        shaders = false
+    }
+
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
+            crunchPngs false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            signingConfig file('zara-release.keystore').exists() ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             applicationIdSuffix '.debug'
             debuggable true
+            crunchPngs false
         }
     }
 

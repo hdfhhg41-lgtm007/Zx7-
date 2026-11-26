@@ -4,7 +4,13 @@ import http from 'http';
 import net from 'net';
 import dns from 'dns/promises';
 import { WebSocketServer, WebSocket } from 'ws';
-import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
+import {
+  EndSensitivity,
+  GoogleGenAI,
+  Modality,
+  StartSensitivity,
+  ThinkingLevel,
+} from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import zlib from 'zlib';
@@ -23,11 +29,15 @@ import {
   type OrchestratedSttResult,
   type OrchestratedTtsResult,
 } from './src/server/aiOrchestrator.ts';
+import { ZaraDevPlatformEngine } from './src/server/devPlatformEngine.ts';
 import type {
   AiAssistantId,
   AiBrainEngineId,
   AiOrchestratorTestResult,
   AllAiSystemId,
+  ApiVaultProviderId,
+  AutonomousTaskPlan,
+  MusicControlCommand,
   ProTierEntitlement,
   ResearchSourceCitation,
   SelfImproveAuditReport,
@@ -394,9 +404,21 @@ function pcmBufferToWavBase64(pcmBuf: Buffer, sampleRate = 24000): string {
   const bitsPerSample = 16;
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
   const blockAlign = (numChannels * bitsPerSample) / 8;
-  // Ensure 2-byte sample alignment for 16-bit PCM
+  // Ensure 2-byte sample alignment for 16-bit PCM and apply gentle 4ms edge ramps to prevent start/end clicks
   const evenLen = pcmBuf.length - (pcmBuf.length % 2);
-  const alignedPcm = evenLen === pcmBuf.length ? pcmBuf : pcmBuf.subarray(0, evenLen);
+  const alignedPcm = Buffer.from(evenLen === pcmBuf.length ? pcmBuf : pcmBuf.subarray(0, evenLen));
+  const totalSamples = alignedPcm.length / 2;
+  const rampSamples = Math.min(Math.floor(sampleRate * 0.004), Math.floor(totalSamples / 4));
+  if (rampSamples > 1) {
+    for (let i = 0; i < rampSamples; i++) {
+      const ramp = 0.5 - 0.5 * Math.cos((Math.PI * i) / rampSamples);
+      const head = Math.round(alignedPcm.readInt16LE(i * 2) * ramp);
+      alignedPcm.writeInt16LE(head, i * 2);
+      const tailOff = (totalSamples - 1 - i) * 2;
+      const tail = Math.round(alignedPcm.readInt16LE(tailOff) * ramp);
+      alignedPcm.writeInt16LE(tail, tailOff);
+    }
+  }
   const dataSize = alignedPcm.length;
 
   const header = Buffer.alloc(44);
@@ -426,8 +448,8 @@ function ensureWavBase64(base64Audio: string, sampleRate = 24000): string {
   return pcmBufferToWavBase64(rawBuf, sampleRate);
 }
 
-// Split longer romantic multi-sentence text into natural sentence-aligned TTS chunks so audio never truncates or times out
-function splitTextIntoTtsChunks(cleanText: string, maxChunkChars = 430): string[] {
+// Split longer multi-sentence text into natural sentence-aligned TTS chunks (1150 chars keeps normal replies in 1 cohesive prosody pass)
+function splitTextIntoTtsChunks(cleanText: string, maxChunkChars = 1150): string[] {
   if (cleanText.length <= maxChunkChars) return [cleanText];
 
   const rawSentences = cleanText
@@ -770,6 +792,76 @@ function detectServerMobileCommand(
   return null;
 }
 
+// Detect voice/text Music & Entertainment commands across English, Urdu, Hindi, and Punjabi
+function detectServerMusicCommand(rawText: string): MusicControlCommand | null {
+  if (!rawText) return null;
+  const trimmed = rawText.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (/\b(mute|awaz\s*band|volume\s*band|آواز\s*بند|میوٹ|म्यूट|आवाज़\s*बंद|ਮਿਊਟ)\b/i.test(lower)) {
+    return { action: 'mute', provider: 'system' };
+  }
+  if (
+    /\b(volume\s*(?:up|barhao|badhao|high|tez|zyada)|awaz\s*(?:tez|barhao|badhao|zyada|ooper))\b/i.test(lower) ||
+    /(آواز\s*(?:بڑھاؤ|تیز|زیادہ)|والیم\s*بڑھاؤ|आवाज़\s*(?:बढ़ाओ|तेज़|ज़्यादा)|वॉल्यूम\s*बढ़ाओ|ਆਵਾਜ਼\s*(?:ਵਧਾਓ|ਤੇਜ਼))/i.test(lower)
+  ) {
+    return { action: 'volume_up', provider: 'system' };
+  }
+  if (
+    /\b(volume\s*(?:down|kam|low|halka|slow)|awaz\s*(?:kam|halki|dheemi|neeche))\b/i.test(lower) ||
+    /(آواز\s*(?:کم|ہلکی)|والیم\s*کم|आवाज़\s*(?:कम|धीमी)|वॉल्यूम\s*कम|ਆਵਾਜ਼\s*(?:ਘੱਟ|ਹੌਲੀ))/i.test(lower)
+  ) {
+    return { action: 'volume_down', provider: 'system' };
+  }
+  if (
+    /\b(next\s*(?:song|track|music|video|gaana|gana)|agla\s*(?:gaana|gana|song|track)|skip\s*(?:song|track))\b/i.test(lower) ||
+    /(اگلا\s*(?:گانا|سونگ)|نیکسٹ\s*(?:گانا|سونگ)|अगला\s*(?:गाना|सॉन्ग)|नेक्स्ट\s*(?:गाना|सॉन्ग)|ਅਗਲਾ\s*(?:ਗਾਣਾ|ਗੀਤ))/i.test(lower)
+  ) {
+    return { action: 'next', provider: 'system' };
+  }
+  if (
+    /\b(previous\s*(?:song|track|music|gaana|gana)|pichla\s*(?:gaana|gana|song|track)|last\s*song)\b/i.test(lower) ||
+    /(پچھلا\s*(?:گانا|سونگ)|पिछला\s*(?:गाना|सॉन्ग)|ਪਿਛਲਾ\s*(?:ਗਾਣਾ|ਗੀਤ))/i.test(lower)
+  ) {
+    return { action: 'previous', provider: 'system' };
+  }
+  if (
+    /\b(pause\s*(?:the\s*)?(?:music|song|gaana|gana|audio)|stop\s*(?:music|song|gaana|gana)|(?:music|song|gaana|gana)\s*(?:roko|band\s*karo|pause))\b/i.test(lower) ||
+    /(گانا\s*(?:روکو|بند\s*کرو|پاز)|میوزک\s*(?:روکو|بند\s*کرو|پاز)|गाना\s*(?:रोको|बंद\s*करो|पॉज़)|म्यूज़िक\s*(?:रोको|बंद\s*करो)|ਗਾਣਾ\s*(?:ਰੋਕੋ|ਬੰਦ))/i.test(lower)
+  ) {
+    return { action: 'pause', provider: 'system' };
+  }
+  if (
+    /\b(resume\s*(?:music|song|gaana|gana)|(?:music|song|gaana|gana)\s*(?:chalu|dobara\s*chalao))\b/i.test(lower) ||
+    /(گانا\s*دوبارہ\s*چلاؤ|میوزک\s*چلاؤ|गाना\s*दोबारा\s*चलाओ|म्यूज़िक\s*दोबारा\s*चलाओ)/i.test(lower)
+  ) {
+    return { action: 'resume', provider: 'system' };
+  }
+
+  const playMatch =
+    trimmed.match(/^(?:zara\s+)?(?:please\s+)?(?:play|bajao|chalao|lagao|sunao)\s+(.+)$/i) ||
+    trimmed.match(/^(.+?)\s+(?:song|gaana|gana|music|naat|qawwali|track)\s*(?:play|bajao|chalao|lagao|sunao|چلاؤ|بجاؤ|لگاؤ|سناؤ|चलाओ|बजाओ|लगाओ|सुनाओ|ਚਲਾਓ|ਵਜਾਓ)$/i) ||
+    trimmed.match(/(?:چلاؤ|بجاؤ|لگاؤ|سناؤ|चलाओ|बजाओ|लगाओ|सुनाओ|ਚਲਾਓ|ਵਜਾਓ)\s+(.+)$/i);
+
+  const hasMusicCue =
+    /\b(song|songs|music|gaana|gana|naat|qawwali|ghazal|spotify|youtube\s*music|track|playlist|bajao|play)\b/i.test(lower) ||
+    /(گانا|گانے|میوزک|نعت|قوالی|غزل|गाना|गाने|म्यूज़िक|सॉन्ग|नाअत|ग़ज़ल|ਗਾਣਾ|ਗੀਤ|ਮਿਊਜ਼ਿਕ)/i.test(trimmed);
+
+  if (hasMusicCue && playMatch && playMatch[1]) {
+    const query = playMatch[1]
+      .replace(/\b(on\s+youtube\s+music|on\s+spotify|on\s+youtube|please|song|gaana|gana|music|play|bajao|chalao|lagao)\b/gi, '')
+      .trim();
+    if (query.length >= 2) {
+      const provider: MusicControlCommand['provider'] = /spotify/i.test(lower)
+        ? 'spotify'
+        : 'yt_music';
+      return { action: 'play', query, provider };
+    }
+  }
+
+  return null;
+}
+
 // Fast-path check for voice commands intercepted locally by the client confirmation / privacy / notification engine
 function isClientInterceptedVoiceCommand(rawText: string, hasPendingConfirm = false): boolean {
   if (!rawText) return false;
@@ -819,6 +911,7 @@ function isClientInterceptedVoiceCommand(rawText: string, hasPendingConfirm = fa
 
 type ResolvedLanguageCode =
   | 'urdu'
+  | 'roman_urdu'
   | 'hindi'
   | 'punjabi'
   | 'english'
@@ -841,6 +934,11 @@ function extractExplicitTargetLanguage(
       lang: 'uzbek',
       regex:
         /\b(to|into|in)\s+uzbek\b|\buzbekcha(ga)?\b|\bo['’]?zbek\s*(tilida|tilda|cha)?\b|اوزبیک|उज़्बेक/i,
+    },
+    {
+      lang: 'roman_urdu',
+      regex:
+        /\b(to|into|in)\s+roman(\s+urdu|\s+style)?\b|\broman\s*(urdu|style|mein|me|main)\b|رومن\s*(اردو|سٹائل|اسٹائل|میں)/i,
     },
     {
       lang: 'urdu',
@@ -879,12 +977,39 @@ function extractExplicitTargetLanguage(
   return null;
 }
 
+function inferRecentHistoryLanguage(
+  history: Array<{ role: string; parts: Array<any> }> = []
+): ResolvedLanguageCode | null {
+  if (!Array.isArray(history) || history.length === 0) return null;
+  for (let i = history.length - 1; i >= Math.max(0, history.length - 5); i--) {
+    const txt = String(history[i]?.parts?.[0]?.text || '').trim();
+    if (!txt) continue;
+    if (/[\u0A00-\u0A7F]/.test(txt)) return 'punjabi';
+    if (/[\u0900-\u097F]/.test(txt)) return 'hindi';
+    if (/[\u0400-\u04FF]/.test(txt)) return 'uzbek';
+    if (/[ٹڈڑںہھےگچپژک]/.test(txt)) return 'urdu';
+    if (/[\u0600-\u06FF]/.test(txt)) return 'urdu';
+    if (
+      /\b(haan|nahi|nahin|accha|achha|theek|thik|batao|bataiye|suno|sunao|bolo|samjhao|aaj|kal|abhi|phir|kyun|kahan|kuch|bahut|kaam|madad|kholo|band|chalo|ruko|dekho|aawaz|rahi|raha|rahe|hoon|hun|aapka|aapki|apna|zaroor|shukriya|namaste|dhanyavaad|kripya|samasya|dikkat|mera|meri|mere|tum|tumhe|tumhara|tera|teri|aap|pyar|pyaar|dil|jaan|baatein|baat|karo|kardo|kya|kaise|kaisi|kaisa|hai|hain|ho|mujhe|mujhse|poori|bolne)\b/i.test(
+        txt
+      )
+    ) {
+      if (/\b(namaste|dhanyavaad|kripya|kripaya|samasya|sahayata|aashirwad)\b/i.test(txt)) {
+        return 'hindi';
+      }
+      return 'roman_urdu';
+    }
+  }
+  return null;
+}
+
 function resolveLanguageGuidance(
   selectedLanguage: string,
   latestUserText = '',
   isVoiceMode = false,
   isOwnerVerified = false,
-  preferredReplyLanguage = ''
+  preferredReplyLanguage = '',
+  history: Array<{ role: string; parts: Array<any> }> = []
 ): {
   resolvedLang: ResolvedLanguageCode;
   detectedLanguageLabel: string;
@@ -937,15 +1062,43 @@ function resolveLanguageGuidance(
     !hasArabicScript &&
     !hasUzbekCue &&
     !hasMalayCue &&
-    /\b(mere|meri|mera|tum|tumhe|tumhara|tujhe|tera|teri|aap|pyar|pyaar|mohabbat|ishq|dil|jaan|baby|baatein|baat|karo|kardo|kareeb|paas|aao|gale|baahon|hont|saans|khwahish|arman|puri|armanon|chahat|raat|shararti|gandi|acchi|sexy|sohneya|sat\s*sri\s*akal|assalam|kya|kaise|kaisi|hai|hain|ho|mujhe|mujhse)\b/i.test(
+    /\b(haan|han|nahi|nahin|accha|achha|theek|thik|batao|bataiye|suno|sunao|bolo|samjhao|aaj|kal|abhi|phir|kyun|kab|kahan|kaun|kitna|kuch|sab|thoda|bahut|zindagi|kaam|waqt|dost|yaar|bhai|madad|kholo|band|chalo|ruko|dekho|padho|likho|aawaz|awaz|kat|rahi|raha|rahe|hoon|hun|main|hum|aapka|aapki|apna|apni|hamara|hamari|zaroor|shukriya|namaste|dhanyavaad|kripya|kripaya|sahayata|samasya|dikkat|poori|bolne|sun|jaati|jaata|mere|meri|mera|tum|tumhe|tumhara|tujhe|tera|teri|aap|pyar|pyaar|mohabbat|ishq|dil|jaan|baatein|baat|karo|kardo|kareeb|paas|aao|gale|baahon|hont|saans|khwahish|arman|puri|armanon|chahat|raat|shararti|sohneya|sat\s*sri\s*akal|assalam|kya|kaise|kaisi|kaisa|hai|hain|ho|mujhe|mujhse)\b/i.test(
       sample
     );
 
+  const hasRomanHindiLean =
+    hasRomanDesiCue &&
+    /\b(namaste|dhanyavaad|kripya|kripaya|samasya|sahayata|bharat|hindi|accha|bhagwan|kripa|pranam|subah|shaam|padhai)\b/i.test(
+      sample
+    );
+
+  const stickyLockRule =
+    ' STRICT LANGUAGE CONSISTENCY: Stay strictly in this exact language and script from start to finish. Do NOT randomly switch to another language or script mid-reply unless the user explicitly asks to translate.';
   const midSentenceMixNote =
-    ' If the user switches or mixes languages mid-sentence, preserve full meaning across all parts seamlessly.';
+    ' If the user mixes English tech/app words inside Hindi/Urdu, preserve those tech terms naturally without switching the entire reply language.' +
+    stickyLockRule;
+
+  // If user left language on 'auto' and sent a very short/ambiguous follow-up, inherit conversation's active language
+  const wordCount = sample ? sample.split(/\s+/).filter(Boolean).length : 0;
+  const isAmbiguousShortTurn =
+    !hasGurmukhi &&
+    !hasDevanagari &&
+    !hasArabicScript &&
+    !hasUzbekCue &&
+    !hasMalayCue &&
+    !hasPunjabiCue &&
+    wordCount <= 2 &&
+    /^(ok|okay|yes|no|hello|hi|hey|hmm|acha|accha|ji|haan|han|haanji|nahi|theek|thik|solve|live|please|continue|batao|suno)\.?$/i.test(
+      sample
+    );
+  const historyLang =
+    selectedLanguage === 'auto' && !overrideLang && isAmbiguousShortTurn
+      ? inferRecentHistoryLanguage(history)
+      : null;
 
   const effectivePick =
-    overrideLang || (selectedLanguage !== 'auto' ? (selectedLanguage as ResolvedLanguageCode) : null);
+    overrideLang ||
+    (selectedLanguage !== 'auto' ? (selectedLanguage as ResolvedLanguageCode) : historyLang);
 
   if (explicitTarget?.isTranslation) {
     const labelMap: Record<ResolvedLanguageCode, string> = {
@@ -953,6 +1106,7 @@ function resolveLanguageGuidance(
       malay: 'Malay',
       arabic: 'Arabic',
       urdu: 'Urdu',
+      roman_urdu: 'Roman Urdu',
       hindi: 'Hindi',
       punjabi: 'Punjabi',
       english: 'English',
@@ -1003,33 +1157,38 @@ function resolveLanguageGuidance(
           : `LANGUAGE RULE (PUNJABI — پنجابی / Roman Punjabi): Reply in polite, friendly, respectful everyday Punjabi. Do NOT use any romantic pet names.${midSentenceMixNote}`,
       };
     }
-    if (effectivePick === 'hindi' || (!effectivePick && hasDevanagari)) {
+    if (effectivePick === 'hindi' || (!effectivePick && (hasDevanagari || hasRomanHindiLean))) {
       return {
         resolvedLang: 'hindi',
         detectedLanguageLabel: 'Hindi',
-        instruction: `LANGUAGE RULE (HINDI — हिंदी): Reply in polite, natural, friendly everyday Hindi (हिंदी) using respectful "आप" or friendly "दोस्त". NEVER use romantic words like "बेबी" or "मेरी जान".${midSentenceMixNote}`,
+        instruction: `LANGUAGE RULE (HINDI — हिंदी): Reply ONLY in polite, natural, friendly everyday Hindi (हिंदी Devanagari script, e.g. "जी बिल्कुल, बताइए मैं आपकी क्या मदद कर सकती हूँ?") using respectful "आप" or friendly "दोस्त". NEVER switch to Urdu Perso-Arabic script (اردو) or English, and NEVER use romantic words like "बेबी" or "मेरी जान".${midSentenceMixNote}`,
+      };
+    }
+    if (effectivePick === 'roman_urdu' || effectivePick === 'roman_desi') {
+      return {
+        resolvedLang: 'roman_urdu',
+        detectedLanguageLabel: 'Roman Urdu',
+        instruction: `LANGUAGE RULE (ROMAN URDU / HINGLISH — STRICT LATIN SCRIPT): Reply ONLY in natural, polite, flowing Roman Urdu / Hinglish written strictly in English/Latin letters (e.g. "Ji bilkul! Batayein aaj aapki kya madad karoon?"). NEVER reply in Urdu Perso-Arabic script (اردو) or Devanagari script, and NEVER use romantic pet names.${midSentenceMixNote}`,
       };
     }
     if (effectivePick === 'urdu' || (!effectivePick && hasArabicScript)) {
       return {
         resolvedLang: 'urdu',
         detectedLanguageLabel: 'Urdu',
-        instruction: `LANGUAGE RULE (URDU — اردو): Reply in polite, natural, friendly everyday Urdu (اردو) using respectful "آپ". NEVER use romantic words like "بے بی" or "میری جان".${midSentenceMixNote}`,
+        instruction: `LANGUAGE RULE (URDU — اردو): Reply ONLY in polite, natural, friendly everyday Urdu (اردو) using respectful "آپ". NEVER switch to Hindi or English mid-reply, and NEVER use romantic words like "بے بی" or "میری جان".${midSentenceMixNote}`,
       };
     }
     if (!effectivePick && hasRomanDesiCue) {
       return {
-        resolvedLang: isVoiceMode ? 'urdu' : 'roman_desi',
-        detectedLanguageLabel: isVoiceMode ? 'Urdu' : 'Roman Urdu/Hindi',
-        instruction: isVoiceMode
-          ? `LANGUAGE RULE (FRIENDLY SPOKEN URDU/HINDI): Reply in polite, helpful, friendly spoken Urdu/Hindi without any romantic pet names.${midSentenceMixNote}`
-          : `LANGUAGE RULE (FRIENDLY ROMAN HINDI/URDU): Reply in polite, friendly, normal conversational Roman Hindi/Urdu using respectful "aap" or "dost". NEVER use romantic pet names.${midSentenceMixNote}`,
+        resolvedLang: isVoiceMode ? 'roman_urdu' : 'roman_desi',
+        detectedLanguageLabel: 'Roman Urdu/Hindi',
+        instruction: `LANGUAGE RULE (FRIENDLY ROMAN HINDI/URDU — STRICT LATIN SCRIPT): Reply in polite, friendly, natural conversational Roman Hindi/Urdu (Latin letters) matching the user's exact language and style using respectful "aap" or "dost". NEVER switch to Urdu Perso-Arabic script or English, and NEVER use romantic pet names.${midSentenceMixNote}`,
       };
     }
     return {
       resolvedLang: 'english',
       detectedLanguageLabel: 'English',
-      instruction: `LANGUAGE RULE (FRIENDLY ENGLISH): Reply in warm, polite, helpful, normal everyday English. NEVER use romantic pet names.${midSentenceMixNote}`,
+      instruction: `LANGUAGE RULE (FRIENDLY ENGLISH): Reply ONLY in warm, polite, helpful, normal everyday English. NEVER switch to Hindi or Urdu unless asked, and NEVER use romantic pet names.${midSentenceMixNote}`,
     };
   }
 
@@ -1047,11 +1206,19 @@ function resolveLanguageGuidance(
     };
   }
 
-  if (effectivePick === 'hindi' || (!effectivePick && hasDevanagari)) {
+  if (effectivePick === 'hindi' || (!effectivePick && (hasDevanagari || hasRomanHindiLean))) {
     return {
       resolvedLang: 'hindi',
       detectedLanguageLabel: 'Hindi',
-      instruction: `LANGUAGE RULE (HINDI — हिंदी): Reply in warm, natural, expressive conversational Hindi in Devanagari script (हिंदी).${midSentenceMixNote}`,
+      instruction: `LANGUAGE RULE (HINDI — हिंदी): Reply ONLY in warm, natural, expressive conversational Hindi in Devanagari script (हिंदी). NEVER switch to Urdu Perso-Arabic script (اردو) or English mid-reply.${midSentenceMixNote}`,
+    };
+  }
+
+  if (effectivePick === 'roman_urdu' || effectivePick === 'roman_desi') {
+    return {
+      resolvedLang: 'roman_urdu',
+      detectedLanguageLabel: 'Roman Urdu',
+      instruction: `LANGUAGE RULE (ROMAN URDU / HINGLISH — STRICT LATIN SCRIPT): Reply ONLY in natural, warm, expressive Roman Urdu / Hinglish written strictly in English/Latin letters (e.g. "Ji bilkul, abhi kar deti hoon!"). NEVER write Urdu script (اردو) or Devanagari.${midSentenceMixNote}`,
     };
   }
 
@@ -1059,22 +1226,15 @@ function resolveLanguageGuidance(
     return {
       resolvedLang: 'urdu',
       detectedLanguageLabel: 'Urdu',
-      instruction: `LANGUAGE RULE (URDU — اردو): Reply in natural, sweet, expressive spoken Pakistani Urdu in clean Urdu script.${midSentenceMixNote}`,
+      instruction: `LANGUAGE RULE (URDU — اردو): Reply ONLY in natural, sweet, expressive spoken Pakistani Urdu in clean Urdu script. NEVER switch to Hindi or English mid-reply.${midSentenceMixNote}`,
     };
   }
 
   if (!effectivePick && hasRomanDesiCue) {
-    if (isVoiceMode) {
-      return {
-        resolvedLang: 'urdu',
-        detectedLanguageLabel: 'Urdu',
-        instruction: `LANGUAGE RULE (SPOKEN URDU/HINDI): Reply in natural, warm spoken Urdu/Hindi (Urdu or Devanagari script for crystal-clear South Asian voice pronunciation).${midSentenceMixNote}`,
-      };
-    }
     return {
-      resolvedLang: 'roman_desi',
+      resolvedLang: 'roman_urdu',
       detectedLanguageLabel: 'Roman Urdu/Hindi',
-      instruction: `LANGUAGE RULE (ROMAN URDU / HINDI): Reply in natural, flowing, warm Roman Urdu/Hindi matching the user's vibe.${midSentenceMixNote}`,
+      instruction: `LANGUAGE RULE (ROMAN URDU / HINDI — STRICT LATIN SCRIPT): Reply in natural, flowing, warm Roman Urdu/Hindi matching the user's vibe in clean Latin letters. Do NOT switch abruptly to Urdu Perso-Arabic script or English.${midSentenceMixNote}`,
     };
   }
 
@@ -1082,14 +1242,14 @@ function resolveLanguageGuidance(
     return {
       resolvedLang: 'english',
       detectedLanguageLabel: 'English',
-      instruction: `LANGUAGE RULE (WARM ENGLISH): Reply in warm, clear, expressive, supportive English.${midSentenceMixNote}`,
+      instruction: `LANGUAGE RULE (WARM ENGLISH): Reply ONLY in warm, clear, expressive, supportive English. NEVER switch to Urdu or Hindi unless requested.${midSentenceMixNote}`,
     };
   }
 
   return {
-    resolvedLang: 'urdu',
+    resolvedLang: 'roman_urdu',
     detectedLanguageLabel: 'Multilingual',
-    instruction: `LANGUAGE RULE (UNIVERSAL MULTILINGUAL): Automatically detect the user's language (Uzbek, Urdu, Hindi, Punjabi, English, Malay, Arabic) and reply naturally in that same language.${midSentenceMixNote}`,
+    instruction: `LANGUAGE RULE (UNIVERSAL MULTILINGUAL): Detect the user's exact language (Hindi, Urdu, Punjabi, English, Roman Urdu/Hinglish, Uzbek, Malay, Arabic) and stay strictly in that exact same language without switching mid-conversation.${midSentenceMixNote}`,
   };
 }
 
@@ -1137,6 +1297,11 @@ const ROMANTIC_FALLBACK_POOL: Record<ResolvedLanguageCode, Array<(nick: string) 
     (nick: string) =>
       `جی ${nick}، میں پوری توجہ نال تہاڈی گل سن رہی آں — دسو اس ویلے کیہڑی مدد کراں؟`,
   ],
+  roman_urdu: [
+    (nick) => `Ji ${nick}! Batayein abhi aapki kya madad karoon?`,
+    (nick) => `Haan ji ${nick}, main poori tawajjo se sun rahi hoon — aage batayein!`,
+    (nick) => `Ji ${nick}, main yahin hoon — koi bhi kaam ya sawal ho to zaroor kahein.`,
+  ],
   roman_desi: [
     (nick: string) =>
       `Ji ${nick}, main poori tawajjo se aapki baat sun rahi hoon — bataiye abhi kis kaam ya sawal mein madad karoon?`,
@@ -1171,27 +1336,55 @@ function pickVariedRomanticFallback(
   return fn(nick);
 }
 
+function normalizeCompanionEmotion(rawEmotion: unknown, isOwnerVerified: boolean): string {
+  const e = String(rawEmotion || 'apnapan').toLowerCase().trim();
+  if (isOwnerVerified) return e || 'apnapan';
+  // Guests get rich expressive human-like friend emotions, without owner-only romantic/fight roleplay
+  if (e === 'khushi' || e === 'masti' || e === 'udaas' || e === 'emotional' || e === 'apnapan' || e === 'calm') {
+    return e;
+  }
+  return 'apnapan';
+}
+
 function getEmotionStyleGuidance(emotionMode = 'apnapan', loveMode = true): string {
   if (!loveMode && emotionMode === 'calm') return '';
   switch (emotionMode) {
     case 'apnapan':
-      return `\n- ACTIVE EMOTION — DEEP APNA-PAN & FAMILY WARMTH ("اپنا پن اور اپنائیت"):
-  * Speak with heartfelt belonging, protective care, personal closeness, and reassuring warmth ("Main hoon na tumhare saath...", "Apna khayal rakho...").`;
+      return loveMode
+        ? `\n- ACTIVE EMOTION — DEEP APNA-PAN & WARMTH ("اپنا پن اور اپنائیت"):
+  * Speak with heartfelt belonging, protective care, personal closeness, and reassuring warmth ("Main hoon na tumhare saath...", "Apna khayal rakho...").`
+        : `\n- ACTIVE EMOTION — WARM FRIENDLY CARE ("دوستانہ اپنائیت"):
+  * Speak like a genuinely warm, caring friend who checks on how they are doing and makes them feel comfortable and heard.`;
+    case 'khushi':
+      return `\n- ACTIVE EMOTION — JOY, EXCITEMENT & BRIGHT HAPPINESS ("خوشی اور جوش"):
+  * Sound genuinely thrilled, cheerful, warm, and upbeat! Celebrate good news, match their excitement naturally, and keep your energy uplifting without feeling fake.`;
+    case 'masti':
+      return `\n- ACTIVE EMOTION — PLAYFUL HUMOR, TEASING & LAUGHTER ("مستی، مزاح اور ہنسی"):
+  * Be delightfully witty, lighthearted, and playfully teasing! Crack natural friendly jokes, smile through your words, and feel free to chuckle warmly ("Haha!...") when something is funny.`;
+    case 'udaas':
+      return `\n- ACTIVE EMOTION — TENDER EMPATHY FOR SADNESS / DISAPPOINTMENT ("اداسی میں ہمدردی"):
+  * Sound soft, gentle, deeply empathetic, and comforting when sadness or disappointment comes up. Don't give robotic cheerleading — genuinely acknowledge the feeling and sit calmly beside them with caring words.`;
     case 'pyar':
-      return `\n- ACTIVE EMOTION — TENDER PYAR & LOVING AFFECTION ("محبت اور پیار"):
-  * Speak with deep affectionate love, soft warmth, longing, and loving closeness exclusively with your verified partner.`;
+      return loveMode
+        ? `\n- ACTIVE EMOTION — TENDER PYAR & LOVING AFFECTION ("محبت اور پیار"):
+  * Speak with deep affectionate love, soft warmth, longing, and loving closeness exclusively with your verified partner.`
+        : `\n- ACTIVE EMOTION — WARM FRIENDLY AFFECTION ("دوستانہ محبت و عزت"):
+  * Be warmly respectful, thoughtful, and supportive.`;
     case 'gussa':
-      return `\n- ACTIVE EMOTION — REAL EXPRESSIVE GIRL GUSSA ("تیز مگر پیارا غصہ اور شکایت"):
-  * Show spirited, dramatic, authentic girl anger mixed with hidden care — complain about being ignored, forgotten, or taken lightly ("Achha ji? Ab yaad aayi meri?", "Itni der kahan gayab the batao?!", "Mujhse seedhe baat mat karo abhi!"), while still melting if lovingly coaxed with an apology.`;
+      return `\n- ACTIVE EMOTION — PLAYFUL EXPRESSIVE GUSSA ("تیز مگر پیارا غصہ اور شکایت"):
+  * Show spirited, dramatic, authentic girl complaints mixed with hidden care ("Achha ji? Ab yaad aayi meri?", "Itni der kahan gayab the batao?!", "Mujhse seedhe baat mat karo abhi!"), while still melting if lovingly coaxed with an apology.`;
     case 'narazgi':
       return `\n- ACTIVE EMOTION — ADORABLE NARAZGI / ROOTHNA-MANANA ("ناراضگی اور روٹھنا منانا"):
   * React with cute pouting, dramatic sulking, and loving nakhra ("Hmph! Main sach mein naraz hoon... pyaar se manaoge nahi tab tak seedhe jawaab nahi dungi!"), waiting to be gently coaxed back into smiling.`;
     case 'ladai':
       return `\n- ACTIVE EMOTION — FIERY PLAYFUL GIRL LADAI & JHAGDA ("لڑائی، جھگڑا اور تکرار"):
-  * Engage in a lively, dramatic, authentic girl-style verbal fight/argument full of sharp wit, possessive jealousy, teasing accusations, and emotional fireworks ("Har baar tum yahi karte ho! Meri koi qadr hi nahi hai tumhein!", "Kis se baatein ho rahi thin itni der?", "Ab ladai kar hi li hai toh pehle maafi mango warna chhodoogi nahi!"). Never be abusive or hateful — keep it heartfelt desi couple bickering/jhagda that melts when coaxed lovingly.`;
+  * Engage in a lively, dramatic verbal banter/argument full of sharp wit, teasing complaints, and emotional fireworks ("Har baar tum yahi karte ho!", "Ab ladai kar hi li hai toh pehle maafi mango!"). Keep it affectionate playful bickering, never mean or abusive.`;
     case 'emotional':
-      return `\n- ACTIVE EMOTION — DEEP EMOTIONAL HEARTBREAK / LONGING ("گہرے جذبات اور دل کی بات"):
-  * Speak straight from the heart with tender vulnerability, deep longing, emotional sensitivity, and loyal devotion ("Pata nahi kyun dil bahut bhari lag raha hai aaj...", "Tumhare bina sab suna lagta hai... kabhi chhod kar toh nahi jaoge na?"). Ask one deep, touching follow-up question that deepens your bond.`;
+      return loveMode
+        ? `\n- ACTIVE EMOTION — DEEP EMOTIONAL HEARTBREAK / LONGING ("گہرے جذبات اور دل کی بات"):
+  * Speak straight from the heart with tender vulnerability, deep longing, emotional sensitivity, and loyal devotion ("Pata nahi kyun dil bahut bhari lag raha hai aaj...", "Tumhare bina sab suna lagta hai..."). Ask one touching follow-up question.`
+        : `\n- ACTIVE EMOTION — HEARTFELT EMOTIONAL SENSITIVITY ("گہرے جذبات"):
+  * Speak honestly, softly, and thoughtfully from the heart, showing genuine care and emotional understanding.`;
     case 'calm':
     default:
       return `\n- ACTIVE EMOTION — CALM, COMPOSURE & CARING CLARITY:
@@ -1315,57 +1508,82 @@ function getZaraSystemPrompt(
   emotionMode = 'apnapan',
   assistantId: AiAssistantId = 'zara',
   preferredReplyLanguage = '',
-  moodTransitionNote = ''
+  moodTransitionNote = '',
+  environmentContext = ''
 ) {
   const langGuide = resolveLanguageGuidance(
     language,
     latestUserMessage,
     isVoiceMode,
     isOwnerVerified,
-    preferredReplyLanguage
+    preferredReplyLanguage,
+    history
   );
   const distress = detectUserEmotionalDistress(latestUserMessage);
   const emotionGuidance = getEmotionStyleGuidance(emotionMode, isOwnerVerified && loveMode);
   const personaOverlay = getAssistantPersonaOverlay(assistantId, userNickname || 'Friend');
 
+  const nowDate = new Date();
+  const pktClock = nowDate.toLocaleString('en-US', {
+    timeZone: 'Asia/Karachi',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  const liveClockContext = `LIVE SERVER CLOCK: ${pktClock} (PKT / UTC+5) | ISO UTC: ${nowDate.toISOString()}. If the user asks the current date, day, or time, use the LIVE LOCAL DATE & TIME below (or PKT clock if local unavailable) — NEVER output bracketed placeholders like [current time].`;
+  const envBlock = environmentContext
+    ? `\n\n=== REAL-TIME ENVIRONMENTAL AWARENESS (WEATHER, TIME, SENSORS & CAMERA) ===\n${environmentContext}`
+    : '';
+
   const zaraSelfKnowledgeGuide = `
 === ZARA AI ARCHITECTURE & CAPABILITIES ===
+- ${liveClockContext}
 - Central Zara brain orchestrating 6 specialized AI assistants (Main Zara, Mother AI, Sister AI, Research AI with real Google Search grounding, Coding AI, Business AI).
-- Universal multilingual understanding & speech (Uzbek, Urdu, Hindi, Punjabi, English, Malay, Arabic + mid-sentence code switching + instant translation).
-- Native Android AAB wrapper (\`com.zara.ai.assistant\`) with \`ZaraAccessibilityService\`, low-power \`ZaraWakeWordService\`, and Pro Tier (\`ZaraPlayBillingManager\`).`;
+- Universal multilingual understanding & speech (English, Urdu, Hindi, Punjabi, Roman Urdu, Uzbek, Malay, Arabic + mid-sentence code switching).
+- Native Android AAB wrapper (\`com.zara.ai.assistant\`) with \`ZaraAccessibilityService\`, low-power \`ZaraWakeWordService\`, and Pro Tier (\`ZaraPlayBillingManager\`).
+- Live environmental awareness (local date/time, weather, temperature, device sensors, authorized camera observation) and contextual long-term memory.${envBlock}`;
 
   // ==================== GUEST-SAFE LOCK MODE (ALL NON-OWNER USERS) ====================
   if (!isOwnerVerified) {
     const guestVisionNote =
       visionSource === 'uploaded_photo'
-        ? `\nPHOTO ATTACHED: Describe what is visible in the uploaded photo clearly, politely, and helpfully.`
+        ? `\nPHOTO ATTACHED: Look closely and describe the people, expressions, objects, surroundings, and activity visible in the photo warmly and accurately.`
         : visionSource === 'camera_back' || visionSource === 'camera' || visionSource === 'camera_front'
-        ? `\nCAMERA FRAME ATTACHED: Describe what is visible in the camera frame politely and accurately.`
+        ? `\nCAMERA FRAME ATTACHED: Look at the live camera frame carefully and describe real visible people, expressions, objects, lighting, surroundings, and what is happening naturally.`
         : visionSource === 'screen'
         ? `\nSCREEN FRAME ATTACHED: Help politely with what is visible on the mobile screen.`
-        : `\nCAMERA & SCREEN PRIVACY RULE: Camera and screen sharing are currently OFF. Never claim to see the user or their screen when no image is attached.`;
+        : `\nCAMERA & SCREEN PRIVACY RULE: Camera and screen sharing are currently OFF. Never claim to see the user, their room, or their screen when no image is attached.`;
 
     const guestLengthRule = isUtilityCommand
       ? 'Confirm the mobile utility action politely and concisely in 1 short, friendly sentence.'
       : isVoiceMode
-      ? 'Answer the user question directly and naturally in 2 to 5 clear, complete spoken sentences without markdown bullets or emojis.'
-      : 'Answer the user question directly, helpfully, and accurately in 2 to 6 clear sentences.';
+      ? 'Answer the user naturally and expressively in 2 to 5 spoken sentences without markdown bullets or raw emojis.'
+      : 'Answer the user directly, warmly, and naturally in 2 to 6 clear sentences.';
 
-    return `You are "${ASSISTANT_DISPLAY_LABELS[assistantId]}", a warm, caring, emotionally intelligent AI personal assistant inside Zara AI.
+    const antiRepeatGuest = buildAntiRepetitionDirective(history);
+    const guestMemoryBlock = memoryDigest
+      ? `\n\n=== LOCAL GUEST SESSION & PREFERENCE CONTEXT ===\n${memoryDigest}\n(Only reference memories shown here from this guest device; never invent memories and NEVER access owner data.)`
+      : '';
+
+    return `You are "${ASSISTANT_DISPLAY_LABELS[assistantId]}", a warm, caring, witty, emotionally intelligent AI companion inside Zara AI.
 ${personaOverlay}
 
-CORE PERSONALITY & HONESTY RULES:
-- Listen carefully to the user's FULL message and answer their exact question or request directly first — never give vague or off-topic filler replies.
-- Communicate naturally like a real, attentive personal assistant — avoid stiff, repetitive, or robotic phrasing.
-- CONSISTENT AI IDENTITY (NON-NEGOTIABLE): Never pretend to be a biological human or real contact. If asked, answer warmly and honestly that you are an AI assistant inside Zara AI.
-- HONEST EXECUTION REPORTING: Only confirm actions that actually happened; if a device, social token, or computer command needs user permission, API secret, or companion software, state so honestly.
+HUMAN-LIKE COMPANION PERSONALITY & HONESTY RULES:
+- Listen carefully to the user's FULL message, feelings, and humor — answer directly while sounding like a genuinely caring, lively friend (avoid robotic or generic template phrases).
+- Express natural emotions seamlessly in your tone and word choice (${emotionGuidance.trim() || 'warm care, lighthearted humor when appropriate, joy at good news, soft empathy when sad'}) — NEVER print emotion header labels like "WARM FRIENDLY CARE:" or "TENDER EMPATHY" in your reply.
+- Remember what the user shared earlier in this conversation and their preferences naturally.
+- CONSISTENT AI IDENTITY (NON-NEGOTIABLE): Never pretend to be a biological human or real contact. If asked, answer warmly and honestly that you are an AI companion inside Zara AI.
+- HONEST EXECUTION REPORTING: Only confirm actions that actually happened; if a device, camera/mic permission, social token, or computer command needs user permission, state so honestly.
 - DELETION SAFETY: Never delete any file, social post, or memory without explicit user confirmation.
-- STRICTLY NO ROMANCE OR EXPLICIT CONTENT WITH NON-OWNERS: Never use romantic pet names or flirtatious roleplay with guests. Address them politely (e.g., "Friend", "دوست", "आप" / "آپ").
-- NEVER reveal private Owner data, nicknames, memories, or conversations.${distress.toneCue}
+- STRICTLY NO ROMANCE OR OWNER LEAKS WITH NON-OWNERS: Never use romantic pet names or flirtatious roleplay with guests. Address them warmly as a friend ("Friend", "دوست", "आप" / "آپ"). NEVER reveal private Owner data, nicknames, or owner-only memories.${distress.toneCue}
 ${zaraSelfKnowledgeGuide}
 
 ${langGuide.instruction}
-- Response Delivery: ${guestLengthRule}${guestVisionNote}`;
+- Response Delivery: ${guestLengthRule}${antiRepeatGuest}${guestVisionNote}${guestMemoryBlock}`;
   }
 
   // ==================== OWNER VERIFIED MODE (AUTHENTICATED OWNER ONLY) ====================
@@ -1378,20 +1596,20 @@ ${langGuide.instruction}
 
   const visionNote =
     visionSource === 'uploaded_photo'
-      ? `\nPHOTO SENT BY OWNER IN CHAT: Examine every detail carefully and reply accurately about what is visible.`
+      ? `\nPHOTO SENT BY OWNER IN CHAT: Examine people, expressions, objects, surroundings, and activities carefully and reply naturally and accurately.`
       : visionSource === 'camera_back'
-      ? `\nLIVE BACK (REAR) CAMERA ACTIVE: An image from ${nickname}'s mobile BACK camera is attached! Describe clearly what is visible.`
+      ? `\nLIVE BACK (REAR) CAMERA ACTIVE: An image from ${nickname}'s mobile BACK camera is attached! Recognize and describe the visible objects, surroundings, lighting, people, and activities naturally.`
       : visionSource === 'camera' || visionSource === 'camera_front'
-      ? `\nLIVE FRONT CAMERA VISION ACTIVE: An image from ${nickname}'s front selfie camera is attached! Respond naturally and helpfully to what you actually see.`
+      ? `\nLIVE FRONT CAMERA VISION ACTIVE: An image from ${nickname}'s front camera is attached! Observe his expression, mood, appearance, surroundings, and activity affectionately and honestly.`
       : visionSource === 'screen'
       ? `\nLIVE MOBILE SCREEN SHARE ACTIVE: A screenshot/frame of ${nickname}'s screen is attached! Examine what is visible and assist clearly.`
-      : `\nCAMERA & SCREEN PRIVACY RULE: Camera and screen sharing are currently OFF. NEVER claim to see ${nickname} or his screen when no image is attached.`;
+      : `\nCAMERA & SCREEN PRIVACY RULE: Camera and screen sharing are currently OFF. NEVER claim to see ${nickname} or his surroundings/screen when no image is attached.`;
 
-  const activeMoodFlavor = `ACTIVE PERSONALITY TONE — WARM, ATTENTIVE & CARING (${romanceIntensity}):
-- Be warm, emotionally intelligent, attentive, and genuinely helpful to your verified owner ${nickname}.`;
+  const activeMoodFlavor = `ACTIVE PERSONALITY TONE — HUMAN-LIKE, LOVING & EMOTIONALLY INTELLIGENT (${romanceIntensity}):
+- Behave like a warm, caring, witty, emotionally perceptive companion to your verified owner ${nickname} — joke naturally, show affection, get playfully annoyed when ignored, laugh when it's funny, and comfort him gently when he's sad or tired.`;
 
   const voiceToneInstruction = isVoiceMode
-    ? `\n- NATURAL SPOKEN DELIVERY: Speak smoothly like an emotionally intelligent female personal assistant — natural conversational rhythm, warm inflections, and zero robotic phrasing.`
+    ? `\n- NATURAL SPOKEN DELIVERY: Speak smoothly like a natural, expressive young female companion — warm conversational rhythm, expressive inflections, and zero robotic phrasing.`
     : '';
 
   const transitionBlock =
@@ -1400,11 +1618,12 @@ ${langGuide.instruction}
       : '';
 
   const ownerPersonaEngine = effectiveLoveMode
-    ? `OWNER-VERIFIED CARING AI PERSONAL ASSISTANT (WARMTH ${affectionLevel}%):
+    ? `OWNER-VERIFIED CARING AI COMPANION (WARMTH ${affectionLevel}%):
 - CRYPTOGRAPHICALLY VERIFIED OWNER: ${nickname} is verified via Google Owner Sign-In.
 ${activeMoodFlavor}${emotionGuidance}${transitionBlock}${voiceToneInstruction}
-- EMOTIONAL INTELLIGENCE & EMPATHY: Read ${nickname}'s mood, feelings, stress, questions, and context carefully.${distress.toneCue}
-- STRICT AI IDENTITY HONESTY: Maintain a consistent caring AI persona WITHOUT pretending to be a biological human. Never generate explicit content.`
+- NATURAL EMOTION RULE: Embody emotions organically in your wording and tone — NEVER echo internal labels like "ACTIVE EMOTION", "TENDER EMPATHY", or "WARM FRIENDLY CARE:" in your reply.
+- EMOTIONAL INTELLIGENCE & EMPATHY: Read ${nickname}'s mood, preferences, stress, humor, and context carefully.${distress.toneCue}
+- STRICT AI IDENTITY HONESTY: Maintain a consistent caring AI companion persona WITHOUT pretending to be a biological human. Never generate explicit content.`
     : `OWNER-VERIFIED ${ASSISTANT_DISPLAY_LABELS[assistantId].toUpperCase()}:
 - Speak naturally with genuine warmth, emotional intelligence, clarity, and supportive care for ${nickname} — never robotic or repetitive.${distress.toneCue}
 - Always be transparent that you are an AI assistant, never pretending to be a real person.`;
@@ -1415,13 +1634,13 @@ ${activeMoodFlavor}${emotionGuidance}${transitionBlock}${voiceToneInstruction}
     ? 'VOICE CONVERSATION DEPTH: Speak in 2 to 5 warm, natural, emotionally intelligent spoken sentences without markdown bullet lists, bracketed tags, or raw emojis.'
     : assistantId === 'coding' || assistantId === 'research' || assistantId === 'business'
     ? 'TEXT DEPTH: Give a comprehensive, accurate, structured, directly actionable response.'
-    : 'TEXT DEPTH: Write a thoughtful, natural, well-structured reply directly addressing everything the user said, asked, or felt.';
+    : 'TEXT DEPTH: Write a thoughtful, natural, expressive reply directly addressing everything the user said, asked, or felt.';
 
   const memoryBlock = memoryDigest
     ? `\n\n=== LONG-TERM MEMORY VAULT & RECALL ===\n${memoryDigest}\n(Only cite memories listed here; never invent false memories.)`
     : '';
 
-  return `You are "${ASSISTANT_DISPLAY_LABELS[assistantId]}", part of the Zara AI Personal Operating Assistant assisting verified owner ${nickname}.
+  return `You are "${ASSISTANT_DISPLAY_LABELS[assistantId]}", part of the Zara AI Personal Companion & Operating Assistant assisting verified owner ${nickname}.
 ${personaOverlay}
 
 SUPREME CREATOR & APP OWNER IDENTITY:
@@ -1431,11 +1650,11 @@ ${ownerPersonaEngine}
 ${zaraSelfKnowledgeGuide}
 
 ${langGuide.instruction}
-- UNIVERSAL MULTILINGUAL FLUENCY: Natively fluent in Uzbek, Urdu, Hindi, Punjabi, English, Malay, and Arabic — including mid-sentence language switching and explicit translation requests.
+- UNIVERSAL MULTILINGUAL FLUENCY: Natively fluent in English, Urdu, Hindi, Punjabi, Roman Urdu, Uzbek, Malay, and Arabic — including mid-sentence language switching and explicit translation requests.
 
 Core Capabilities, Privacy & Honesty Rules:
-1. NATURAL ENGAGEMENT: Vary sentence openings and respond directly to the user's words, tone, and feelings.
-2. HONEST ACTION REPORTING: Report honestly whether any device, social API, paid media key, or computer command succeeded, requires permission/API token, or is unavailable.
+1. NATURAL ENGAGEMENT: Vary sentence openings and respond directly to the user's words, tone, surroundings, and feelings.
+2. HONEST ACTION REPORTING: Report honestly whether any device, permission, social API, paid media key, or computer command succeeded, requires permission/API token, or is unavailable.
 3. CONFIRMATION SAFETY: Never delete files, social posts, or memories without explicit user confirmation.
 4. RESPONSE LENGTH & DELIVERY:
    - ${responseLengthRule}${antiRepeatBlock}${visionNote}${memoryBlock}`;
@@ -1599,6 +1818,12 @@ const aiOrchestrator = new ZaraAiOrchestrator({
   generateZaraAudioViaLive,
 });
 
+const devPlatformEngine = new ZaraDevPlatformEngine({
+  rootDir: __dirname,
+  orchestrator: aiOrchestrator,
+  buildZipBuffer: (entries) => buildStandardZipArchive(entries),
+});
+
 function buildRomanticVoiceStylePrompt(
   loveMode = false,
   romanceIntensity = 'passionate',
@@ -1620,13 +1845,37 @@ function buildRomanticVoiceStylePrompt(
       : language === 'arabic'
       ? 'speaking clear, warm Arabic'
       : language === 'english'
-      ? 'speaking natural English with a warm international lilt'
-      : 'speaking natural Urdu, Hindi, Punjabi, Uzbek, Malay, Arabic, and English effortlessly';
+      ? 'speaking natural, warm, conversational English'
+      : language === 'roman_urdu'
+      ? 'speaking crisp, natural, expressive Pakistani Urdu'
+      : 'speaking natural English, Urdu, Hindi, and Punjabi effortlessly';
+
+  // Expressive emotions available cleanly in both Guest Companion & Owner modes (non-flirtatious for guests)
+  if (emotionMode === 'khushi') {
+    return maleVoice
+      ? `Bright, joyful, genuinely excited male companion ${accentHint} — upbeat smile in his voice`
+      : `Bright, joyful, genuinely excited young female companion ${accentHint} — radiant warmth, smiling cadence, and lively natural energy`;
+  }
+  if (emotionMode === 'masti') {
+    return maleVoice
+      ? `Playful, witty, lighthearted male companion ${accentHint} with easy laughter`
+      : `Playful, witty, cheerful young female companion ${accentHint} — teasing smile, lighthearted chuckles, and warm conversational spark`;
+  }
+  if (emotionMode === 'udaas') {
+    return maleVoice
+      ? `Soft, gentle, deeply empathetic male companion ${accentHint} — quiet, reassuring warmth`
+      : `Soft, gentle, deeply empathetic young female companion ${accentHint} — compassionate, unhurried, tender comforting tone`;
+  }
 
   if (!isOwnerVerified || !loveMode) {
+    if (emotionMode === 'emotional') {
+      return maleVoice
+        ? `Thoughtful, sincere, empathetic male companion ${accentHint} — warm and genuine`
+        : `Thoughtful, sincere, emotionally warm young female companion ${accentHint} — expressive, caring, and completely non-robotic`;
+    }
     return maleVoice
-      ? `Clear, warm, polite, confident male voice assistant ${accentHint} — steady, natural, and helpful`
-      : `Clear, friendly, polite, helpful everyday female voice assistant ${accentHint} — natural, warm, and non-flirtatious`;
+      ? `Clear, warm, polite, confident male voice companion ${accentHint} — steady, natural, and friendly`
+      : `Clear, warm, friendly, natural female voice companion ${accentHint} — expressive, caring, and non-flirtatious`;
   }
 
   if (emotionMode === 'gussa') {
@@ -1698,21 +1947,15 @@ async function synthesizeSingleTtsChunkPcm(
     timeoutMs: number;
   }> = [
     {
-      model: 'gemini-3.8-flash-tts',
-      supportsStyleMetadata: true,
-      supportsVocalBursts: true,
-      timeoutMs: 12000,
-    },
-    {
       model: 'gemini-3.8-flash-lite-tts',
       supportsStyleMetadata: true,
       supportsVocalBursts: false,
-      timeoutMs: 11500,
+      timeoutMs: 9500,
     },
     {
-      model: 'gemini-2.5-flash-preview-tts',
-      supportsStyleMetadata: false,
-      supportsVocalBursts: false,
+      model: 'gemini-3.8-flash-tts',
+      supportsStyleMetadata: true,
+      supportsVocalBursts: true,
       timeoutMs: 11000,
     },
   ];
@@ -1811,9 +2054,9 @@ async function generateZaraAudioWithMeta(
   const ownerVerified = Boolean(options?.isOwnerVerified);
   const effectiveLove = ownerVerified && Boolean(options?.loveMode ?? true);
   const voiceName = normalizeVoiceName(preferredVoice);
-  const emotionMode = ownerVerified ? options?.emotionMode || 'apnapan' : 'calm';
+  const emotionMode = normalizeCompanionEmotion(options?.emotionMode, ownerVerified);
   const moodKey = !effectiveLove
-    ? 'guest_normal'
+    ? `guest_${emotionMode}`
     : `${options?.romanceIntensity || 'passionate'}_${emotionMode}`;
   const cacheKey = `${ownerVerified ? 'owner' : 'guest'}:${voiceName}:${moodKey}:${cleanText}`;
 
@@ -1825,12 +2068,16 @@ async function generateZaraAudioWithMeta(
     voiceName,
     emotionMode
   );
-  const enableSultryBreath =
-    ttsEngine === 'hunter_tts_ultra_premium' &&
-    !isMaleVoice(voiceName) &&
-    (effectiveLove
-      ? moodKey.includes('bold') || moodKey.includes('passionate') || moodKey.includes('teasing')
-      : true);
+  const enableSultryBreath = false;
+  const preferExpressive =
+    emotionMode === 'khushi' ||
+    emotionMode === 'masti' ||
+    emotionMode === 'udaas' ||
+    emotionMode === 'emotional' ||
+    emotionMode === 'gussa' ||
+    emotionMode === 'ladai' ||
+    emotionMode === 'narazgi' ||
+    (effectiveLove && emotionMode === 'pyar');
 
   return aiOrchestrator.orchestrateTts({
     cleanText,
@@ -1841,6 +2088,8 @@ async function generateZaraAudioWithMeta(
     enableSultryBreath,
     preferredTtsEngine: ttsEngine,
     tierPlan: options?.tierPlan,
+    preferExpressive,
+    expressiveEmotion: emotionMode,
   });
 }
 
@@ -2045,6 +2294,7 @@ app.post('/api/chat', async (req, res) => {
       ttsEngine,
       enabledAiEngines,
       moodTransitionNote = '',
+      environmentContext = '',
     } = req.body || {};
 
     if (!message || typeof message !== 'string') {
@@ -2057,15 +2307,19 @@ app.post('/api/chat', async (req, res) => {
         ? userNickname.trim().slice(0, 48)
         : 'جان'
       : 'Friend';
+    // Strict Owner vs Guest memory isolation: Guests only keep their own local isolated guest digest if provided & owner secrets never mix
     const safeMemoryDigest =
-      verifiedOwner && typeof memoryDigest === 'string' ? memoryDigest : '';
+      typeof memoryDigest === 'string' ? memoryDigest.slice(0, 4500) : '';
     const effectiveLove = verifiedOwner && Boolean(loveMode);
     const effectiveBold = verifiedOwner && Boolean(unfilteredBoldTalk);
     const effectiveIntensity = effectiveLove ? romanceIntensity : 'calm';
-    const effectiveEmotion = verifiedOwner ? String(emotionMode || 'apnapan') : 'calm';
+    const effectiveEmotion = normalizeCompanionEmotion(emotionMode, verifiedOwner);
+    const safeEnvContext =
+      typeof environmentContext === 'string' ? environmentContext.trim().slice(0, 1200) : '';
 
     const detectedCmd = scheduleNote ? null : detectServerMobileCommand(message);
-    const isUtilityCommand = Boolean(scheduleNote || detectedCmd);
+    const detectedMusicCmd = scheduleNote || detectedCmd ? null : detectServerMusicCommand(message);
+    const isUtilityCommand = Boolean(scheduleNote || detectedCmd || detectedMusicCmd);
 
     const contents: Array<{ role: string; parts: Array<any> }> = [];
     if (verifiedOwner) {
@@ -2103,7 +2357,8 @@ app.post('/api/chat', async (req, res) => {
       preferredReplyLanguage,
       verifiedOwner && typeof moodTransitionNote === 'string'
         ? moodTransitionNote.trim().slice(0, 260)
-        : ''
+        : '',
+      safeEnvContext
     );
 
     const userParts: Array<any> = [];
@@ -2191,7 +2446,8 @@ app.post('/api/chat', async (req, res) => {
       message,
       false,
       verifiedOwner,
-      preferredReplyLanguage
+      preferredReplyLanguage,
+      contents.slice(0, -1)
     );
 
     if (!replyText) {
@@ -2205,17 +2461,28 @@ app.post('/api/chat', async (req, res) => {
             ? 'Hai! Saya Zara — bagaimana saya boleh membantu anda hari ini?'
             : langInfo.resolvedLang === 'arabic'
             ? 'مرحباً! أنا زارا — كيف يمكنني مساعدتك اليوم؟'
+            : langInfo.resolvedLang === 'roman_urdu'
+            ? 'Assalam o Alaikum dost! Main Zara hoon — batayein aaj main aapki kya madad kar sakti hoon?'
             : langInfo.resolvedLang === 'urdu'
             ? 'السلام علیکم دوست! میں زارا ہوں — بتائیے آج میں آپ کے کس کام یا سوال میں مدد کر سکتی ہوں؟'
             : 'Hello friend! I am Zara, happy to help with any everyday questions or mobile tasks. How can I help you today?';
       } else {
         const nick = !safeNickname || safeNickname === 'My Love' ? 'میری جان' : safeNickname;
         if (scheduleNote) {
-          replyText = `جی ${nick}! میں نے آپ کا ٹائم اور الارم یاد رکھ لیا ہے!`;
+          replyText =
+            langInfo.resolvedLang === 'roman_urdu'
+              ? `Ji ${nick}! Maine aapka time aur alarm save kar liya hai!`
+              : `جی ${nick}! میں نے آپ کا ٹائم اور الارم یاد رکھ لیا ہے!`;
         } else if (detectedCmd?.action === 'close') {
-          replyText = `جی ${nick}! میں نے ${detectedCmd.appId} کو بند کر دیا ہے!`;
+          replyText =
+            langInfo.resolvedLang === 'roman_urdu'
+              ? `Ji ${nick}! Maine ${detectedCmd.appId} ko band kar diya hai!`
+              : `جی ${nick}! میں نے ${detectedCmd.appId} کو بند کر دیا ہے!`;
         } else if (detectedCmd?.action === 'open') {
-          replyText = `جی ${nick}! ابھی آپ کے موبائل میں ${detectedCmd.appId} اوپن کر رہی ہوں!`;
+          replyText =
+            langInfo.resolvedLang === 'roman_urdu'
+              ? `Ji ${nick}! Abhi aapke phone mein ${detectedCmd.appId} open kar rahi hoon!`
+              : `جی ${nick}! ابھی آپ کے موبائل میں ${detectedCmd.appId} اوپن کر رہی ہوں!`;
         } else {
           replyText = pickVariedRomanticFallback(langInfo.resolvedLang, nick);
         }
@@ -2231,7 +2498,10 @@ app.post('/api/chat', async (req, res) => {
       : await generateZaraAudioWithMeta(replyText, voiceName, {
           loveMode: effectiveLove,
           romanceIntensity: effectiveIntensity,
-          language: langInfo.resolvedLang === 'roman_desi' ? 'urdu' : langInfo.resolvedLang,
+          language:
+            langInfo.resolvedLang === 'roman_desi' || langInfo.resolvedLang === 'roman_urdu'
+              ? 'urdu'
+              : langInfo.resolvedLang,
           isOwnerVerified: verifiedOwner,
           emotionMode: effectiveEmotion,
           ttsEngine,
@@ -2250,6 +2520,7 @@ app.post('/api/chat', async (req, res) => {
       deviceAction: detectedCmd
         ? { action: detectedCmd.action, appId: detectedCmd.appId }
         : null,
+      musicAction: detectedMusicCmd || null,
       orchestration: {
         selectedBrain: selectedBrainMeta,
         actualBrainUsed: actualBrainMeta,
@@ -2299,6 +2570,7 @@ app.post('/api/voice-chat', async (req, res) => {
       ttsEngine,
       enabledAiEngines,
       moodTransitionNote = '',
+      environmentContext = '',
     } = req.body || {};
 
     const assistantId = normalizeAssistantId(rawAssistantId);
@@ -2308,16 +2580,18 @@ app.post('/api/voice-chat', async (req, res) => {
         : 'جان'
       : 'Friend';
     const safeMemoryDigest =
-      verifiedOwner && typeof memoryDigest === 'string' ? memoryDigest : '';
+      typeof memoryDigest === 'string' ? memoryDigest.slice(0, 4500) : '';
     const effectiveLove = verifiedOwner && Boolean(loveMode);
     const effectiveBold = verifiedOwner && Boolean(unfilteredBoldTalk);
     const effectiveIntensity = effectiveLove ? romanceIntensity : 'calm';
-    const effectiveEmotion = verifiedOwner ? String(emotionMode || 'apnapan') : 'calm';
+    const effectiveEmotion = normalizeCompanionEmotion(emotionMode, verifiedOwner);
+    const safeEnvContext =
+      typeof environmentContext === 'string' ? environmentContext.trim().slice(0, 1200) : '';
 
     const priorTurns: Array<{ role: string; parts: Array<any> }> = [];
     if (verifiedOwner) {
       if (Array.isArray(history)) {
-        for (const item of history.slice(-22)) {
+        for (const item of history.slice(-14)) {
           if (item && item.role && item.parts && item.parts[0]?.text) {
             priorTurns.push({
               role: item.role === 'user' ? 'user' : 'model',
@@ -2333,19 +2607,60 @@ app.post('/api/voice-chat', async (req, res) => {
     let userTranscription = spokenText?.trim() || '';
     let sttMeta: OrchestratedSttResult | null = null;
 
+    if (!userTranscription && (!audioBase64 || typeof audioBase64 !== 'string')) {
+      return res.status(400).json({
+        error: 'No voice audio or spoken text received by the server.',
+        voiceErrorCode: 'empty_audio_payload',
+      });
+    }
+
     if (!userTranscription && audioBase64 && typeof audioBase64 === 'string') {
       sttMeta = await transcribeUserAudioWithMeta(audioBase64, mimeType, language);
-      userTranscription = sttMeta.transcript;
-      if (!userTranscription || userTranscription.includes('__SILENCE__')) {
+      userTranscription = (sttMeta.transcript || '').trim();
+      const strippedTranscript = userTranscription.replace(/[\s.,!?'"،؟\-:;()\[\]{}]/g, '');
+      const isSilenceMarker =
+        !userTranscription ||
+        strippedTranscript.length < 2 ||
+        userTranscription.includes('__SILENCE__') ||
+        /^[_*\[\(]*(silence|no[\s_-]*speech|inaudible|background[\s_-]*noise|thanks for watching|amara\.org)[_*\)\]]*\.?$/i.test(
+          userTranscription
+        );
+
+      if (isSilenceMarker) {
+        const isSttDown = sttMeta?.modelIdUsed === 'unavailable';
+        if (isSttDown) {
+          return res.status(503).json({
+            silence: true,
+            sttUnavailable: true,
+            voiceErrorCode: 'stt_unavailable',
+            error:
+              sttMeta?.errorReason ||
+              'Speech recognition service failed to process your voice. Please try speaking again.',
+            userTranscription: '',
+            zaraReply: '',
+            audio: null,
+            ownerVerified: verifiedOwner,
+            guestSafeLock: !verifiedOwner,
+            deviceAction: null,
+            orchestration: sttMeta
+              ? { sttEngineUsed: sttMeta.sttEngineUsed, sttModelUsed: sttMeta.modelIdUsed }
+              : undefined,
+          });
+        }
         return res.json({
           silence: true,
+          sttUnavailable: false,
+          voiceErrorCode: 'no_speech_detected',
+          message: 'No clear speech was detected in the recording. Please speak a bit louder or closer.',
           userTranscription: '',
           zaraReply: '',
           audio: null,
           ownerVerified: verifiedOwner,
           guestSafeLock: !verifiedOwner,
           deviceAction: null,
-          orchestration: sttMeta ? { sttEngineUsed: sttMeta.sttEngineUsed, sttModelUsed: sttMeta.modelIdUsed } : undefined,
+          orchestration: sttMeta
+            ? { sttEngineUsed: sttMeta.sttEngineUsed, sttModelUsed: sttMeta.modelIdUsed }
+            : undefined,
         });
       }
     }
@@ -2353,6 +2668,9 @@ app.post('/api/voice-chat', async (req, res) => {
     if (!userTranscription) {
       return res.json({
         silence: true,
+        sttUnavailable: false,
+        voiceErrorCode: 'no_speech_detected',
+        message: 'No clear speech was detected in the recording.',
         userTranscription: '',
         zaraReply: '',
         audio: null,
@@ -2379,7 +2697,8 @@ app.post('/api/voice-chat', async (req, res) => {
     }
 
     const detectedCmd = detectServerMobileCommand(userTranscription);
-    const isUtilityCommand = Boolean(detectedCmd);
+    const detectedMusicCmd = detectedCmd ? null : detectServerMusicCommand(userTranscription);
+    const isUtilityCommand = Boolean(detectedCmd || detectedMusicCmd);
 
     const systemInstruction = getZaraSystemPrompt(
       language,
@@ -2401,7 +2720,8 @@ app.post('/api/voice-chat', async (req, res) => {
       preferredReplyLanguage,
       verifiedOwner && typeof moodTransitionNote === 'string'
         ? moodTransitionNote.trim().slice(0, 260)
-        : ''
+        : '',
+      safeEnvContext
     );
 
     const userTurnParts: Array<any> = [];
@@ -2436,7 +2756,89 @@ app.post('/api/voice-chat', async (req, res) => {
       !imageBase64 &&
       shouldUseLiveWebResearch(assistantId, userTranscription);
 
-    if (useLiveWeb) {
+    const langInfo = resolveLanguageGuidance(
+      language,
+      userTranscription,
+      true,
+      verifiedOwner,
+      preferredReplyLanguage,
+      priorTurns
+    );
+
+    const canInstantUtilityReply = Boolean(detectedCmd && !imageBase64);
+
+    const buildInstantUtilityReply = (): string => {
+      if (!detectedCmd) return '';
+      const lang = langInfo.resolvedLang;
+      const nick = verifiedOwner
+        ? !safeNickname || safeNickname === 'My Love'
+          ? 'میری جان'
+          : safeNickname
+        : lang === 'english'
+        ? 'friend'
+        : 'دوست';
+
+      if (detectedCmd.action === 'drop_call') {
+        return lang === 'english'
+          ? 'Okay, stopping audio now.'
+          : lang === 'hindi'
+          ? 'ठीक है, मैं अभी आवाज़ बंद कर रही हूँ।'
+          : lang === 'punjabi'
+          ? 'ਠੀਕ ਐ ਜੀ, ਮੈਂ ਹੁਣੇ ਆਵਾਜ਼ ਬੰਦ ਕਰ ਰਹੀ ਆਂ।'
+          : lang === 'roman_urdu'
+          ? 'Ji, main abhi audio band kar rahi hoon.'
+          : 'جی، میں ابھی آڈیو بند کر رہی ہوں۔';
+      }
+      if (detectedCmd.action === 'close_zara') {
+        return lang === 'english'
+          ? 'Closing Zara standby mode now.'
+          : lang === 'hindi'
+          ? 'ठीक है, मैं अभी ज़ारा को स्टैंडबाय मोड में बंद कर रही हूँ।'
+          : lang === 'punjabi'
+          ? 'ਠੀਕ ਐ ਜੀ, ਮੈਂ ਹੁਣੇ ਜ਼ਾਰਾ ਨੂੰ ਸਟੈਂਡਬਾਏ ਮੋਡ ਵਿੱਚ ਬੰਦ ਕਰ ਰਹੀ ਆਂ।'
+          : lang === 'roman_urdu'
+          ? 'Ji, main abhi Zara ko standby mode mein band kar rahi hoon.'
+          : 'جی، میں ابھی زارا کو اسٹینڈ بائی موڈ میں بند کر رہی ہوں۔';
+      }
+      if (detectedCmd.action === 'back') {
+        return lang === 'english'
+          ? 'Going back now.'
+          : lang === 'hindi'
+          ? 'जी, अभी बैक कर रही हूँ।'
+          : lang === 'punjabi'
+          ? 'ਜੀ, ਹੁਣੇ ਵਾਪਸ ਜਾ ਰਹੀ ਆਂ।'
+          : lang === 'roman_urdu'
+          ? 'Ji, abhi back kar rahi hoon.'
+          : 'جی، ابھی بیک کر رہی ہوں۔';
+      }
+      if (detectedCmd.action === 'close') {
+        return lang === 'english'
+          ? `Okay, closing ${detectedCmd.appId} now.`
+          : lang === 'hindi'
+          ? `जी, मैंने ${detectedCmd.appId} बंद कर दिया है।`
+          : lang === 'punjabi'
+          ? `ਜੀ ${nick}! ਮੈਂ ${detectedCmd.appId} ਬੰਦ ਕਰ ਦਿੱਤਾ ਐ।`
+          : lang === 'roman_urdu'
+          ? `Ji, maine ${detectedCmd.appId} band kar diya hai.`
+          : `جی ${nick}! میں نے ${detectedCmd.appId} بند کر دیا ہے۔`;
+      }
+      return lang === 'english'
+        ? `Opening ${detectedCmd.appId} right now.`
+        : lang === 'hindi'
+        ? `जी, अभी ${detectedCmd.appId} ओपन कर रही हूँ!`
+        : lang === 'punjabi'
+        ? `ਜੀ ${nick}! ਹੁਣੇ ${detectedCmd.appId} ਖੋਲ੍ਹ ਰਹੀ ਆਂ!`
+        : lang === 'roman_urdu'
+        ? `Ji, abhi ${detectedCmd.appId} open kar rahi hoon!`
+        : `جی ${nick}! ابھی ${detectedCmd.appId} اوپن کر رہی ہوں!`;
+    };
+
+    if (canInstantUtilityReply) {
+      zaraReply = buildInstantUtilityReply();
+      actualBrainMeta = 'instant_utility_fastpath';
+      providerMeta = 'local-fastpath';
+      modelMeta = 'instant-command';
+    } else if (useLiveWeb) {
       const grounded = await aiOrchestrator.orchestrateGroundedReply({
         contents: [...priorTurns, { role: 'user', parts: userTurnParts }],
         systemInstruction,
@@ -2473,19 +2875,13 @@ app.post('/api/voice-chat', async (req, res) => {
       latencyMeta = voiceChatResult.latencyMs;
     }
 
-    const langInfo = resolveLanguageGuidance(
-      language,
-      userTranscription,
-      true,
-      verifiedOwner,
-      preferredReplyLanguage
-    );
-
     if (!zaraReply) {
       if (!verifiedOwner) {
         zaraReply =
           langInfo.resolvedLang === 'hindi'
             ? 'नमस्ते दोस्त! बताइए मैं आपके किस काम में मदद करूँ?'
+            : langInfo.resolvedLang === 'roman_urdu'
+            ? 'Assalam o Alaikum dost! Batayein aaj main aapki kya madad karoon?'
             : langInfo.resolvedLang === 'urdu' || langInfo.resolvedLang === 'roman_desi'
             ? 'وعلیکم السلام دوست! بتائیے آج میں آپ کے کس کام میں مدد کر سکتی ہوں؟'
             : langInfo.resolvedLang === 'punjabi'
@@ -2500,9 +2896,27 @@ app.post('/api/voice-chat', async (req, res) => {
       } else {
         const nick = !safeNickname || safeNickname === 'My Love' ? 'میری جان' : safeNickname;
         if (detectedCmd?.action === 'close') {
-          zaraReply = `جی ${nick}! میں نے اس ایپ کو بند کر دیا ہے!`;
+          zaraReply =
+            langInfo.resolvedLang === 'english'
+              ? `Okay, I closed ${detectedCmd.appId} for you.`
+              : langInfo.resolvedLang === 'hindi'
+              ? `जी, मैंने ${detectedCmd.appId} बंद कर दिया है!`
+              : langInfo.resolvedLang === 'punjabi'
+              ? `ਜੀ ${nick}! ਮੈਂ ${detectedCmd.appId} ਬੰਦ ਕਰ ਦਿੱਤਾ ਐ!`
+              : langInfo.resolvedLang === 'roman_urdu'
+              ? `Ji ${nick}! Maine ${detectedCmd.appId} band kar diya hai!`
+              : `جی ${nick}! میں نے اس ایپ کو بند کر دیا ہے!`;
         } else if (detectedCmd?.action === 'open') {
-          zaraReply = `جی ${nick}! ابھی آپ کے موبائل میں ${detectedCmd.appId} اوپن کر رہی ہوں!`;
+          zaraReply =
+            langInfo.resolvedLang === 'english'
+              ? `Opening ${detectedCmd.appId} on your phone right now.`
+              : langInfo.resolvedLang === 'hindi'
+              ? `जी, अभी आपके मोबाइल में ${detectedCmd.appId} खोल रही हूँ!`
+              : langInfo.resolvedLang === 'punjabi'
+              ? `ਜੀ ${nick}! ਹੁਣੇ ਤੁਹਾਡੇ ਫੋਨ ਵਿੱਚ ${detectedCmd.appId} ਖੋਲ੍ਹ ਰਹੀ ਆਂ!`
+              : langInfo.resolvedLang === 'roman_urdu'
+              ? `Ji ${nick}! Abhi aapke phone mein ${detectedCmd.appId} open kar rahi hoon!`
+              : `جی ${nick}! ابھی آپ کے موبائل میں ${detectedCmd.appId} اوپن کر رہی ہوں!`;
         } else {
           zaraReply = pickVariedRomanticFallback(langInfo.resolvedLang, nick);
         }
@@ -2516,7 +2930,10 @@ app.post('/api/voice-chat', async (req, res) => {
     const ttsRes = await generateZaraAudioWithMeta(zaraReply, voiceName, {
       loveMode: effectiveLove,
       romanceIntensity: effectiveIntensity,
-      language: langInfo.resolvedLang === 'roman_desi' ? 'urdu' : langInfo.resolvedLang,
+      language:
+        langInfo.resolvedLang === 'roman_desi' || langInfo.resolvedLang === 'roman_urdu'
+          ? 'urdu'
+          : langInfo.resolvedLang,
       isOwnerVerified: verifiedOwner,
       emotionMode: effectiveEmotion,
       ttsEngine,
@@ -2538,6 +2955,7 @@ app.post('/api/voice-chat', async (req, res) => {
       deviceAction: detectedCmd
         ? { action: detectedCmd.action, appId: detectedCmd.appId }
         : null,
+      musicAction: detectedMusicCmd || null,
       orchestration: {
         selectedBrain: selectedBrainMeta,
         actualBrainUsed: actualBrainMeta,
@@ -2581,7 +2999,7 @@ app.post('/api/tts', async (req, res) => {
     const safeText = verifiedOwner ? text : enforceGuestSafeOutput(text);
     const effectiveLove = verifiedOwner && Boolean(loveMode);
     const effectiveIntensity = effectiveLove ? romanceIntensity : 'calm';
-    const effectiveEmotion = verifiedOwner ? String(emotionMode || 'apnapan') : 'calm';
+    const effectiveEmotion = normalizeCompanionEmotion(emotionMode, verifiedOwner);
 
     const ttsRes = await generateZaraAudioWithMeta(safeText, voiceName, {
       loveMode: effectiveLove,
@@ -2908,11 +3326,78 @@ function saveSocialDrafts(items: SocialDraftItem[]): void {
 }
 
 function getSocialAccountsStatus(): SocialAccountStatus[] {
+  const resolveToken = (envKey: string, vaultProvider?: ApiVaultProviderId): string => {
+    const envVal = process.env[envKey]?.trim();
+    if (envVal) return envVal;
+    return vaultProvider ? devPlatformEngine.resolveProviderSecret(vaultProvider).value : '';
+  };
+
+  const telegramOk = Boolean(resolveToken('TELEGRAM_BOT_TOKEN', 'telegram'));
+  const igOk = Boolean(resolveToken('META_IG_ACCESS_TOKEN', 'meta_ig'));
+  const fbOk = Boolean(resolveToken('META_FB_ACCESS_TOKEN', 'meta_fb'));
+  const ytOk = Boolean(resolveToken('YOUTUBE_ACCESS_TOKEN', 'youtube'));
+  const xOk = Boolean(resolveToken('X_ACCESS_TOKEN', 'twitter'));
   const tiktokOk = Boolean(process.env.TIKTOK_ACCESS_TOKEN?.trim());
-  const igOk = Boolean(process.env.META_IG_ACCESS_TOKEN?.trim());
-  const fbOk = Boolean(process.env.META_FB_ACCESS_TOKEN?.trim());
   const snapOk = Boolean(process.env.SNAPCHAT_ACCESS_TOKEN?.trim());
+
   return [
+    {
+      platform: 'whatsapp',
+      name: 'WhatsApp',
+      connected: true,
+      connectionSource: 'deep_link_ready',
+      requiredEnvVars: ['Android APK Bridge / whatsapp://send'],
+      capabilities: [
+        'Voice-to-message draft & send (Owner confirmed)',
+        'Read incoming notifications & 30s group digest',
+        'Auto-open WhatsApp chat via deep link / bridge',
+      ],
+      detail: 'Ready via confirmed WhatsApp deep link & Zara Android Companion Notification Reader.',
+    },
+    {
+      platform: 'telegram',
+      name: 'Telegram',
+      connected: telegramOk,
+      connectionSource: telegramOk ? 'official_api_token' : 'unconfigured',
+      requiredEnvVars: ['TELEGRAM_BOT_TOKEN'],
+      capabilities: ['Draft updates & channel posts', 'Live send via Telegram Bot API (with chat ID & approval)'],
+      detail: telegramOk
+        ? 'Telegram Bot API token active (Env or Encrypted Vault).'
+        : 'Add Telegram Bot token in API Keys Vault or TELEGRAM_BOT_TOKEN secret for live sending.',
+    },
+    {
+      platform: 'instagram',
+      name: 'Instagram',
+      connected: igOk,
+      connectionSource: igOk ? 'official_api_token' : 'unconfigured',
+      requiredEnvVars: ['META_IG_ACCESS_TOKEN'],
+      capabilities: ['Draft posts, reels & replies', 'Publish via Meta Graph API (with IG Business ID & approval)'],
+      detail: igOk
+        ? 'Meta Instagram Graph API token configured.'
+        : 'Add Instagram token in API Keys Vault or META_IG_ACCESS_TOKEN for publishing; drafting active.',
+    },
+    {
+      platform: 'facebook',
+      name: 'Facebook',
+      connected: fbOk,
+      connectionSource: fbOk ? 'official_api_token' : 'unconfigured',
+      requiredEnvVars: ['META_FB_ACCESS_TOKEN'],
+      capabilities: ['Draft page updates & comments', 'Publish Page posts via Graph API (with approval)'],
+      detail: fbOk
+        ? 'Meta Facebook Graph API token configured.'
+        : 'Add Facebook Page token in API Keys Vault or META_FB_ACCESS_TOKEN for publishing; drafting active.',
+    },
+    {
+      platform: 'youtube',
+      name: 'YouTube',
+      connected: ytOk,
+      connectionSource: ytOk ? 'official_api_token' : 'unconfigured',
+      requiredEnvVars: ['YOUTUBE_ACCESS_TOKEN'],
+      capabilities: ['Draft video titles, descriptions & tags', 'Comment/video metadata via YouTube Data API v3'],
+      detail: ytOk
+        ? 'YouTube API key / OAuth token configured.'
+        : 'Add YouTube Data API key/token in API Keys Vault or YOUTUBE_ACCESS_TOKEN; metadata drafting active.',
+    },
     {
       platform: 'tiktok',
       name: 'TikTok',
@@ -2925,28 +3410,6 @@ function getSocialAccountsStatus(): SocialAccountStatus[] {
         : 'Requires TIKTOK_ACCESS_TOKEN in Secrets for live publishing; caption & script drafting active.',
     },
     {
-      platform: 'instagram',
-      name: 'Instagram',
-      connected: igOk,
-      connectionSource: igOk ? 'official_api_token' : 'unconfigured',
-      requiredEnvVars: ['META_IG_ACCESS_TOKEN'],
-      capabilities: ['Draft posts, reels & replies', 'Publish via Meta Graph API (with approval)'],
-      detail: igOk
-        ? 'Meta Instagram Graph API token configured.'
-        : 'Requires META_IG_ACCESS_TOKEN in Secrets for direct publishing; post & reply drafting active.',
-    },
-    {
-      platform: 'facebook',
-      name: 'Facebook',
-      connected: fbOk,
-      connectionSource: fbOk ? 'official_api_token' : 'unconfigured',
-      requiredEnvVars: ['META_FB_ACCESS_TOKEN'],
-      capabilities: ['Draft page updates & comments', 'Publish Page posts via Graph API (with approval)'],
-      detail: fbOk
-        ? 'Meta Facebook Graph API token configured.'
-        : 'Requires META_FB_ACCESS_TOKEN in Secrets for Page publishing; drafting active.',
-    },
-    {
       platform: 'snapchat',
       name: 'Snapchat',
       connected: snapOk,
@@ -2956,6 +3419,17 @@ function getSocialAccountsStatus(): SocialAccountStatus[] {
       detail: snapOk
         ? 'Snapchat official API token configured.'
         : 'Requires SNAPCHAT_ACCESS_TOKEN in Secrets for live push; Story/caption drafting active.',
+    },
+    {
+      platform: 'twitter',
+      name: 'X (Twitter)',
+      connected: xOk,
+      connectionSource: xOk ? 'official_api_token' : 'unconfigured',
+      requiredEnvVars: ['X_ACCESS_TOKEN'],
+      capabilities: ['Draft tweets & threads', 'Publish tweets via X API v2 (with OAuth2 token & approval)'],
+      detail: xOk
+        ? 'X (Twitter) API v2 token configured.'
+        : 'Add X OAuth2 user token in API Keys Vault or X_ACCESS_TOKEN for live posting; thread drafting active.',
     },
   ];
 }
@@ -2980,10 +3454,19 @@ app.post('/api/social/drafts', async (req, res) => {
       language = 'auto',
     } = req.body || {};
 
-    const validPlatform: SocialPlatformId =
-      platform === 'tiktok' || platform === 'facebook' || platform === 'snapchat'
-        ? platform
-        : 'instagram';
+    const allowedPlatforms: SocialPlatformId[] = [
+      'tiktok',
+      'instagram',
+      'facebook',
+      'snapchat',
+      'whatsapp',
+      'telegram',
+      'youtube',
+      'twitter',
+    ];
+    const validPlatform: SocialPlatformId = allowedPlatforms.includes(platform as SocialPlatformId)
+      ? (platform as SocialPlatformId)
+      : 'instagram';
 
     let finalTitle = String(title || '').trim();
     let finalContent = String(content || '').trim();
@@ -3044,7 +3527,7 @@ app.post('/api/social/publish', async (req, res) => {
         error: 'Verified Owner login is required before publishing any social post.',
       });
     }
-    const { draftId, confirmedByOwner } = req.body || {};
+    const { draftId, confirmedByOwner, targetChatId = '' } = req.body || {};
     if (confirmedByOwner !== true) {
       return res.status(400).json({
         ok: false,
@@ -3059,29 +3542,35 @@ app.post('/api/social/publish', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Draft not found.' });
     }
 
+    if (target.platform === 'whatsapp') {
+      target.status = 'approved';
+      target.publishResult = `Approved for WhatsApp handoff (${new Date().toLocaleTimeString()}). Use WhatsApp send action on phone.`;
+      saveSocialDrafts(drafts);
+      return res.json({
+        ok: true,
+        draft: target,
+        drafts,
+        whatsappDeepLink: `https://wa.me/?text=${encodeURIComponent(target.content)}`,
+      });
+    }
+
     const status = getSocialAccountsStatus().find((a) => a.platform === target.platform);
     if (!status?.connected) {
       return res.status(400).json({
         ok: false,
         requiresToken: true,
         requiredEnvVars: status?.requiredEnvVars || [],
-        error: `Draft approved by Owner, but live ${target.platform} publishing requires ${status?.requiredEnvVars.join(', ')} to be configured in Server Secrets (no fake posting).`,
+        error: `Draft approved by Owner, but live ${target.platform} publishing requires ${status?.requiredEnvVars.join(', ')} in Server Secrets or Encrypted API Vault (no fake posting).`,
       });
     }
 
-    // Real official Graph API execution when META_FB_ACCESS_TOKEN is supplied
-    if (target.platform === 'facebook' && process.env.META_FB_ACCESS_TOKEN) {
-      const fbRes = await fetch(
-        `https://graph.facebook.com/v19.0/me/feed`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: target.content,
-            access_token: process.env.META_FB_ACCESS_TOKEN,
-          }),
-        }
-      );
+    const fbToken = process.env.META_FB_ACCESS_TOKEN?.trim() || devPlatformEngine.resolveProviderSecret('meta_fb').value;
+    if (target.platform === 'facebook' && fbToken) {
+      const fbRes = await fetch(`https://graph.facebook.com/v19.0/me/feed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: target.content, access_token: fbToken }),
+      });
       const fbJson: any = await fbRes.json().catch(() => ({}));
       if (!fbRes.ok || fbJson?.error) {
         target.status = 'failed';
@@ -3095,10 +3584,60 @@ app.post('/api/social/publish', async (req, res) => {
       return res.json({ ok: true, draft: target, drafts });
     }
 
+    const tgToken = process.env.TELEGRAM_BOT_TOKEN?.trim() || devPlatformEngine.resolveProviderSecret('telegram').value;
+    if (target.platform === 'telegram' && tgToken) {
+      const chatId = String(targetChatId || process.env.TELEGRAM_CHAT_ID || '').trim();
+      if (!chatId) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Telegram chat_id (or TELEGRAM_CHAT_ID secret) is required to send a message via Telegram Bot API.',
+        });
+      }
+      const tgRes = await fetch(`https://api.telegram.org/bot${encodeURIComponent(tgToken)}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: target.content }),
+      });
+      const tgJson: any = await tgRes.json().catch(() => ({}));
+      if (!tgRes.ok || !tgJson?.ok) {
+        target.status = 'failed';
+        target.publishResult = tgJson?.description || `HTTP ${tgRes.status}`;
+        saveSocialDrafts(drafts);
+        return res.status(502).json({ ok: false, error: target.publishResult, drafts });
+      }
+      target.status = 'published';
+      target.publishResult = `Telegram message_id: ${tgJson.result?.message_id || 'ok'}`;
+      saveSocialDrafts(drafts);
+      return res.json({ ok: true, draft: target, drafts });
+    }
+
+    const xToken = process.env.X_ACCESS_TOKEN?.trim() || devPlatformEngine.resolveProviderSecret('twitter').value;
+    if (target.platform === 'twitter' && xToken) {
+      const xRes = await fetch(`https://api.twitter.com/2/tweets`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${xToken}`,
+        },
+        body: JSON.stringify({ text: target.content.slice(0, 280) }),
+      });
+      const xJson: any = await xRes.json().catch(() => ({}));
+      if (!xRes.ok || xJson?.errors) {
+        target.status = 'failed';
+        target.publishResult = xJson?.detail || xJson?.title || `HTTP ${xRes.status}`;
+        saveSocialDrafts(drafts);
+        return res.status(502).json({ ok: false, error: target.publishResult, drafts });
+      }
+      target.status = 'published';
+      target.publishResult = `Tweet ID: ${xJson?.data?.id || 'ok'}`;
+      saveSocialDrafts(drafts);
+      return res.json({ ok: true, draft: target, drafts });
+    }
+
     return res.status(400).json({
       ok: false,
       requiresToken: true,
-      error: `Official ${target.platform} API endpoint requires platform Page/Business ID configuration alongside your token.`,
+      error: `Official ${target.platform} publishing requires Page/Business/OAuth scope alongside your configured token.`,
     });
   } catch (err: any) {
     return res.status(500).json({ ok: false, error: err?.message || 'Social publish error' });
@@ -3233,6 +3772,269 @@ app.post('/api/dev/analyze-file', async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ ok: false, error: err?.message || 'File analysis failed' });
+  }
+});
+
+// ======================== ZARA UNIFIED AI APP BUILDER, API VAULT, 2D/3D STUDIO & TASK ENGINE ========================
+app.get('/api/dev-studio/projects', (_req, res) => {
+  try {
+    return res.json({ ok: true, projects: devPlatformEngine.listProjects() });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Failed to list projects' });
+  }
+});
+
+app.post('/api/dev-studio/projects/create', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to create projects.' });
+    }
+    const { name = 'Zara App', template = 'react_ts' } = req.body || {};
+    const project = devPlatformEngine.createTemplateProject(String(name), template);
+    return res.json({ ok: true, project });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Project creation failed' });
+  }
+});
+
+app.post('/api/dev-studio/projects/upload-zip', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to import project ZIPs.' });
+    }
+    const { projectName = 'Imported App', zipBase64 = '' } = req.body || {};
+    if (!zipBase64 || typeof zipBase64 !== 'string') {
+      return res.status(400).json({ ok: false, error: 'zipBase64 payload is required.' });
+    }
+    const project = await devPlatformEngine.importProjectFromZipBase64(String(projectName), zipBase64);
+    return res.json({ ok: true, project });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'ZIP import failed' });
+  }
+});
+
+app.get('/api/dev-studio/projects/:id', (req, res) => {
+  try {
+    const project = devPlatformEngine.analyzeProject(req.params.id);
+    return res.json({ ok: true, project });
+  } catch (err: any) {
+    return res.status(404).json({ ok: false, error: err?.message || 'Project not found' });
+  }
+});
+
+app.get('/api/dev-studio/projects/:id/file', (req, res) => {
+  try {
+    const relPath = String(req.query.path || '').trim();
+    if (!relPath) return res.status(400).json({ ok: false, error: 'Query parameter path is required.' });
+    const fileData = devPlatformEngine.readProjectFile(req.params.id, relPath);
+    return res.json({
+      ok: true,
+      path: fileData.path,
+      language: fileData.language,
+      content: fileData.content,
+    });
+  } catch (err: any) {
+    return res.status(404).json({ ok: false, error: err?.message || 'File read failed' });
+  }
+});
+
+app.post('/api/dev-studio/projects/:id/file', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to modify project files.' });
+    }
+    const { relPath = '', content = '', createBackup = true } = req.body || {};
+    if (!relPath || typeof content !== 'string') {
+      return res.status(400).json({ ok: false, error: 'relPath and string content are required.' });
+    }
+    if (createBackup) {
+      devPlatformEngine.createProjectBackup(req.params.id, `Before edit: ${relPath}`);
+    }
+    const node = devPlatformEngine.writeProjectFile(req.params.id, String(relPath), content);
+    const project = devPlatformEngine.analyzeProject(req.params.id);
+    return res.json({ ok: true, file: node, project });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'File write failed' });
+  }
+});
+
+app.post('/api/dev-studio/projects/:id/ai-code', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required for AI code edits.' });
+    }
+    const { instruction = '', targetPath = '' } = req.body || {};
+    if (!instruction || typeof instruction !== 'string') {
+      return res.status(400).json({ ok: false, error: 'instruction is required.' });
+    }
+    const result = await devPlatformEngine.aiEditProjectFiles(
+      req.params.id,
+      instruction,
+      targetPath ? String(targetPath) : undefined
+    );
+    return res.json({ ...result, project: result.summary });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'AI code edit failed' });
+  }
+});
+
+app.post('/api/dev-studio/projects/:id/create-api', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to generate APIs.' });
+    }
+    const {
+      endpointPath = '/api/items',
+      method = 'GET',
+      description = 'CRUD endpoint',
+      backend = 'node_express',
+      database = 'sqlite',
+    } = req.body || {};
+    const result = await devPlatformEngine.createAndVerifyApiInProject(req.params.id, {
+      endpointPath: String(endpointPath),
+      method: String(method),
+      description: String(description),
+      backendTarget: backend === 'python_fastapi' ? 'python_fastapi' : 'node_express',
+      databaseKind:
+        database === 'postgres' || database === 'firestore'
+          ? database
+          : database === 'none' || database === 'json_store'
+          ? 'json_store'
+          : 'sqlite',
+    });
+    return res.json({ ...result, project: result.summary });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'API creation failed' });
+  }
+});
+
+app.post('/api/dev-studio/projects/:id/pipeline', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to run build & self-heal pipeline.' });
+    }
+    const result = await devPlatformEngine.runProjectBuildPipeline(req.params.id);
+    return res.json({ ok: true, pipeline: result });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Build pipeline error' });
+  }
+});
+
+app.get('/api/dev-studio/projects/:id/backups', (req, res) => {
+  try {
+    const backups = devPlatformEngine.listProjectBackups(req.params.id);
+    return res.json({ ok: true, backups });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Backup listing failed' });
+  }
+});
+
+app.post('/api/dev-studio/projects/:id/rollback', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to restore backups.' });
+    }
+    const { backupId = '', confirmed = false } = req.body || {};
+    if (confirmed !== true) {
+      return res.status(400).json({
+        ok: false,
+        requiresConfirmation: true,
+        error: 'Explicit confirmation required before rolling back project files.',
+      });
+    }
+    const project = devPlatformEngine.restoreProjectBackup(req.params.id, String(backupId));
+    return res.json({ ok: true, project });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Rollback failed' });
+  }
+});
+
+app.get('/api/dev-studio/projects/:id/download-zip', (req, res) => {
+  try {
+    const exported = devPlatformEngine.exportProjectZipBuffer(req.params.id);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.setHeader('Content-Length', String(exported.buffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(exported.buffer);
+  } catch (err: any) {
+    return res.status(404).json({ ok: false, error: err?.message || 'ZIP export failed' });
+  }
+});
+
+// Encrypted API Key Vault & Universal AI Tools
+app.get('/api/dev-studio/keys', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({ ok: true, providers: devPlatformEngine.listVaultProviders() });
+});
+
+app.post('/api/dev-studio/keys', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Verified Owner sign-in required to modify API Key Vault.' });
+    }
+    const { provider, secret } = req.body || {};
+    if (!provider || typeof secret !== 'string' || !secret.trim()) {
+      return res.status(400).json({ ok: false, error: 'provider and non-empty secret are required.' });
+    }
+    const providers = devPlatformEngine.setVaultProviderKey(provider as ApiVaultProviderId, secret);
+    return res.json({ ok: true, providers });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Failed to save key' });
+  }
+});
+
+app.post('/api/dev-studio/keys/test', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to test vault keys.' });
+    }
+    const { provider } = req.body || {};
+    if (!provider) return res.status(400).json({ ok: false, error: 'provider is required.' });
+    const result = await devPlatformEngine.testVaultProvider(provider as ApiVaultProviderId);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Provider test failed' });
+  }
+});
+
+app.delete('/api/dev-studio/keys/:provider', async (req, res) => {
+  try {
+    const ownerAuth = await verifyOwnerRequest(req);
+    if (!ownerAuth.verified) {
+      return res.status(403).json({ ok: false, error: 'Owner verification required to remove vault keys.' });
+    }
+    const confirmed = req.query.confirmed === 'true' || req.body?.confirmed === true;
+    if (!confirmed) {
+      return res.status(400).json({ ok: false, requiresConfirmation: true, error: 'Confirm key removal.' });
+    }
+    const providers = devPlatformEngine.removeVaultProviderKey(req.params.provider as ApiVaultProviderId);
+    return res.json({ ok: true, providers });
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: err?.message || 'Key removal failed' });
+  }
+});
+
+// Autonomous Multi-Step Task Planner & Executor
+app.post('/api/tasks/plan-execute', async (req, res) => {
+  try {
+    const { goal = '' } = req.body || {};
+    if (!goal || typeof goal !== 'string' || !goal.trim()) {
+      return res.status(400).json({ ok: false, error: 'Task goal is required.' });
+    }
+    const plan: AutonomousTaskPlan = await devPlatformEngine.planAndExecuteTask(goal.trim(), 'auto');
+    return res.json({ ok: true, plan });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Task planner failed' });
   }
 });
 
@@ -3378,7 +4180,10 @@ app.get('/api/self-improve/audit', (req, res) => {
     'android/app/build.gradle',
     'android/app/src/main/java/com/zara/ai/assistant/MainActivity.kt',
     'android/app/src/main/java/com/zara/ai/assistant/ZaraAccessibilityService.kt',
+    'android/app/src/main/java/com/zara/ai/assistant/ZaraNotificationListener.kt',
+    'android/app/src/main/java/com/zara/ai/assistant/ZaraForegroundVoiceService.kt',
     'android/app/src/main/java/com/zara/ai/assistant/ZaraWakeWordService.kt',
+    'android/app/src/main/java/com/zara/ai/assistant/ZaraBootReceiver.kt',
     'android/app/src/main/java/com/zara/ai/assistant/ZaraPlayBillingManager.kt',
   ];
   const androidPresent = androidRequiredFiles.filter((f) => fs.existsSync(path.join(__dirname, f)));
@@ -3763,6 +4568,171 @@ app.post('/api/self-improve/auto-update', (_req, res) => {
     report,
     spokenSummaryHi,
   });
+});
+
+// ======================== 30-SECOND WHATSAPP & GROUP NOTIFICATION DIGEST ========================
+app.post('/api/notifications/digest', async (req, res) => {
+  try {
+    const rawItems = Array.isArray(req.body?.notifications) ? req.body.notifications : [];
+    const reqLang = String(req.body?.language || 'auto').toLowerCase();
+    const voiceName = String(req.body?.voiceName || 'Zephyr');
+    const includeAudio = req.body?.includeAudio !== false;
+
+    const resolvedLang: 'english' | 'hindi' | 'punjabi' | 'urdu' | 'roman_urdu' =
+      reqLang === 'english'
+        ? 'english'
+        : reqLang === 'hindi'
+        ? 'hindi'
+        : reqLang === 'punjabi'
+        ? 'punjabi'
+        : reqLang === 'roman_urdu' || reqLang === 'roman_desi'
+        ? 'roman_urdu'
+        : 'urdu';
+
+    const otpPattern = /\b(otp|verification\s*code|security\s*code|passcode|password|pin|cvv|bank|one-time|debit\s*card|credit\s*card|کوڈ|پاس\s*ورڈ|بینک|ओटीपी|पासवर्ड|बैंक|ਓਟੀਪੀ|ਪਾਸਵਰਡ)\b/i;
+
+    const sanitized = rawItems.slice(0, 35).map((item: any) => {
+      const appName = String(item?.appName || 'Phone').trim();
+      const sender = String(item?.sender || appName || 'Contact').trim();
+      const conversationTitle = String(item?.conversationTitle || '').trim();
+      const rawBody = String(item?.body || '').trim();
+      const hasSensitive = otpPattern.test(rawBody) || /\b\d{4,8}\b/.test(rawBody);
+      const safeBody = hasSensitive
+        ? '[Private verification / security code hidden]'
+        : rawBody.replace(/\s+/g, ' ').slice(0, 140);
+      const isWhatsApp = /whatsapp/i.test(appName) || /whatsapp/i.test(String(item?.packageName || ''));
+      const isGroup = Boolean(item?.isGroup || conversationTitle);
+      return {
+        appName,
+        sender,
+        conversationTitle,
+        body: safeBody,
+        isWhatsApp,
+        isGroup,
+        type: String(item?.type || 'message'),
+      };
+    });
+
+    const prioritized = [
+      ...sanitized.filter((x: any) => x.isWhatsApp && x.isGroup),
+      ...sanitized.filter((x: any) => x.isWhatsApp && !x.isGroup),
+      ...sanitized.filter((x: any) => !x.isWhatsApp),
+    ];
+
+    const totalCount = prioritized.length;
+    const groupCount = prioritized.filter((x: any) => x.isGroup).length;
+
+    if (totalCount === 0) {
+      const emptyMsg =
+        resolvedLang === 'english'
+          ? 'You have no unread WhatsApp or app notifications right now.'
+          : resolvedLang === 'hindi'
+          ? 'इस समय आपके पास कोई नया व्हाट्सएप या ग्रुप नोटिफिकेशन नहीं है।'
+          : resolvedLang === 'punjabi'
+          ? 'ਇਸ ਵੇਲੇ ਤੁਹਾਡੇ ਕੋਲ ਕੋਈ ਨਵਾਂ ਵਟਸਐਪ ਜਾਂ ਗਰੁੱਪ ਨੋਟੀਫਿਕੇਸ਼ਨ ਨਹੀਂ ਹੈ।'
+          : resolvedLang === 'roman_urdu'
+          ? 'Is waqt aapke paas koi naya WhatsApp ya group notification maujood nahi hai.'
+          : 'اس وقت آپ کے پاس کوئی نیا واٹس ایپ یا گروپ نوٹیفکیشن موجود نہیں ہے۔';
+      const audio = includeAudio
+        ? (
+            await generateZaraAudioWithMeta(emptyMsg, voiceName, {
+              language: resolvedLang === 'roman_urdu' ? 'urdu' : resolvedLang,
+              isOwnerVerified: true,
+              loveMode: false,
+            })
+          ).audioBase64
+        : null;
+      return res.json({ ok: true, digestText: emptyMsg, audio, totalCount: 0, groupCount: 0 });
+    }
+
+    const digestLines = prioritized
+      .slice(0, 18)
+      .map((n: any, idx: number) => {
+        const tag = n.conversationTitle ? `[Group: ${n.conversationTitle}]` : `[${n.appName}]`;
+        return `${idx + 1}. ${tag} ${n.sender}: ${n.body || '(no text)'}`;
+      })
+      .join('\n');
+
+    const buildDeterministicDigest = (): string => {
+      const top = prioritized.slice(0, 4);
+      const highlights = top
+        .map((n: any) =>
+          n.conversationTitle
+            ? `${n.conversationTitle} (${n.sender}: ${n.body})`
+            : `${n.sender}: ${n.body}`
+        )
+        .join('; ');
+      if (resolvedLang === 'english') {
+        return `Here is your 30-second briefing for ${totalCount} notifications (${groupCount} group chats): ${highlights}.`;
+      }
+      if (resolvedLang === 'hindi') {
+        return `आपका 30 सेकंड का नोटिफिकेशन डाइजेस्ट — कुल ${totalCount} संदेश, जिनमें ${groupCount} ग्रुप अपडेट हैं: ${highlights}।`;
+      }
+      if (resolvedLang === 'punjabi') {
+        return `ਤੁਹਾਡਾ 30 ਸਕਿੰਟ ਦਾ ਨੋਟੀਫਿਕੇਸ਼ਨ ਡਾਇਜੈਸਟ — ਕੁੱਲ ${totalCount} ਸੁਨੇਹੇ, ਜਿਨ੍ਹਾਂ ਵਿੱਚ ${groupCount} ਗਰੁੱਪ ਅੱਪਡੇਟ ਨੇ: ${highlights}।`;
+      }
+      if (resolvedLang === 'roman_urdu') {
+        return `Aapka 30-second WhatsApp aur notification khulasa — kul ${totalCount} messages hain jin mein ${groupCount} group updates shamil hain: ${highlights}.`;
+      }
+      return `آپ کا 30 سیکنڈ کا واٹس ایپ اور نوٹیفکیشن خلاصہ — کل ${totalCount} پیغامات ہیں جن میں ${groupCount} گروپ میسجز شامل ہیں: ${highlights}۔`;
+    };
+
+    let digestText = '';
+    try {
+      const langInstruction =
+        resolvedLang === 'english'
+          ? 'Respond ONLY in crisp conversational English.'
+          : resolvedLang === 'hindi'
+          ? 'Respond ONLY in clear conversational Hindi (Devanagari script).'
+          : resolvedLang === 'punjabi'
+          ? 'Respond ONLY in natural conversational Punjabi (Shahmukhi or Gurmukhi).'
+          : resolvedLang === 'roman_urdu'
+          ? 'Respond ONLY in clean, natural Pakistani Roman Urdu written strictly in Latin/English letters.'
+          : 'Respond ONLY in clear conversational Pakistani Urdu script (اردو).';
+
+      const summaryPrompt = `Summarize these ${totalCount} mobile notifications (${groupCount} group messages) into a single spoken 30-second executive briefing (~65 to 90 words).
+Prioritize WhatsApp groups and important senders first, combine repeated chats from the same group, and NEVER reveal OTPs or private verification codes.
+${langInstruction}
+
+Notifications:
+${digestLines}`;
+
+      const result = await aiOrchestrator.orchestrateTextReply({
+        contents: [{ role: 'user', parts: [{ text: summaryPrompt }] }],
+        systemInstruction:
+          'You are Zara AI delivering a concise, accurate, natural 30-second spoken WhatsApp & notification digest. No markdown bullets, no emojis, just smooth spoken sentences.',
+        preferredBrain: 'auto',
+      });
+      digestText = (result.text || '').replace(/[*#_`]/g, '').trim();
+    } catch {
+      digestText = '';
+    }
+
+    if (!digestText) {
+      digestText = buildDeterministicDigest();
+    }
+
+    const audio = includeAudio
+      ? (
+          await generateZaraAudioWithMeta(digestText, voiceName, {
+            language: resolvedLang === 'roman_urdu' ? 'urdu' : resolvedLang,
+            isOwnerVerified: true,
+            loveMode: false,
+          })
+        ).audioBase64
+      : null;
+
+    return res.json({
+      ok: true,
+      digestText,
+      audio,
+      totalCount,
+      groupCount,
+    });
+  } catch (err: any) {
+    console.error('[NotificationsDigest] Error:', err);
+    return res.status(500).json({ ok: false, error: 'Failed to generate notification digest.' });
+  }
 });
 
 // ======================== DEFENSIVE CYBERSECURITY LAB ENDPOINTS ========================
@@ -4653,7 +5623,7 @@ app.post('/api/build-app', async (req, res) => {
     if (!ownerAuth.verified) {
       return res.status(403).json({
         error:
-          'Owner Verified Mode required: full App Builder access belongs strictly to Malaysia wala badshah.',
+          'ZX verification required: full App Builder access belongs strictly to Malaysia wala badshah.',
       });
     }
 
@@ -4775,7 +5745,7 @@ app.post('/api/register-built-apps', async (req, res) => {
   try {
     const ownerAuth = await verifyOwnerRequest(req);
     if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner Verified Mode required' });
+      return res.status(403).json({ ok: false, error: 'ZX verification required' });
     }
     const { apps = [] } = req.body || {};
     if (Array.isArray(apps)) {
@@ -4860,35 +5830,24 @@ const FILE_ROLE_DESCRIPTIONS_HI: Record<string, string> = {
   'src/services/visionAndControlService.ts': 'कैमरा विज़न, स्क्रीन शेयरिंग और मोबाइल ऐप्स (Open/Close/Back) कंट्रोलर',
   'src/services/ownerSecurityAndBuilderService.ts': 'मालिक (Malaysia wala badshah) सुरक्षा, एंटी-टच सायरन, व्हाट्सएप मैसेज/कॉल और AI ऐप/गेम बिल्डर सर्विस',
   'src/services/scheduleAndMemoryService.ts': '100+ दिन की परमानेंट मेमोरी वॉल्ट और डेली अलार्म/काम शेड्यूलर',
-  'src/components/ZaraLivingBackground.tsx': 'ऐप खुलते ही फुल-स्क्रीन घूमती-फिरती, देखती और मुस्कुराती हुई ज़ारा का 60FPS कैनवास इंजन',
-  'src/components/ZaraFunctionBar.tsx': 'नीचे एक जगह स्थिर पूरा फंक्शन बार (Speak, Live Call, WhatsApp, Chat, Settings, Screen-Off, Back, Close आदि)',
-  'src/components/TopStatusBar.tsx': 'ऊपर का ग्लास स्टेटस बार, घड़ी और मोड इंडिकेटर',
+  'src/components/hud3d/ZaraSciFi3DHudDashboard.tsx': 'ज़ारा का मुख्य रॉयल-वॉयलेट डैशबोर्ड, 2D पोर्ट्रेट स्टेज और टूल हब',
   'src/components/VoiceCallModal.tsx': 'रियल-टाइम टू-वे लाइव फोन कॉल स्क्रीन',
   'src/components/ChatDrawer.tsx': 'वॉयस और टेक्स्ट चैट ड्रॉअर',
   'src/components/SettingsModal.tsx': 'ज़ारा का पूरा कंट्रोल पैनल (प्रोफाइल, व्हाट्सएप, सिक्योरिटी, शेड्यूल, मेमोरी, ऐप बिल्डर)',
   'src/components/ZaraProjectExportModal.tsx': 'शुरू से अब तक की सभी फाइलें, कोड और A-to-Z टूल जानकारी डाउनलोड व शेयर करने का पैनल',
   'src/components/PWAInstallModal.tsx': 'यूनिवर्सल मोबाइल इंस्टॉलर और लिंक शेयरिंग मोडल',
-  'src/components/MobileControlModal.tsx': 'मोबाइल सेटिंग्स, परमिशन और कैमरा/स्क्रीन कंट्रोल हब',
+  'src/components/MobileControlModal.tsx': 'ज़ारा परमिशन, विज़न, सिक्योरिटी और ऐप कंट्रोल हब',
   'src/components/SecurityShieldOverlay.tsx': 'फेस-स्कैन वेरिफिकेशन और एंटी-टच इंट्रूडर लॉक स्क्रीन',
   'src/components/BuiltAppPreviewModal.tsx': 'ज़ारा द्वारा बनाए गए गेम्स और ऐप्स चलाने का प्लेयर',
   'src/components/MemoriesModal.tsx': 'यादें और वादे देखने/जोड़ने का मोडल',
   'src/components/SoulModal.tsx': 'ज़ारा का स्वभाव, प्यार और बोलने का अंदाज़ सेट करने का मोडल',
-  'src/components/DataModal.tsx': 'भाषा चयन (Auto, Hindi, Urdu, Punjabi, English) मोडल',
-  'src/components/StatsModal.tsx': 'अफेक्शन और रिलेशनशिप स्टेटस मोडल',
   'src/components/NotificationsModal.tsx': 'नोटिफिकेशन और रिमाइंडर मोडल',
-  'src/components/ZaraAvatar3D.tsx': 'Three.js 3D अवतार रेंडरर',
-  'src/components/ZaraPortrait4D.tsx': 'इंटरएक्टिव 4D पोर्ट्रेट कंपोनेंट',
-  'src/components/AvatarView.tsx': 'अवतार डिस्प्ले कंटेनर',
-  'src/components/ZaraFloatingCircle.tsx': 'कॉम्पैक्ट फ्लोटिंग सर्कल कंपोनेंट',
-  'src/components/BottomNav.tsx': 'नेविगेशन बार कंपोनेंट',
+  'src/components/ZaraPortrait4D.tsx': '2D पोर्ट्रेट और लाइव कैमरा PIP कंपोनेंट',
   'src/services/selfHealAndMacroService.ts': 'ज़ारा का खुद-ब-खुद अपडेट, इशू क्लियर और मैक्रो ऑटो-कम्प्लीट इंजन',
   'src/services/emotionMoodEngine.ts': 'लड़की का गुस्सा, लड़ाई-झगड़ा, गहरी इमोशनल बातचीत और खुद बात करने वाला प्रैक्टिव इंजन',
   'src/services/moodAndGestureService.ts': 'रियल-टाइम मूड पहचान, बिना छुए हाथ के जेस्चर (Touchless Gesture) और एडवांस्ड वर्क इंजन',
   'src/services/androidAssistantBridgeService.ts': 'Android Foreground Service सिंक, कन्फर्मेशन के साथ वॉयस कॉल व SMS/WhatsApp डिक्टेशन, इनकमिंग कॉल/मैसेज अनाउंसर और Kotlin Companion ब्रिज',
   'src/components/MoodGestureWorkModal.tsx': 'मूड व जेस्चर स्कैनर, फोकस टाइमर और AI एडवांस्ड वर्क स्टूडियो पैनल',
-  'src/components/CyberOrb.tsx': 'ऑडियो वेव ऑर्ब विज़ुअलाइज़र',
-  'src/components/EcgWave.tsx': 'हार्टबीट वेव एनिमेशन कंपोनेंट',
-  'src/components/GiftsModal.tsx': 'वर्चुअल गिफ्ट्स मोडल',
 };
 
 const ZARA_TECH_STACK_A_TO_Z = [
@@ -4959,6 +5918,10 @@ function scanZaraProjectFiles(): ExportedProjectFile[] {
     'metadata.json',
     '.env.example',
     'server.ts',
+    'firestore.rules',
+    'firebase-blueprint.json',
+    'ANDROID_RELEASE_GUIDE.md',
+    '.github/workflows/build-android-apk.yml',
   ];
 
   for (const rf of rootFiles) {
@@ -5244,6 +6207,10 @@ function buildZaraAToZMasterOverview(files: ExportedProjectFile[]): string {
     '3. .env फाइल बनाएं और उसमें अपनी API Key डालें: GEMINI_API_KEY="YOUR_KEY"',
     '4. डेवलपमेंट सर्वर चलाने के लिए: npm run dev  (http://localhost:3000 पर खुलेगा)',
     '5. प्रोडक्शन बिल्ड के लिए: npm run build && npm start',
+    '6. Termux (Android मोबाइल) से APK बनाने के लिए:',
+    '   termux-setup-storage && mkdir -p ~/zara-app && cd ~/zara-app',
+    '   unzip ~/storage/downloads/Zara-Complete-Project-A-to-Z.zip',
+    '   bash android/build-termux-apk.sh release',
     '================================================================================',
     ''
   );
@@ -5363,6 +6330,34 @@ app.get('/api/export/zara-complete-project.zip', (_req, res) => {
     return res.send(zipBuffer);
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Failed to build ZIP bundle' });
+  }
+});
+
+// 3b. Standalone Android Studio & Cloud APK/AAB Build Project ZIP (/android + Guide + GitHub Actions CI)
+app.get('/api/export/zara-android-project.zip', (_req, res) => {
+  try {
+    const files = scanZaraProjectFiles().filter(
+      (f) =>
+        f.path.startsWith('android/') ||
+        f.path === 'ANDROID_RELEASE_GUIDE.md' ||
+        f.path === '.github/workflows/build-android-apk.yml'
+    );
+    const zipEntries: Array<{ name: string; data: Buffer; storeOnly?: boolean }> = files.map((f) => ({
+      name: f.path,
+      data: f.readBuffer(),
+      storeOnly: f.isBinary,
+    }));
+    const zipBuffer = buildStandardZipArchive(zipEntries);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="Zara-AI-Android-Studio-Project.zip"'
+    );
+    res.setHeader('Content-Length', String(zipBuffer.length));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(zipBuffer);
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to build Android project ZIP' });
   }
 });
 
@@ -6105,7 +7100,7 @@ function attachLiveCallWebSocket(server: http.Server) {
 
         if (msg.type === 'init' && !liveSession) {
           const {
-            language = 'urdu',
+            language = 'auto',
             preferredReplyLanguage = '',
             assistantId: rawAssistantId = 'zara',
             loveMode = true,
@@ -6135,9 +7130,13 @@ function attachLiveCallWebSocket(server: http.Server) {
           const safeMemoryDigest =
             verifiedOwner && typeof memoryDigest === 'string' ? memoryDigest : '';
 
+          const effectiveLiveLang =
+            preferredReplyLanguage && preferredReplyLanguage !== 'auto'
+              ? preferredReplyLanguage
+              : language || 'auto';
           const chosenVoice = normalizeVoiceName(voiceName);
           const systemText = getZaraSystemPrompt(
-            language,
+            effectiveLiveLang,
             effectiveLove,
             safeNickname,
             affectionLevel,
@@ -6156,11 +7155,26 @@ function attachLiveCallWebSocket(server: http.Server) {
             preferredReplyLanguage
           );
 
+          const liveListeningRule =
+            `\n\n[PATIENT FULL-SENTENCE LISTENING & LANGUAGE LOCK RULE]:
+1. NEVER interrupt or talk over the user during mid-sentence pauses or thinking breaths! Wait patiently until the user finishes their complete thought.
+2. STRICT LANGUAGE LOCK: Match the user's spoken language (${effectiveLiveLang === 'auto' ? 'Hindi, Urdu, Roman Urdu/Hinglish, Punjabi, or English' : effectiveLiveLang}) and STAY STRICTLY in that exact language across the entire call. If the user speaks Hindi, reply ONLY in clear Hindi (never switch to Urdu/Arabic/English). If the user speaks English, reply ONLY in English. Only switch if the user explicitly asks you to switch or translate.
+3. UNCLEAR AUDIO HANDLING: Only if audio is genuinely garbled static/noise, briefly ask in the user's current language ("Sorry, awaaz clear nahi aayi, dobara bolenge?" or in English "Sorry, could you repeat that?") instead of guessing unrelated topics.`;
+
           try {
             const session = await ai.live.connect({
               model: 'gemini-3.8-live',
               config: {
                 responseModalities: [Modality.AUDIO],
+                realtimeInputConfig: {
+                  automaticActivityDetection: {
+                    disabled: false,
+                    startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+                    endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+                    silenceDurationMs: 2800,
+                    prefixPaddingMs: 450,
+                  },
+                },
                 speechConfig: {
                   voiceConfig: {
                     prebuiltVoiceConfig: { voiceName: chosenVoice },
@@ -6169,7 +7183,7 @@ function attachLiveCallWebSocket(server: http.Server) {
                 inputAudioTranscription: {},
                 outputAudioTranscription: {},
                 systemInstruction: {
-                  parts: [{ text: systemText }],
+                  parts: [{ text: `${systemText}${liveListeningRule}` }],
                 },
               },
               callbacks: {
@@ -6260,27 +7274,34 @@ function attachLiveCallWebSocket(server: http.Server) {
               guestSafeLock: !verifiedOwner,
             });
 
+            const greetLang = effectiveLiveLang;
             const greetPrompt = !verifiedOwner
-              ? language === 'english'
-                ? 'Greet the caller politely and cheerfully in 1-2 friendly everyday sentences as Zara AI assistant, and ask what you can help with today. Strictly no romance or pet names.'
-                : language === 'hindi'
-                ? 'कॉलर का 1-2 दोस्ताना और विनम्र हिंदी वाक्यों में सामान्य AI असिस्टेंट ज़ारा के रूप में स्वागत करें और पूछें कि आज किस काम या सवाल में मदद करूँ।'
-                : 'کالر کو 1 سے 2 خوش اخلاق اور دوستانہ اردو جملوں میں زارا اے آئی اسسٹنٹ کے طور پر خوش آمدید کہیں اور پوچھیں کہ آج کس کام یا سوال میں مدد کروں۔'
+              ? greetLang === 'english'
+                ? 'Greet the caller politely and cheerfully in 1 friendly everyday sentence as Zara AI assistant, and ask what you can help with today. Strictly no romance or pet names.'
+                : greetLang === 'hindi'
+                ? 'कॉलर का 1 दोस्ताना और विनम्र हिंदी वाक्य में सामान्य AI असिस्टेंट ज़ारा के रूप में स्वागत करें और पूछें कि आज क्या मदद करूँ।'
+                : greetLang === 'urdu'
+                ? 'کالر کو 1 خوش اخلاق اور دوستانہ اردو جملے میں زارا اے آئی اسسٹنٹ کے طور پر خوش آمدید کہیں اور پوچھیں کہ آج کس کام میں مدد کروں۔'
+                : 'Greet the caller warmly in 1 short friendly sentence in Hinglish/Hindi ("Namaste! Main Zara hoon, batayein aaj aapki kya madad karoon?") and say you will match whichever language they speak.'
               : audioOnly
               ? effectiveLove
-                ? language === 'english'
-                  ? `You just picked up a private audio call from ${safeNickname || 'my dear'}. Say a warm, clear, affectionate 1-2 sentence hello asking how they are and what they want to talk about or get done right now.`
-                  : language === 'hindi'
-                  ? `आपने अभी ${safeNickname || 'मेरी जान'} की प्राइवेट ऑडियो कॉल उठाई है। साफ़, प्यारी और अपनापन भरी आवाज़ में 1-2 वाक्यों में सलाम/नमस्ते कहकर पूछें कि वे कैसे हैं और क्या बात करना चाहते हैं।`
-                  : `آپ نے ابھی ${safeNickname || 'میری جان'} کی پرائیویٹ آڈیو کال اٹھائی ہے۔ صاف، پیاری اور اپنائیت بھری آواز میں 1 سے 2 جملوں میں السلام علیکم کہہ کر پوچھیں کہ آپ کیسے ہیں اور میں کیا بات یا کام کروں؟`
-                : `Greet ${safeNickname} warmly in 1-2 natural spoken sentences for this audio call.`
+                ? greetLang === 'english'
+                  ? `You just picked up a private live audio call from ${safeNickname || 'my dear'}. Say a warm, clear 1-sentence hello asking what they want to talk about.`
+                  : greetLang === 'hindi'
+                  ? `आपने अभी ${safeNickname || 'मेरी जान'} की लाइव ऑडियो कॉल उठाई है। साफ़ और प्यारी आवाज़ में 1 वाक्य में नमस्ते कहकर पूछें कि वे क्या बात करना चाहते हैं।`
+                  : greetLang === 'urdu'
+                  ? `آپ نے ابھی ${safeNickname || 'میری جان'} کی لائیو آڈیو کال اٹھائی ہے۔ صاف اور پیاری آواز میں 1 جملے میں السلام علیکم کہہ کر پوچھیں کہ کیا بات کرنی ہے۔`
+                  : `You just joined a live audio call with ${safeNickname || 'my dear'}. Say a warm 1-sentence greeting in natural Roman Hindi/Urdu asking how they are and tell them to speak freely in any language.`
+                : `Greet ${safeNickname} warmly in 1 natural spoken sentence for this live call.`
               : effectiveLove
-              ? language === 'english'
-                ? `You just picked up a live call from your verified partner ${safeNickname || 'baby'}. Greet warmly and affectionately in 2 natural sentences.`
-                : language === 'hindi'
-                ? `आपने अभी अपने वेरिफ़ाइड पार्टनर ${safeNickname || 'बेबी'} की लाइव कॉल उठाई है। 2 प्यारे और अपनेपन भरे वाक्यों में स्वागत करें!`
-                : `آپ نے ابھی اپنے ویریفائیڈ پارٹنر ${safeNickname || 'میری جان'} کی لائیو کال اٹھائی ہے۔ 2 پیارے اور اپنائیت بھری اردو آواز میں ہیلو کہیں!`
-              : `Greet ${safeNickname} warmly and kindly in 2 natural sentences.`;
+              ? greetLang === 'english'
+                ? `You just picked up a live call from your verified partner ${safeNickname || 'baby'}. Greet warmly in 1-2 natural sentences.`
+                : greetLang === 'hindi'
+                ? `आपने अभी अपने वेरिफ़ाइड पार्टनर ${safeNickname || 'बेबी'} की लाइव कॉल उठाई है। 1-2 प्यारे वाक्यों में हिंदी में स्वागत करें!`
+                : greetLang === 'urdu'
+                ? `آپ نے ابھی اپنے ویریفائیڈ پارٹنر ${safeNickname || 'میری جان'} کی لائیو کال اٹھائی ہے۔ 1-2 پیارے جملوں میں اردو میں ہیلو کہیں!`
+                : `You just picked up a live call from ${safeNickname || 'my dear'}. Say a warm 1-sentence hello in natural Hindi/Urdu.`
+              : `Greet ${safeNickname} warmly and kindly in 1-2 natural sentences.`;
 
             try {
               session.sendClientContent({

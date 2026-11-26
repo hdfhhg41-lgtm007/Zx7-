@@ -7,6 +7,10 @@ import {
   StudioTaskActivity,
 } from '../types';
 import { format24To12Hour, getMobileClockSnapshot } from './scheduleAndMemoryService';
+import {
+  MISS_ZS_AI_KNOWLEDGE_SUMMARY,
+  MISS_ZS_FULL_CHAT_NOTE_TEXT,
+} from '../data/missZsBlueprintNotes';
 
 // ======================== NETWORK ONLINE / OFFLINE MONITOR ========================
 
@@ -223,7 +227,7 @@ export function buildStudioTaskForCommand(
 export interface ZaraInternalUiAction {
   kind: 'open_settings_tab' | 'open_chat' | 'open_ai_studio' | 'open_mobile_hub' | 'open_pwa_install';
   tabId?: SettingsTabId;
-  studioTab?: 'office' | 'pctools' | 'security' | 'messages' | 'photo' | 'video';
+  studioTab?: 'brains' | 'social' | 'devlab' | 'office' | 'pctools' | 'security' | 'messages' | 'photo' | 'video';
   label: string;
   spokenUrduHindi: string;
 }
@@ -244,14 +248,15 @@ export function detectZaraInternalUiCommand(text: string): ZaraInternalUiAction 
     return null;
   }
 
-  // Do NOT intercept third-party app settings like "WhatsApp ki setting kholo"
+  // Do NOT intercept third-party app settings like "WhatsApp ki setting kholo" unless specifically Social Hub
   if (
-    /\b(whatsapp|youtube|instagram|facebook|tiktok|snapchat|telegram|chrome|gmail|maps|play\s*store|spotify|netflix)\b/i.test(
+    (/\b(whatsapp|youtube|instagram|facebook|tiktok|snapchat|telegram|chrome|gmail|maps|play\s*store|spotify|netflix)\b/i.test(
       lower
     ) ||
-    /(واٹس\s*ایپ|یوٹیوب|انسٹاگرام|فیس\s*بک|ٹک\s*ٹاک|کروم|व्हाट्सएप|यूट्यूब|इंस्टाग्राम|फेसबुक|क्रोम)/i.test(
-      lower
-    )
+      /(واٹس\s*ایپ|یوٹیوب|انسٹاگرام|فیس\s*بک|ٹک\s*ٹاک|کروم|व्हाट्सएप|यूट्यूब|इंस्टाग्राम|फेसबुक|क्रोम)/i.test(
+        lower
+      )) &&
+    !/\bsocial\s*hub\b/i.test(lower)
   ) {
     return null;
   }
@@ -263,23 +268,32 @@ export function detectZaraInternalUiCommand(text: string): ZaraInternalUiAction 
 
   if (!hasOpenCue) return null;
 
-  // 1. Professional AI Studio (Office Work, PC & Dev Tools, Security Lab, Media)
+  // 1. Professional AI Studio (App Builder, API Vault, Social Hub, Office Work, Security Lab)
   if (
-    /\b(office\s*(work|tool|studio)|pc\s*tool|dev\s*tool|security\s*lab|cyber\s*tool|hacking\s*tool|ai\s*studio)\b/i.test(
+    /\b(app\s*builder|coding\s*(studio|lab)|api\s*(creator|vault|keys?)|build\s*pipeline|social\s*(hub|media\s*manager)|office\s*(work|tool|studio)|pc\s*tool|dev\s*tool|security\s*lab|cyber\s*tool|hacking\s*tool|ai\s*studio|ai\s*tools)\b/i.test(
       lower
     ) ||
-    /(آفس\s*ورک|سیکیورٹی\s*لیب|ऑफिस\s*वर्क|सिक्योरिटी\s*लैब|पीसी\s*टूल)/i.test(lower)
+    /(ایپ\s*بلڈر|کوڈنگ\s*اسٹوڈیو|سوشل\s*ہب|آفس\s*ورک|سیکیورٹی\s*لیب|ऑफिस\s*वर्क|सिक्योरिटी\s*लैब|पीसी\s*टूल|ऐप\s*बिल्डर)/i.test(
+      lower
+    )
   ) {
-    const studioTab = /security|cyber|hack|dns|header|سیکیورٹی|सिक्योरिटी/i.test(lower)
-      ? 'security'
-      : /pc|code|regex|json|hash|dev|पीसी/i.test(lower)
-      ? 'pctools'
-      : 'office';
+    const studioTab: ZaraInternalUiAction['studioTab'] =
+      /app\s*builder|coding|api\s*creator|build\s*pipeline|api\s*(vault|keys?)|ایپ\s*بلڈر|کوڈنگ/i.test(lower)
+        ? 'devlab'
+        : /social\s*(hub|media)|سوشل\s*ہب/i.test(lower)
+        ? 'social'
+        : /ai\s*tools|brains/i.test(lower)
+        ? 'brains'
+        : /security|cyber|hack|dns|header|سیکیورٹی|सिक्योरिटी/i.test(lower)
+        ? 'security'
+        : /pc|code|regex|json|hash|dev|पीसी/i.test(lower)
+        ? 'pctools'
+        : 'office';
     return {
       kind: 'open_ai_studio',
       studioTab,
-      label: 'Professional AI Studio',
-      spokenUrduHindi: 'जी! मैंने आपके लिए प्रोफेशनल एआई स्टूडियो खोल दिया है!',
+      label: `Zara AI Studio → ${studioTab}`,
+      spokenUrduHindi: 'जी! मैंने आपके लिए ज़ारा प्रोफेशनल एआई स्टूडियो खोल दिया है!',
     };
   }
 
@@ -444,7 +458,7 @@ You have 100% live self-awareness of your own app ("Zara Live Studio v9.5 Produc
    - Lock-Screen & Screen-Off Voice Engine Fixed: Hybrid AudioWorklet + Zero-Touch MediaRecorder + MediaSession background audio bridge so Zara hears commands even when the phone screen is locked/off (once Mic permission & Chrome background battery unrestricted mode are allowed).
    - Auto-Open Settings & Mobile Control: Voice/text commands now automatically open Zara's own 9 Settings tabs ("Zara apni setting kholo", "romance setting kholo"), ANY specific app's Android system settings ("WhatsApp ki setting kholo", "YouTube ki permission kholo" via APPLICATION_DETAILS_SETTINGS), all Android system settings (Wi-Fi, Bluetooth, Hotspot, Mobile Data, Display, Sound, Battery, Storage, Location, Accessibility, Security), and Hardware LED Flashlight.
    - Hybrid Online + Offline Brain (PWA v9): Works with internet (Gemini Cloud AI) AND without internet (Offline Local Brain + Service Worker v9 asset cache).
-   - Cryptographic Guest-Safe Lock vs. Owner Verified Mode: Only verified Owner ("Malaysia wala badshah" via Google Sign-In) unlocks affectionate Pakistani girlfriend mode (pyar + sweet playful couple nok-jhok) and 100+ days private cloud vault; all other public users automatically get safe, polite, normal everyday assistant mode.
+   - Cryptographic Guest-Safe Lock vs. ZX Mode: Only verified ZX account ("Malaysia wala badshah" via Google Sign-In) unlocks affectionate Pakistani girlfriend mode (pyar + sweet playful couple nok-jhok) and 100+ days private cloud vault; all other public users automatically get safe, polite, normal everyday assistant mode.
 
 2. ALL 9 TABS INSIDE ZARA'S SETTINGS (Top-Right "Settings" Button):
    - Tab 1 "Controls": Master Mic Open/Off, Screen-Off Keep-Alive, Ambient Camera/Screen Vision, Hardware Flashlight, Chat Drawer, Floating PiP Window, Install PWA, Self-Heal Auto-Update.
@@ -469,6 +483,8 @@ You have 100% live self-awareness of your own app ("Zara Live Studio v9.5 Produc
    - Play Store Native Wrapper (.aab) with \`ZaraAndroidBridge\` Accessibility Service for zero-tap UI automation inside WhatsApp/Settings.
    - Custom Offline Wake-Word Engine ("Hey Zara") inside native foreground service for 0% battery drain over 24 hours.
    - Public User Onboarding, Privacy Policy & Play Billing Pro Subscription page for public monetization.
+
+${MISS_ZS_AI_KNOWLEDGE_SUMMARY}
 `;
 
 export function detectZaraSelfUpdateOrSettingsQuestion(
@@ -532,6 +548,18 @@ export async function runOfflineZaraBrain(
   const selfInfo = detectZaraSelfUpdateOrSettingsQuestion(raw);
   if (selfInfo) {
     return { replyText: selfInfo.replyText };
+  }
+
+  // 1b. Noted MISS ZS Blueprint / Design System / Game Details recall offline
+  if (
+    /\b(miss\s*zs|design\s*system|blueprint|game\s*detail|birthday\s*cake|flower\s*shop|spatial\s*3d|gimbal)\b/i.test(
+      lower
+    ) ||
+    /(مس\s*زیڈ\s*ایس|گیم\s*ڈیٹیل|मिस\s*ज़ेडएस|गेम\s*डिटेल|डिज़ाइन\s*सिस्टम|ब्लूप्रिंट)/i.test(lower)
+  ) {
+    return {
+      replyText: MISS_ZS_FULL_CHAT_NOTE_TEXT,
+    };
   }
 
   // 2. Live Time & Date offline

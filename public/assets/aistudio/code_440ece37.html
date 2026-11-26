@@ -1,0 +1,314 @@
+<!DOCTYPE html><html lang="en" class="dark"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MISS ZS - WhatsApp and Messages</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#9333EA',
+        'on-primary': '#FFFFFF',
+        'primary-container': '#3B0764',
+        'on-primary-container': '#E9D5FF',
+        'accent': '#A855F7',
+        'secondary': '#8B5CF6',
+        'on-secondary': '#0F0F0F',
+        'tertiary': '#C084FC',
+        'on-tertiary': '#1E0B36',
+        'surface': '#0B0813',
+        'on-surface': '#F3E8FF',
+        'surface-variant': '#161129',
+        'on-surface-variant': '#D8B4FE',
+        'surface-container': '#1E1735',
+        'surface-container-high': '#281F45',
+        'outline': '#4C1D95',
+        'outline-variant': '#2E1065',
+        'success': '#10B981',
+        'on-success': '#393939',
+        'warning': '#F59E0B',
+        'on-warning': '#000000',
+        'error': '#EF4444',
+        'on-error': '#1C1C1C',
+        'battery-green': '#22C55E',
+        'battery-charging': '#38BDF8',
+        'urdu-badge': '#EC4899',
+        'light-primary': '#6B21A8',
+        'light-on-primary': '#FFFFFF',
+        'light-surface': '#FAF5FF',
+        'light-on-surface': '#1E1735',
+        'dark-primary': '#C084FC',
+        'dark-on-primary': '#3B0764',
+        'dark-surface': '#0B0813',
+        'dark-on-surface': '#F3E8FF',
+      },
+      borderRadius: {
+        'sm': '6px',
+        'DEFAULT': '12px',
+        'md': '16px',
+        'lg': '20px',
+        'xl': '28px',
+        'full': '9999px',
+      },
+      spacing: {
+        'gutter-xs': '4px',
+        'gutter-sm': '8px',
+        'gutter-md': '12px',
+        'gutter-lg': '16px',
+        'gutter-xl': '24px',
+        'section': '32px',
+        'page-margin': '16px',
+      },
+      fontFamily: {
+        'display': ['"Archivo"', 'sans-serif'],
+        'headline': ['"Archivo"', 'sans-serif'],
+        'title': ['"Commissioner"', 'sans-serif'],
+        'body': ['"Commissioner"', 'sans-serif'],
+        'label': ['"Commissioner"', 'sans-serif'],
+        'code': ['"Source Code Pro"', 'monospace'],
+      },
+      fontSize: {
+        'display-lg': ['40px', { lineHeight: '48px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'display-lg-mobile': ['30px', { lineHeight: '38px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg': ['34px', { lineHeight: '42px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg-mobile': ['26px', { lineHeight: '34px', letterSpacing: '0px', fontWeight: '700' }],
+        'headline-md': ['22px', { lineHeight: '28px', fontWeight: '600' }],
+        'headline-sm': ['18px', { lineHeight: '24px', fontWeight: '600' }],
+        'title-lg': ['20px', { lineHeight: '26px', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '22px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+        'body-sm': ['12px', { lineHeight: '16px', fontWeight: '400' }],
+        'label-lg': ['14px', { lineHeight: '20px', letterSpacing: '0.1px', fontWeight: '500' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.2px', fontWeight: '500' }],
+        'label-sm': ['11px', { lineHeight: '14px', letterSpacing: '0.3px', fontWeight: '600' }],
+        'code-sm': ['12px', { lineHeight: '16px', fontWeight: '500' }],
+      },
+      transitionDuration: {
+        'state-change': '150ms',
+        'surface-enter': '250ms',
+        'surface-exit': '180ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'surface-enter': '0ms',
+        'surface-exit': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'ease-out',
+        'surface-enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'surface-exit': 'cubic-bezier(0.3, 0, 1, 1)',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&amp;family=Commissioner:wght@400;500;600&amp;family=Source+Code+Pro:wght@500&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>
+    .material-symbols-outlined { display: inline-block; width: 1em; height: 1em; line-height: 1 !important; box-sizing: content-box; overflow: hidden; white-space: nowrap; direction: ltr; vertical-align: middle; }
+  </style>
+</head>
+<body class="bg-surface text-on-surface min-h-[884px] flex flex-col font-body antialiased relative pb-24" data-stitch-vh="min-h-[884px]===min-h-screen">
+
+  <!-- Android System Status Bar -->
+  <div class="px-6 pt-3 pb-2 flex items-center justify-between text-body-sm font-code text-on-surface-variant z-30">
+    <span>10:50 AM</span>
+    <div class="flex items-center gap-2">
+      <span class="flex items-center gap-1 text-battery-green">
+        <span class="material-symbols-outlined text-[14px]">battery_5_bar</span>
+        <span class="text-on-surface font-semibold">91%</span>
+      </span>
+      <span class="material-symbols-outlined text-[16px]">wifi</span>
+      <span class="material-symbols-outlined text-[16px]">signal_cellular_4_bar</span>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="px-4 py-3 bg-surface-variant/90 border-b border-outline/30 sticky top-0 z-20 backdrop-blur-md">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../main-home/MainHome.html" class="p-1 rounded-full text-on-surface-variant hover:text-white">
+          <span class="material-symbols-outlined text-[24px]">arrow_back</span>
+        </a>
+        <div>
+          <h1 class="font-headline text-headline-sm font-bold text-on-surface">WhatsApp &amp; Messages</h1>
+          <p class="text-body-sm text-emerald-400">Communication Assistant</p>
+        </div>
+      </div>
+      <div class="p-2 rounded-lg bg-emerald-950/70 border border-emerald-700/50 text-emerald-400">
+        <span class="material-symbols-outlined text-[20px]">chat</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 px-4 py-4 flex flex-col gap-4">
+
+    <!-- Privacy Banner: Owner Confirmation Required -->
+    <div class="bg-surface-container border border-outline/50 rounded-xl p-3.5 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-emerald-950 text-emerald-400 flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-[20px]">verified</span>
+        </div>
+        <div>
+          <span class="font-title text-label-md font-semibold text-on-surface">WhatsApp Accessibility Protocol</span>
+          <p class="text-[12px] text-on-surface-variant">Messages are only dispatched with your explicit voice or tap consent.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Voice Draft in Progress (Feature 8 & 9) -->
+    <section class="bg-surface-container rounded-xl p-4 border border-emerald-500/40 shadow-lg">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+          <h2 class="font-headline text-title-md font-bold text-on-surface">Voice Message Draft</h2>
+        </div>
+        <span class="px-2 py-0.5 rounded-full bg-primary-container text-tertiary text-[10px] font-label font-bold">Speech-to-Text</span>
+      </div>
+
+      <div class="p-3 rounded-lg bg-surface-variant border border-outline-variant">
+        <div class="flex items-center justify-between text-[11px] text-on-surface-variant mb-1">
+          <span>Recipient: <strong>Ayesha Malik (Family)</strong></span>
+          <span class="text-emerald-400 font-mono">+92 321 9876543</span>
+        </div>
+        <p class="font-body text-body-md text-on-surface mt-2 bg-surface-container/60 p-2.5 rounded-md border border-outline-variant">
+          &#34;Assalam-o-Alaikum Baji, main ghar wapsi par fruit le kar aaonga. Khana garam rakhna.&#34;
+        </p>
+        <div class="flex items-center justify-between mt-2 pt-2 border-t border-outline-variant/60 text-[11px]">
+          <span class="text-on-surface-variant">Detected: Urdu Roman &amp; Audio attached</span>
+          <button class="text-accent flex items-center gap-1 font-semibold">
+            <span class="material-symbols-outlined text-[14px]">play_circle</span> Preview Voice (MISS ZS)
+          </button>
+        </div>
+      </div>
+
+      <!-- Action Confirmation Buttons -->
+      <div class="grid grid-cols-2 gap-2 mt-3">
+        <button class="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-title text-label-md font-semibold flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-95">
+          <span class="material-symbols-outlined text-[18px]">send</span>
+          <span>Confirm &amp; Send</span>
+        </button>
+        <button class="py-2.5 rounded-xl bg-surface-variant hover:bg-surface-container-high border border-outline text-on-surface-variant hover:text-white font-title text-label-md font-medium flex items-center justify-center gap-1.5 transition-all">
+          <span class="material-symbols-outlined text-[18px]">edit</span>
+          <span>Edit Draft</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Recent WhatsApp Inbound Messages Read-Aloud Queue (Feature 13) -->
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-headline text-title-md font-semibold text-on-surface flex items-center gap-2">
+          <span class="material-symbols-outlined text-secondary text-[18px]">mark_chat_unread</span>
+          <span>Unread Inbound Messages (4)</span>
+        </h3>
+        <button class="text-tertiary text-label-sm font-semibold hover:underline flex items-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">volume_up</span> Read All
+        </button>
+      </div>
+
+      <div class="flex flex-col gap-2.5">
+        <!-- Message 1 -->
+        <div class="bg-surface-container rounded-xl p-3.5 border border-outline-variant flex flex-col gap-2">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-emerald-950 text-emerald-300 font-bold flex items-center justify-center text-[12px] border border-emerald-800">
+                ZK
+              </div>
+              <div>
+                <h4 class="font-title text-label-md font-semibold text-on-surface">Zainab Khan</h4>
+                <span class="text-[10px] text-on-surface-variant">WhatsApp • 8 mins ago</span>
+              </div>
+            </div>
+            <span class="w-2.5 h-2.5 rounded-full bg-accent"></span>
+          </div>
+          <p class="text-body-sm text-on-surface-variant pl-11">
+            &#34;Miss ZS ko bolna kal ke presentation slides ready hain, email check kar len.&#34;
+          </p>
+          <div class="flex items-center gap-3 pl-11 pt-1 border-t border-outline-variant/40">
+            <button class="text-[11px] text-accent font-semibold flex items-center gap-1 hover:underline">
+              <span class="material-symbols-outlined text-[14px]">volume_up</span> Speak
+            </button>
+            <button class="text-[11px] text-tertiary font-semibold flex items-center gap-1 hover:underline">
+              <span class="material-symbols-outlined text-[14px]">mic</span> Voice Reply
+            </button>
+          </div>
+        </div>
+
+        <!-- Message 2 -->
+        <div class="bg-surface-container rounded-xl p-3.5 border border-outline-variant flex flex-col gap-2">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-full bg-purple-950 text-tertiary font-bold flex items-center justify-center text-[12px] border border-outline">
+                TR
+              </div>
+              <div>
+                <h4 class="font-title text-label-md font-semibold text-on-surface">Tariq Rasheed</h4>
+                <span class="text-[10px] text-on-surface-variant">WhatsApp Business • 24 mins ago</span>
+              </div>
+            </div>
+            <span class="w-2.5 h-2.5 rounded-full bg-accent"></span>
+          </div>
+          <p class="text-body-sm text-on-surface-variant pl-11">
+            &#34;Your shipment parcel #9822 has arrived at Islamabad hub for delivery.&#34;
+          </p>
+          <div class="flex items-center gap-3 pl-11 pt-1 border-t border-outline-variant/40">
+            <button class="text-[11px] text-accent font-semibold flex items-center gap-1 hover:underline">
+              <span class="material-symbols-outlined text-[14px]">volume_up</span> Speak
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Communication Assistant Voice Commands -->
+    <section class="bg-surface-variant rounded-xl p-3.5 border border-outline-variant">
+      <span class="text-label-sm font-semibold text-tertiary block mb-1">Try Spoken Commands:</span>
+      <p class="text-body-sm text-on-surface-variant italic">
+        &#34;Miss ZS, send a WhatsApp message to Tariq saying I received the tracking info.&#34;
+      </p>
+    </section>
+
+  </main>
+
+  <!-- Bottom Android Navigation Bar -->
+  <nav class="fixed bottom-0 left-0 right-0 max-w-[390px] mx-auto bg-surface-variant/95 border-t border-outline/40 backdrop-blur-lg px-4 py-2 flex items-center justify-around z-30">
+    <a href="../main-home/MainHome.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">home</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Home</span>
+    </a>
+
+    <a href="../ai-conversation/AIConversation.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">chat</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Chat</span>
+    </a>
+
+    <a href="../voice-control/VoiceControl.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <div class="w-10 h-10 -mt-5 rounded-full bg-primary flex items-center justify-center text-white shadow-lg border border-accent">
+        <span class="material-symbols-outlined text-[22px]">mic</span>
+      </div>
+      <span class="text-[10px] font-label font-medium mt-0.5">Voice</span>
+    </a>
+
+    <a href="../six-assistants/SixAssistantsDashboard.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">group_work</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Assistants</span>
+    </a>
+
+    <a href="../settings-security/SettingsSecurity.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">settings</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Settings</span>
+    </a>
+  </nav>
+
+  <div class="fixed bottom-1 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/20 rounded-full z-40 pointer-events-none"></div>
+
+
+
+</body></html>

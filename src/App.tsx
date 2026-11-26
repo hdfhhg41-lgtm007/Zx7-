@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   ExternalLink,
   ShieldCheck,
@@ -25,15 +25,7 @@ const MemoriesModal = lazy(() =>
 const SoulModal = lazy(() =>
   import('./components/SoulModal').then((m) => ({ default: m.SoulModal }))
 );
-const DataModal = lazy(() =>
-  import('./components/DataModal').then((m) => ({ default: m.DataModal }))
-);
-const StatsModal = lazy(() =>
-  import('./components/StatsModal').then((m) => ({ default: m.StatsModal }))
-);
-const SettingsModal = lazy(() =>
-  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
-);
+import { SettingsModal } from './components/SettingsModal';
 const NotificationsModal = lazy(() =>
   import('./components/NotificationsModal').then((m) => ({ default: m.NotificationsModal }))
 );
@@ -73,6 +65,52 @@ const FileManagerModal = lazy(() =>
 );
 import type { AiStudioTab } from './components/AdvancedAiStudioModal';
 import { ZaraSciFi3DHudDashboard } from './components/hud3d/ZaraSciFi3DHudDashboard';
+
+class ModalErrorBoundary extends React.Component<
+  { children: React.ReactNode; onReset?: () => void },
+  { hasError: boolean; errorMsg: string }
+> {
+  constructor(props: { children: React.ReactNode; onReset?: () => void }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: '' };
+  }
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      hasError: true,
+      errorMsg: error instanceof Error ? error.message : 'Unable to render dialog.',
+    };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-3xl bg-slate-950 border border-rose-500/50 p-5 text-white space-y-3 shadow-2xl">
+            <h2 className="text-sm font-extrabold text-rose-300">Settings Recovery</h2>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              A saved browser setting caused a display glitch ({this.state.errorMsg}). Resetting
+              saved state restores all settings safely.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  this.setState({ hasError: false, errorMsg: '' });
+                  this.props.onReset?.();
+                }}
+                className="flex-1 min-h-[38px] px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-xs font-bold text-white cursor-pointer"
+              >
+                Recover Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import {
   PcAllowedAction,
   detectPcVoiceCommand,
@@ -80,6 +118,10 @@ import {
 } from './services/computerControlService';
 
 import { audioService } from './services/audioService';
+import {
+  DEFAULT_ZARA_HOME_PORTRAIT_ID,
+  isBuiltin2DPortraitId,
+} from './data/zaraPortraits';
 import { DirectMicSession } from './services/voiceCaptureService';
 import {
   AlwaysOnVoiceListener,
@@ -91,8 +133,12 @@ import {
   closeMobileAppNow,
   detectCameraFrontBackCommand,
   detectMobileCommandFromText,
+  detectMusicControlCommand,
+  executeMusicControlCommand,
   launchMobileAppNow,
   queryMobilePermissions,
+  readMobileHardwareTelemetry,
+  buildSurroundingsPerceptionBrief,
   requestAllPermissionsMaster,
   zaraVision,
 } from './services/visionAndControlService';
@@ -113,25 +159,40 @@ import {
   saveWorkTasks,
 } from './services/moodAndGestureService';
 import {
+  AzanAlertEventKey,
   autoExtractMemoryFromTurn,
+  buildAzanVoicePrompt,
+  buildEnvironmentContextSummary,
   buildMemoryAndScheduleDigest,
+  computeDailyPrayerTimes,
   detectExplicitRememberCommand,
   detectScheduleCommandFromText,
   format24To12Hour,
   formatZaraProfileShareText,
   getMobileClockSnapshot,
+  loadAzanRamadanConfig,
   loadDeviceMemories,
   loadLongTermMemories,
   loadLongTermMessages,
   loadSavedSchedules,
+  mergeMissZsSeedMemoriesOnce,
+  saveAzanRamadanConfig,
   saveDeviceMemories,
   saveLongTermMemories,
   saveLongTermMessages,
   saveSchedules,
 } from './services/scheduleAndMemoryService';
 import {
+  createMissZsChatNoteMessage,
+  ensureMissZsNoteInMessages,
+  MISS_ZS_CHAT_NOTE_ID,
+  MISS_ZS_CHAT_SEEDED_KEY,
+  MISS_ZS_OWNER_CHAT_SEEDED_KEY,
+} from './data/missZsBlueprintNotes';
+import {
   buildProactiveCompanionMessage,
-  detectMoodShiftFromInput,
+  detectEmotionForCompanion,
+  detectUserBusyIntent,
 } from './services/emotionMoodEngine';
 import {
   fetchWithContainerWakeup,
@@ -167,9 +228,16 @@ import {
   detectRepeatNotificationCommand,
   detectVoiceConfirmationDecision,
   executeConfirmedCallOrMessage,
+  fetchNativeRecentNotifications,
+  getNativeAndroidAutomationStatus,
+  inputTextViaAccessibility,
   loadIncomingNotifications,
   loadSpokenNotificationConfig,
+  openAndroidSystemPermissionScreen,
+  openAppByNameViaNativeBridge,
   performAndroidAccessibilityAction,
+  readNativeAndroidScreen,
+  requestWhatsAppGroupDigest,
   saveIncomingNotifications,
   saveSpokenNotificationConfig,
   setNativeLowPowerWakeWord,
@@ -196,6 +264,7 @@ import {
   AdvancedWorkTaskItem,
   AiAssistantId,
   AlarmScheduleItem,
+  AzanRamadanConfig,
   BuiltAppItem,
   CameraFacing,
   DetectedHandGesture,
@@ -210,6 +279,7 @@ import {
   SecurityAndControlConfig,
   SettingsTabId,
   SpokenNotificationConfig,
+  SurroundingsSnapshot,
   VisionMode,
   ZaraEmotionMode,
 } from './types';
@@ -222,8 +292,6 @@ export default function App() {
   // Modals & Screen Circle state (All former bottom buttons now live inside Settings -> 'controls'!)
   const [showMemories, setShowMemories] = useState(false);
   const [showSoul, setShowSoul] = useState(false);
-  const [showData, setShowData] = useState(false);
-  const [showStats, setShowStats] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId>('controls');
   const [showNotifications, setShowNotifications] = useState(false);
@@ -240,11 +308,12 @@ export default function App() {
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [autoStartPlayDownload, setAutoStartPlayDownload] = useState(false);
   const [showMobileControl, setShowMobileControl] = useState(false);
-  const [mobileControlTab, setMobileControlTab] = useState<MobileControlTab>('settings');
+  const [mobileControlTab, setMobileControlTab] = useState<MobileControlTab>('permissions');
   const [highlightedSettingId, setHighlightedSettingId] = useState<string | null>(null);
   const [showAiStudio, setShowAiStudio] = useState(false);
   const [aiStudioTab, setAiStudioTab] = useState<AiStudioTab>('office');
   const [showAudioCall, setShowAudioCall] = useState(false);
+  const [audioCallMinimized, setAudioCallMinimized] = useState(false);
   const [showDriverMode, setShowDriverMode] = useState(false);
   const [showFileManager, setShowFileManager] = useState(false);
   const [pendingPcConfirm, setPendingPcConfirm] = useState<{
@@ -266,6 +335,21 @@ export default function App() {
   const [isAlwaysOnRunning, setIsAlwaysOnRunning] = useState(false);
   const [isFloatingPiP, setIsFloatingPiP] = useState(false);
   const [interimVoiceText, setInterimVoiceText] = useState('');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceErrorTimerRef = useRef<number | null>(null);
+
+  const setVoiceErrorNotice = (msg: string | null, autoClearMs = 7500) => {
+    if (voiceErrorTimerRef.current) {
+      window.clearTimeout(voiceErrorTimerRef.current);
+      voiceErrorTimerRef.current = null;
+    }
+    setVoiceError(msg);
+    if (msg && autoClearMs > 0) {
+      voiceErrorTimerRef.current = window.setTimeout(() => {
+        setVoiceError((cur) => (cur === msg ? null : cur));
+      }, autoClearMs);
+    }
+  };
 
   const { isInstalled, isInIframe, playStoreLaunchUrl } = usePWAInstall();
   // Default full-screen viewport immediately on launch ("سامنے پوری اسکرین پہ دکھنا چاہیے زارا ایپ اوپن کرتے ہی")
@@ -318,7 +402,7 @@ export default function App() {
         const saved = localStorage.getItem('zara_saved_language') as Language | null;
         if (
           saved &&
-          ['auto', 'uzbek', 'malay', 'arabic', 'urdu', 'hindi', 'punjabi', 'english'].includes(saved)
+          ['auto', 'roman_urdu', 'uzbek', 'malay', 'arabic', 'urdu', 'hindi', 'punjabi', 'english'].includes(saved)
         ) {
           return saved;
         }
@@ -332,8 +416,16 @@ export default function App() {
     try {
       localStorage.setItem('zara_saved_language', newLang);
     } catch {}
+    try {
+      window.ZaraAndroidBridge?.setAssistantLanguage?.(newLang);
+    } catch {}
+    setConfig((prev) => ({
+      ...prev,
+      preferredReplyLanguage: newLang === 'auto' ? undefined : newLang,
+    }));
     const labels: Record<Language, string> = {
       auto: 'Auto-Match Universal (خودکار)',
+      roman_urdu: 'Roman Urdu (رومن سٹائل)',
       uzbek: "O'zbekcha (Uzbek)",
       malay: 'Bahasa Melayu',
       arabic: 'العربية (Arabic)',
@@ -350,6 +442,28 @@ export default function App() {
   const [isHomeMicActive, setIsHomeMicActive] = useState(false);
   const [isThinkingHome, setIsThinkingHome] = useState(false);
   const [homeMicVol, setHomeMicVol] = useState(0);
+  const lastQuantizedMicVolRef = useRef(0);
+  const lastMicVolEmitMsRef = useRef(0);
+  const updateHomeMicVolQuantized = useCallback((rawVol: number) => {
+    const quantized = rawVol <= 0 ? 0 : Math.min(100, Math.round(rawVol / 5) * 5);
+    const now = performance.now();
+    if (quantized === 0) {
+      if (lastQuantizedMicVolRef.current !== 0) {
+        lastQuantizedMicVolRef.current = 0;
+        lastMicVolEmitMsRef.current = now;
+        setHomeMicVol(0);
+      }
+      return;
+    }
+    if (
+      quantized !== lastQuantizedMicVolRef.current &&
+      now - lastMicVolEmitMsRef.current >= 110
+    ) {
+      lastQuantizedMicVolRef.current = quantized;
+      lastMicVolEmitMsRef.current = now;
+      setHomeMicVol(quantized);
+    }
+  }, []);
   const [homeStatusBanner, setHomeStatusBanner] = useState<string | null>(null);
   const [visionMode, setVisionMode] = useState<VisionMode>('off');
   const [isManualCameraPreview, setIsManualCameraPreview] = useState(false);
@@ -375,9 +489,17 @@ export default function App() {
   const [isBuildingApp, setIsBuildingApp] = useState(false);
   const [activePreviewApp, setActivePreviewApp] = useState<BuiltAppItem | null>(null);
 
-  // Alarms, Work Time Schedules & Ringing Alert State
+  // Alarms, Work Time Schedules, Azan/Sehri/Iftar & Battery Thermal State
   const [schedules, setSchedules] = useState<AlarmScheduleItem[]>(() => loadSavedSchedules());
   const [ringingSchedule, setRingingSchedule] = useState<AlarmScheduleItem | null>(null);
+  const [azanConfig, setAzanConfig] = useState<AzanRamadanConfig>(() => loadAzanRamadanConfig());
+  const [batteryTelemetry, setBatteryTelemetry] = useState<{
+    pct: number | null;
+    tempC: number | null;
+    charging: boolean | null;
+  }>({ pct: null, tempC: null, charging: null });
+  const overheatWarnedAtRef = useRef<number>(0);
+  const lowBatWarnedRef = useRef<boolean>(false);
 
   // Real-Time Mood & Touchless Gesture Recognition + Advanced Work Studio State
   const [showMoodWorkModal, setShowMoodWorkModal] = useState(false);
@@ -392,41 +514,12 @@ export default function App() {
   const homeMicRef = useRef<DirectMicSession | null>(null);
   const alwaysOnRef = useRef<AlwaysOnVoiceListener | null>(null);
   const voiceToggleBusyRef = useRef(false);
+  const voiceAbortControllerRef = useRef<AbortController | null>(null);
+  const voiceTurnTokenRef = useRef(0);
   const homeScreenInputRef = useRef<HTMLInputElement | null>(null);
 
   const [config, setConfig] = useState<PersonalityConfig>(() => {
-    try {
-      const saved =
-        localStorage.getItem(CONFIG_STORAGE_KEY) ||
-        localStorage.getItem('zara_personality_config_v4');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          ...parsed,
-          portraitId: parsed.portraitId || 'ai_broadcast_studio',
-          ambientVisionEnabled: parsed.ambientVisionEnabled ?? true,
-          unfilteredBoldTalk: parsed.unfilteredBoldTalk ?? true,
-          romanceIntensity: parsed.romanceIntensity || 'passionate',
-          emotionMode: parsed.emotionMode || 'apnapan',
-          uiTheme: parsed.uiTheme || 'cyber_cyan',
-          showHudQuickBar: parsed.showHudQuickBar ?? true,
-          heartLockEnabled: parsed.heartLockEnabled ?? false,
-          heartLockUnlocked: parsed.heartLockEnabled ? false : true,
-          voiceGender: parsed.voiceGender || 'female',
-          ownerOnlyRomance: parsed.ownerOnlyRomance ?? true,
-          isOwnerSessionUnlocked: parsed.isOwnerSessionUnlocked ?? true,
-          brainMode: parsed.brainMode || 'auto',
-          sttEngine: parsed.sttEngine || 'hunter_stt_beta',
-          ttsEngine: parsed.ttsEngine || 'hunter_tts_ultra_premium',
-          enabledAiEngines: parsed.enabledAiEngines,
-          activeAssistantId: parsed.activeAssistantId || 'zara',
-          preferredReplyLanguage: parsed.preferredReplyLanguage || undefined,
-          proactiveSelfTalkEnabled: parsed.proactiveSelfTalkEnabled ?? true,
-          autoSelfCheckEnabled: parsed.autoSelfCheckEnabled ?? true,
-        };
-      }
-    } catch {}
-    return {
+    const defaults: PersonalityConfig = {
       loveMode: true,
       affectionLevel: 100,
       obedienceLevel: 100,
@@ -444,49 +537,117 @@ export default function App() {
       voiceGender: 'female',
       voiceName: 'Zephyr',
       avatarOutfit: 'cyber_rose',
-      portraitId: 'ai_broadcast_studio',
+      portraitId: DEFAULT_ZARA_HOME_PORTRAIT_ID,
       ambientVisionEnabled: true,
       userNickname: 'Jaan',
       wakeWordEnabled: true,
       autoSpeak: true,
       proactiveSelfTalkEnabled: true,
+      proactiveIntervalMinutes: 5,
+      proactiveContinueLastTopic: true,
+      proactiveAllowInHandsFree: true,
+      busyQuietMode: false,
+      backgroundCameraAwarenessEnabled: false,
       autoSelfCheckEnabled: true,
       brainMode: 'auto',
       sttEngine: 'hunter_stt_beta',
       ttsEngine: 'hunter_tts_ultra_premium',
       activeAssistantId: 'zara',
     };
+    try {
+      const saved =
+        localStorage.getItem(CONFIG_STORAGE_KEY) ||
+        localStorage.getItem('zara_personality_config_v4');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const speedNum = Number(parsed?.voiceSpeed);
+        const pitchNum = Number(parsed?.voicePitch);
+        const affNum = Number(parsed?.affectionLevel);
+        const obdNum = Number(parsed?.obedienceLevel);
+        return {
+          ...defaults,
+          ...parsed,
+          loveMode: parsed?.loveMode ?? true,
+          affectionLevel: Number.isFinite(affNum) ? affNum : 100,
+          obedienceLevel: Number.isFinite(obdNum) ? obdNum : 100,
+          voiceSpeed:
+            Number.isFinite(speedNum) && speedNum >= 0.5 && speedNum <= 1.5 ? speedNum : 0.98,
+          voicePitch:
+            Number.isFinite(pitchNum) && pitchNum >= 0.5 && pitchNum <= 1.5 ? pitchNum : 1.05,
+          voiceName: parsed?.voiceName || 'Zephyr',
+          avatarOutfit: parsed?.avatarOutfit || 'cyber_rose',
+          portraitId:
+            isBuiltin2DPortraitId(parsed?.portraitId) ||
+            (typeof parsed?.portraitId === 'string' && parsed.portraitId.startsWith('custom_'))
+              ? parsed.portraitId
+              : DEFAULT_ZARA_HOME_PORTRAIT_ID,
+          ambientVisionEnabled: parsed?.ambientVisionEnabled ?? true,
+          unfilteredBoldTalk: parsed?.unfilteredBoldTalk ?? true,
+          romanceIntensity: parsed?.romanceIntensity || 'passionate',
+          emotionMode: parsed?.emotionMode || 'apnapan',
+          uiTheme: parsed?.uiTheme || 'cyber_cyan',
+          showHudQuickBar: parsed?.showHudQuickBar ?? true,
+          heartLockEnabled: parsed?.heartLockEnabled ?? false,
+          heartLockUnlocked: parsed?.heartLockEnabled ? false : true,
+          voiceGender: parsed?.voiceGender || 'female',
+          ownerOnlyRomance: parsed?.ownerOnlyRomance ?? true,
+          isOwnerSessionUnlocked: parsed?.isOwnerSessionUnlocked ?? true,
+          userNickname: parsed?.userNickname || 'Jaan',
+          wakeWordEnabled: parsed?.wakeWordEnabled ?? true,
+          autoSpeak: parsed?.autoSpeak ?? true,
+          brainMode: parsed?.brainMode || 'auto',
+          sttEngine: parsed?.sttEngine || 'hunter_stt_beta',
+          ttsEngine: parsed?.ttsEngine || 'hunter_tts_ultra_premium',
+          enabledAiEngines: parsed?.enabledAiEngines,
+          activeAssistantId: parsed?.activeAssistantId || 'zara',
+          preferredReplyLanguage: parsed?.preferredReplyLanguage || undefined,
+          proactiveSelfTalkEnabled: parsed?.proactiveSelfTalkEnabled ?? true,
+          proactiveIntervalMinutes: parsed?.proactiveIntervalMinutes || 5,
+          proactiveContinueLastTopic: parsed?.proactiveContinueLastTopic ?? true,
+          proactiveAllowInHandsFree: parsed?.proactiveAllowInHandsFree ?? true,
+          busyQuietMode: parsed?.busyQuietMode ?? false,
+          backgroundCameraAwarenessEnabled: parsed?.backgroundCameraAwarenessEnabled ?? false,
+          autoSelfCheckEnabled: parsed?.autoSelfCheckEnabled ?? true,
+        };
+      }
+    } catch {}
+    return defaults;
   });
 
   const [securityConfig, setSecurityConfig] = useState<SecurityAndControlConfig>(() => {
+    const secDefaults: SecurityAndControlConfig = {
+      pinEnabled: false,
+      pinCode: '1234',
+      autoAppLaunch: true,
+      voiceControlEnabled: true,
+      privacyGuard: true,
+      allPermissionsGranted: false,
+      faceLockEnabled: false,
+      biometricLockEnabled: false,
+      antiTheftGpsEnabled: true,
+      customWakeWord: 'hey zara',
+      lowPowerWakeWordEnabled: true,
+      wakeWordOnlyMode: false,
+      autoLockOnIntruder: true,
+      ownerName: 'Malaysia wala badshah',
+    };
     try {
       const saved = localStorage.getItem(SECURITY_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         return {
+          ...secDefaults,
           ...parsed,
-          ownerName: parsed.ownerName || 'Malaysia wala badshah',
-          autoLockOnIntruder: parsed.autoLockOnIntruder ?? true,
-          customWakeWord: parsed.customWakeWord || 'hey zara',
-          lowPowerWakeWordEnabled: parsed.lowPowerWakeWordEnabled ?? true,
+          ownerName: parsed?.ownerName || 'Malaysia wala badshah',
+          autoLockOnIntruder: parsed?.autoLockOnIntruder ?? true,
+          customWakeWord: parsed?.customWakeWord || 'hey zara',
+          lowPowerWakeWordEnabled: parsed?.lowPowerWakeWordEnabled ?? true,
+          wakeWordOnlyMode: parsed?.wakeWordOnlyMode ?? false,
+          voiceControlEnabled: parsed?.voiceControlEnabled ?? true,
         };
       }
     } catch {}
-      return {
-        pinEnabled: false,
-        pinCode: '1234',
-        autoAppLaunch: true,
-        voiceControlEnabled: true,
-        privacyGuard: true,
-        allPermissionsGranted: false,
-        faceLockEnabled: false,
-        biometricLockEnabled: false,
-        antiTheftGpsEnabled: true,
-        customWakeWord: 'hey zara',
-        lowPowerWakeWordEnabled: true,
-        autoLockOnIntruder: true,
-        ownerName: 'Malaysia wala badshah',
-      };
+    return secDefaults;
   });
 
   // Never block launch with automatic Face Scan or PIN Lock (available manually inside Settings)
@@ -535,39 +696,64 @@ export default function App() {
     language: 'urdu',
   });
 
+  const seedMissZsChatOnce = (base: ChatMessage[], flagKey: string): ChatMessage[] => {
+    try {
+      if (localStorage.getItem(flagKey) === '1') {
+        return base;
+      }
+      const { next } = ensureMissZsNoteInMessages(base);
+      localStorage.setItem(flagKey, '1');
+      return next;
+    } catch {
+      return ensureMissZsNoteInMessages(base).next;
+    }
+  };
+
   // 100+ Days Long-Term Persistent Memories & Messages (Firebase Cloud Vault for Owner + Local Device Vault)
-  const [ownerMemories, setOwnerMemories] = useState<MemoryItem[]>(() =>
-    getOwnerAuthSnapshot().isOwnerVerified ? loadLongTermMemories() : []
+  const [ownerMemories, setOwnerMemories] = useState<MemoryItem[]>(() => {
+    const snap = getOwnerAuthSnapshot();
+    if (!snap.isOwnerVerified || !snap.signedInUid) return [];
+    return mergeMissZsSeedMemoriesOnce(loadLongTermMemories(), `owner_${snap.signedInUid}`).next;
+  });
+  const [deviceMemories, setDeviceMemories] = useState<MemoryItem[]>(
+    () => mergeMissZsSeedMemoriesOnce(loadDeviceMemories(), 'guest').next
   );
-  const [deviceMemories, setDeviceMemories] = useState<MemoryItem[]>(() => loadDeviceMemories());
   const [ownerMessages, setOwnerMessages] = useState<ChatMessage[]>(() => {
-    if (!getOwnerAuthSnapshot().isOwnerVerified) {
+    const snap = getOwnerAuthSnapshot();
+    if (!snap.isOwnerVerified || !snap.signedInUid) {
       return [];
     }
     const saved = loadLongTermMessages();
-    if (saved && saved.length > 0) return saved;
-    return [createDefaultOwnerWelcome()];
+    const base = saved && saved.length > 0 ? saved : [createDefaultOwnerWelcome()];
+    return seedMissZsChatOnce(base, `${MISS_ZS_OWNER_CHAT_SEEDED_KEY}_${snap.signedInUid}`);
   });
 
   // Persistent normal chat session for Guests (kept strictly isolated from Owner Vault)
   const [guestMessages, setGuestMessages] = useState<ChatMessage[]>(() => {
+    let base: ChatMessage[] = [createDefaultGuestWelcome()];
     try {
       const raw = localStorage.getItem('zara_guest_chat_session_v1');
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.slice(-60);
+          base = parsed.slice(-60);
         }
       }
     } catch {}
-    return [createDefaultGuestWelcome()];
+    return seedMissZsChatOnce(base, MISS_ZS_CHAT_SEEDED_KEY);
   });
 
   useEffect(() => {
     if (ownerAuth.isOwnerVerified) return;
-    try {
-      localStorage.setItem('zara_guest_chat_session_v1', JSON.stringify(guestMessages.slice(-60)));
-    } catch {}
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          'zara_guest_chat_session_v1',
+          JSON.stringify(guestMessages.slice(-60))
+        );
+      } catch {}
+    }, 250);
+    return () => window.clearTimeout(timer);
   }, [guestMessages, ownerAuth.isOwnerVerified]);
 
   const appendActiveMessages = (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
@@ -582,20 +768,26 @@ export default function App() {
   const memories = ownerAuth.isOwnerVerified ? ownerMemories : deviceMemories;
 
   useEffect(() => {
-    try {
-      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
-    } catch {}
     audioService.setPreferredTtsEngine(config.ttsEngine || 'hunter_tts_ultra_premium');
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+      } catch {}
+    }, 250);
+    return () => window.clearTimeout(timer);
   }, [config]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(SECURITY_STORAGE_KEY, JSON.stringify(securityConfig));
-    } catch {}
     setNativeLowPowerWakeWord(
       securityConfig.lowPowerWakeWordEnabled ?? true,
       securityConfig.customWakeWord || 'hey zara'
     );
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(SECURITY_STORAGE_KEY, JSON.stringify(securityConfig));
+      } catch {}
+    }, 250);
+    return () => window.clearTimeout(timer);
   }, [securityConfig]);
 
   useEffect(() => {
@@ -646,6 +838,89 @@ export default function App() {
   const hasUserInteractedRef = useRef<boolean>(false);
   const proactiveTurnCountRef = useRef<number>(0);
   const lastProactiveSpokenAtRef = useRef<number>(0);
+  const busyUntilRef = useRef<number>(0);
+  const environmentSnapshotRef = useRef<SurroundingsSnapshot | null>(null);
+
+  // Automatic Real-Time Environment Sync (Weather via Open-Meteo + Local Clock/Timezone + Device Sensors)
+  useEffect(() => {
+    let cancelled = false;
+    const syncEnvironmentNow = async () => {
+      try {
+        const tel = await readMobileHardwareTelemetry();
+        const lat = azanConfig.latitude ?? 31.5204;
+        const lon = azanConfig.longitude ?? 74.3587;
+        const cityLabel = azanConfig.cityName || 'Lahore';
+        let tempC: number | null = environmentSnapshotRef.current?.tempC ?? null;
+        let weatherCondition = environmentSnapshotRef.current?.weatherCondition || 'Clear';
+        let humidity: number | undefined = environmentSnapshotRef.current?.humidity;
+
+        if (isAppOnline()) {
+          try {
+            const wRes = await fetch(
+              `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code`
+            );
+            if (wRes.ok) {
+              const wd = await wRes.json();
+              if (wd?.current?.temperature_2m !== undefined) {
+                tempC = Math.round(Number(wd.current.temperature_2m));
+              }
+              if (wd?.current?.relative_humidity_2m !== undefined) {
+                humidity = Math.round(Number(wd.current.relative_humidity_2m));
+              }
+              const code = Number(wd?.current?.weather_code ?? 0);
+              weatherCondition =
+                code === 0
+                  ? 'Clear'
+                  : code <= 3
+                  ? 'Partly Cloudy'
+                  : code <= 48
+                  ? 'Misty'
+                  : code >= 80 || (code >= 51 && code <= 67)
+                  ? 'Rainy'
+                  : 'Mild';
+            }
+          } catch {}
+        }
+        if (cancelled) return;
+        const now = new Date();
+        let timezone = 'Local';
+        try {
+          timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local';
+        } catch {}
+        environmentSnapshotRef.current = {
+          locationLabel: cityLabel,
+          tempC,
+          weatherCondition,
+          humidity,
+          batteryPct: tel.batteryLevel,
+          batteryTempC: tel.batteryTempC,
+          isCharging: tel.isCharging,
+          networkType: tel.networkType,
+          online: tel.online,
+          localTimeStr: now.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          }),
+          localDateStr: now.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          timezone,
+          capturedAtIso: now.toISOString(),
+        };
+      } catch {}
+    };
+
+    syncEnvironmentNow();
+    const timer = window.setInterval(syncEnvironmentNow, 12 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [azanConfig.latitude, azanConfig.longitude, azanConfig.cityName]);
 
   // Track user gestures so proactive voice only speaks once browser audio autoplay is unlocked
   useEffect(() => {
@@ -711,24 +986,30 @@ export default function App() {
     };
   }, [config.autoSelfCheckEnabled]);
 
-  // Proactive Companion Self-Talking & Emotional Check-In Loop ("खुद-ब-खुद बात करे, गुस्सा/इमोशनल व यादें साझा करे")
+  // Proactive Companion Self-Talking & Contextual Check-In Loop (Remembers last topic, respects busy mode & live speech!)
   useEffect(() => {
-    if (config.proactiveSelfTalkEnabled === false) return;
+    if (config.proactiveSelfTalkEnabled === false || config.busyQuietMode) return;
+    const minIntervalMs = Math.max(90_000, (config.proactiveIntervalMinutes || 5) * 60_000);
+
     const interval = window.setInterval(async () => {
       const now = Date.now();
-      if (
-        typeof document !== 'undefined' &&
-        document.visibilityState !== 'visible'
-      ) {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
       }
+      if (alwaysOnVoiceEnabled && config.proactiveAllowInHandsFree === false) {
+        return;
+      }
+      // NEVER interrupt while user is actively speaking or typing, or while waiting in busy mode!
       if (
+        isHomeMicActive ||
+        alwaysOnRef.current?.isUserCurrentlySpeaking() ||
         isThinkingHome ||
         showAudioCall ||
         showSettings ||
         audioService.getIsSpeaking() ||
-        now - lastUserActivityAtRef.current < 85_000 ||
-        now - lastProactiveSpokenAtRef.current < 110_000
+        now < busyUntilRef.current ||
+        now - lastUserActivityAtRef.current < Math.min(minIntervalMs, 110_000) ||
+        now - lastProactiveSpokenAtRef.current < minIntervalMs
       ) {
         return;
       }
@@ -738,19 +1019,32 @@ export default function App() {
       const allowLove = Boolean(config.loveMode && !heartLocked);
       const nextIdx = proactiveTurnCountRef.current;
       proactiveTurnCountRef.current += 1;
+      const activeThread = verified ? ownerMessages : guestMessages;
+      const activeVault = !heartLocked ? (verified ? ownerMemories : deviceMemories) : [];
 
       const proactive = buildProactiveCompanionMessage({
         isOwnerVerified: verified,
         loveMode: allowLove,
         emotionMode: config.emotionMode || 'apnapan',
-        nickname: config.userNickname || 'Jaan',
-        memories: !heartLocked ? (verified ? ownerMemories : deviceMemories) : [],
+        nickname: config.userNickname || 'Friend',
+        memories: activeVault,
         turnIndex: nextIdx,
+        language,
+        recentMessages: activeThread,
+        environment: environmentSnapshotRef.current,
+        continueLastTopic: config.proactiveContinueLastTopic !== false,
       });
 
       lastProactiveSpokenAtRef.current = now;
-      if (allowLove && proactive.suggestedEmotion && proactive.suggestedEmotion !== config.emotionMode) {
-        setConfig((prev) => ({ ...prev, emotionMode: proactive.suggestedEmotion }));
+      if (proactive.suggestedEmotion && proactive.suggestedEmotion !== config.emotionMode) {
+        const nextEmo = allowLove
+          ? proactive.suggestedEmotion
+          : proactive.suggestedEmotion === 'pyar' ||
+            proactive.suggestedEmotion === 'gussa' ||
+            proactive.suggestedEmotion === 'ladai'
+          ? 'apnapan'
+          : proactive.suggestedEmotion;
+        setConfig((prev) => ({ ...prev, emotionMode: nextEmo }));
       }
 
       const clock = getMobileClockSnapshot();
@@ -778,14 +1072,18 @@ export default function App() {
           voiceName: config.voiceName || 'Zephyr',
           loveMode: allowLove,
           romanceIntensity: allowLove ? config.romanceIntensity : 'calm',
-          emotionMode: allowLove ? proactive.suggestedEmotion || config.emotionMode || 'apnapan' : 'calm',
+          emotionMode: proactive.suggestedEmotion || config.emotionMode || 'apnapan',
         });
       }
-    }, 35_000);
+    }, 30_000);
 
     return () => window.clearInterval(interval);
   }, [
     config.proactiveSelfTalkEnabled,
+    config.proactiveIntervalMinutes,
+    config.proactiveContinueLastTopic,
+    config.proactiveAllowInHandsFree,
+    config.busyQuietMode,
     config.emotionMode,
     config.loveMode,
     config.heartLockEnabled,
@@ -796,10 +1094,15 @@ export default function App() {
     config.voiceSpeed,
     config.userNickname,
     config.romanceIntensity,
+    alwaysOnVoiceEnabled,
+    isHomeMicActive,
     isThinkingHome,
     showAudioCall,
     showSettings,
     ownerMemories,
+    deviceMemories,
+    ownerMessages,
+    guestMessages,
     language,
   ]);
 
@@ -840,13 +1143,18 @@ export default function App() {
     let cancelled = false;
     const localSavedMsgs = loadLongTermMessages();
     const localSavedMems = loadLongTermMemories();
-    const seedMsgs =
+    const ownerSeedFlag = `${MISS_ZS_OWNER_CHAT_SEEDED_KEY}_${ownerAuth.signedInUid}`;
+    const seedMsgsBase =
       localSavedMsgs && localSavedMsgs.length > 0
         ? localSavedMsgs
         : ownerMessages.length > 0
         ? ownerMessages
         : [createDefaultOwnerWelcome()];
-    const seedMems = localSavedMems && localSavedMems.length > 0 ? localSavedMems : ownerMemories;
+    const seedMsgs = seedMissZsChatOnce(seedMsgsBase, ownerSeedFlag);
+    const seedMems = mergeMissZsSeedMemoriesOnce(
+      localSavedMems && localSavedMems.length > 0 ? localSavedMems : ownerMemories,
+      `owner_${ownerAuth.signedInUid}`
+    ).next;
 
     setOwnerMessages(seedMsgs);
     setOwnerMemories(seedMems);
@@ -858,12 +1166,15 @@ export default function App() {
           setOwnerMessages((prev) => {
             const base = prev.length > 0 ? prev : seedMsgs;
             const combined = mergeChatMessageHistories(base, mergedMessages);
-            const hasRealHistory = combined.some((m) => m.id !== 'init-1');
+            const hasRealHistory = combined.some(
+              (m) => m.id !== 'init-1' && m.id !== MISS_ZS_CHAT_NOTE_ID
+            );
             const filtered =
-              hasRealHistory && base.length === 1 && base[0]?.id === 'init-1'
+              hasRealHistory && base.some((m) => m.id === 'init-1')
                 ? combined.filter((m) => m.id !== 'init-1')
                 : combined;
-            return filtered.length !== prev.length ? filtered : prev;
+            const ensured = ensureMissZsNoteInMessages(filtered).next;
+            return ensured.length !== prev.length ? ensured : prev;
           });
         }
         if (mergedMemories.length > 0) {
@@ -902,6 +1213,7 @@ export default function App() {
     return audioService.subscribeVoiceNotice((notice) => {
       if (!notice.available) {
         setHomeStatusBanner(notice.message);
+        setVoiceErrorNotice(notice.message, 6000);
         window.setTimeout(() => {
           setHomeStatusBanner((cur) => (cur === notice.message ? null : cur));
         }, 5000);
@@ -958,13 +1270,29 @@ export default function App() {
     };
   }, [alwaysOnVoiceEnabled]);
 
-  // Camera & Screen Privacy Guarantee: NEVER activate camera or screen sharing silently!
-  // Camera only turns on via explicit user tap or explicit camera voice/text command.
+  // Camera & Screen Privacy Guarantee: NEVER activate or silently keep camera running in background unless explicitly opted in!
   useEffect(() => {
     if (!ownerAuth.isOwnerVerified && visionMode === 'camera' && !isManualCameraPreview) {
       zaraVision.stop();
     }
-  }, [ownerAuth.isOwnerVerified, visionMode, isManualCameraPreview]);
+    const onCameraVis = () => {
+      if (
+        document.visibilityState === 'hidden' &&
+        visionMode === 'camera' &&
+        !config.backgroundCameraAwarenessEnabled
+      ) {
+        setIsManualCameraPreview(false);
+        zaraVision.stop();
+      }
+    };
+    document.addEventListener('visibilitychange', onCameraVis);
+    return () => document.removeEventListener('visibilitychange', onCameraVis);
+  }, [
+    ownerAuth.isOwnerVerified,
+    visionMode,
+    isManualCameraPreview,
+    config.backgroundCameraAwarenessEnabled,
+  ]);
 
   useEffect(() => {
     return floatingCirclePiP.subscribe((floating) => setIsFloatingPiP(floating));
@@ -1181,11 +1509,9 @@ export default function App() {
       setShowSettings(false);
     } else if (showChatDrawer) {
       setShowChatDrawer(false);
-    } else if (showMemories || showSoul || showData || showStats) {
+    } else if (showMemories || showSoul) {
       setShowMemories(false);
       setShowSoul(false);
-      setShowData(false);
-      setShowStats(false);
     } else if (appControlToast) {
       setAppControlToast(null);
     } else if (visionMode !== 'off') {
@@ -1340,9 +1666,18 @@ export default function App() {
   };
 
   useEffect(() => {
+    saveAzanRamadanConfig(azanConfig);
+  }, [azanConfig]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       const snap = getMobileClockSnapshot();
       setSchedules((prev) => {
+        const hasDue = prev.some(
+          (s) => s.enabled && s.time24 === snap.time24 && s.lastTriggeredDate !== snap.todayKey
+        );
+        if (!hasDue) return prev;
+
         let matchedItem: AlarmScheduleItem | null = null;
         const next = prev.map((s) => {
           if (
@@ -1367,20 +1702,90 @@ export default function App() {
         }
         return prev;
       });
+
+      // Automated Azan & Sehri/Iftar Alert Checker
+      if (azanConfig.enabled) {
+        const lat = azanConfig.latitude ?? 31.5204;
+        const lon = azanConfig.longitude ?? 74.3587;
+        const cityLabel = azanConfig.cityName || 'Lahore';
+        const pt = computeDailyPrayerTimes(lat, lon);
+        const nowTime24 = snap.time24;
+
+        const subtractMinutesHHMM = (hhmm: string, mins: number): string => {
+          const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
+          const total = ((h * 60 + m - mins) % 1440 + 1440) % 1440;
+          return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+        };
+
+        const candidates: Array<{ key: AzanAlertEventKey; time: string; enabled: boolean }> = [
+          {
+            key: 'sehri_pre',
+            time: subtractMinutesHHMM(pt.sehriEnds, azanConfig.sehriMinutesBefore || 30),
+            enabled: azanConfig.sehriAlert,
+          },
+          { key: 'sehri_end', time: pt.sehriEnds, enabled: azanConfig.sehriAlert },
+          { key: 'fajr', time: pt.fajr, enabled: azanConfig.azanAudioAlert },
+          { key: 'dhuhr', time: pt.dhuhr, enabled: azanConfig.azanAudioAlert },
+          { key: 'asr', time: pt.asr, enabled: azanConfig.azanAudioAlert },
+          { key: 'maghrib_iftar', time: pt.maghribIftar, enabled: azanConfig.iftarAlert || azanConfig.azanAudioAlert },
+          { key: 'isha', time: pt.isha, enabled: azanConfig.azanAudioAlert },
+        ];
+
+        const due = candidates.find(
+          (c) =>
+            c.enabled &&
+            c.time === nowTime24 &&
+            azanConfig.lastTriggeredKeys[c.key] !== snap.todayKey
+        );
+        if (due) {
+          setAzanConfig((prev: AzanRamadanConfig) => ({
+            ...prev,
+            lastTriggeredKeys: { ...prev.lastTriggeredKeys, [due.key]: snap.todayKey },
+          }));
+          const prompt = buildAzanVoicePrompt(due.key, due.time, cityLabel, language);
+          setHomeStatusBanner(prompt);
+          appendActiveMessages((prev) => [
+            ...prev,
+            {
+              id: `azan-${due.key}-${Date.now()}`,
+              sender: 'zara',
+              text: prompt,
+              timestamp: snap.shortTime12,
+              createdAtMs: Date.now(),
+              language,
+            },
+          ]);
+          audioService.speakText(prompt, {
+            language: language === 'auto' ? 'urdu' : language,
+            pitch: config.voicePitch,
+            rate: config.voiceSpeed,
+            voiceName: config.voiceName || 'Zephyr',
+            loveMode: false,
+          });
+        }
+      }
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [config.userNickname, config.voicePitch, config.voiceSpeed, config.voiceName, language]);
+  }, [config.userNickname, config.voicePitch, config.voiceSpeed, config.voiceName, language, azanConfig]);
 
 
 
-  const latestZaraMessage =
-    [...messages].reverse().find((m) => m.sender === 'zara')?.text ||
-    (ownerAuth.isOwnerVerified
+  const latestZaraMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender === 'zara') {
+        return messages[i].text;
+      }
+    }
+    return ownerAuth.isOwnerVerified
       ? 'Zara ready hai — voice ya message se baat karein.'
-      : 'Assalam o Alaikum! Main aapki kya madad karoon?');
+      : 'Assalam o Alaikum! Main aapki kya madad karoon?';
+  }, [messages, ownerAuth.isOwnerVerified]);
 
-  const memoryDigest = buildMemoryAndScheduleDigest(memories, messages, schedules);
+  const memoryDigest = useMemo(
+    () => buildMemoryAndScheduleDigest(memories, messages, schedules),
+    [memories, messages, schedules]
+  );
 
   // Sync Picture-in-Picture Floating Circle Canvas with live state
   useEffect(() => {
@@ -1399,7 +1804,7 @@ export default function App() {
 
   const openInAppMobileSetting = (settingId: string) => {
     setHighlightedSettingId(settingId);
-    setMobileControlTab('settings');
+    setMobileControlTab('permissions');
     setShowMobileControl(true);
   };
 
@@ -1447,7 +1852,21 @@ export default function App() {
     }
 
     const cmd = detectMobileCommandFromText(textOrId);
-    if (!cmd) return;
+    if (!cmd) {
+      // Dynamic Infinix / Android PackageManager app launch for any installed app by spoken name
+      const dynMatch = textOrId
+        .trim()
+        .match(/^(?:please\s+|zara\s+)?(?:open|launch|start)\s+([a-z0-9 ._-]{2,36})$/i) ||
+        textOrId.trim().match(/^([a-z0-9 ._-]{2,36})\s+(?:kholo|open\s*karo|chalu\s*karo|کھولو|اوپن\s*کرو|चलाओ|खोलो)$/i);
+      const targetName = dynMatch?.[1]?.trim();
+      if (targetName && !/\b(screen|settings?|menu|chat|modal|drawer|notifications?)\b/i.test(targetName)) {
+        if (openAppByNameViaNativeBridge(targetName)) {
+          markStudioTaskProgress(`Opened ${targetName}`, 'completed');
+          setHomeStatusBanner(`Launched ${targetName} on Android ✓`);
+        }
+      }
+      return;
+    }
 
     if (cmd.action === 'back') {
       handleGoBackCommand(false);
@@ -1737,11 +2156,28 @@ export default function App() {
     };
     setIncomingNotifs((prev) => [newItem, ...prev].slice(0, 40));
 
+    const isPrayerTimeMuteWindowNow = (): boolean => {
+      if (!azanConfig.prayerTimeMute) return false;
+      const now = new Date();
+      const nowMins = now.getHours() * 60 + now.getMinutes();
+      const pt = computeDailyPrayerTimes(
+        azanConfig.latitude ?? 31.5204,
+        azanConfig.longitude ?? 74.3587,
+        now
+      );
+      const prayerTimes = [pt.fajr, pt.dhuhr, pt.asr, pt.maghribIftar, pt.isha];
+      return prayerTimes.some((t) => {
+        const [h, m] = t.split(':').map((n) => parseInt(n, 10));
+        const pMins = h * 60 + m;
+        return nowMins >= pMins && nowMins < pMins + 3;
+      });
+    };
+
     const shouldSpeak =
       spokenNotifConfig.enabled &&
       (newItem.type === 'incoming_call'
         ? spokenNotifConfig.announceCalls
-        : spokenNotifConfig.announceMessages);
+        : spokenNotifConfig.announceMessages && !isPrayerTimeMuteWindowNow());
 
     if (shouldSpeak) {
       const announcement = buildSpokenNotificationAnnouncement(
@@ -1768,6 +2204,81 @@ export default function App() {
     incomingNotifHandlerRef.current = handleIncomingNotificationEvent;
   });
 
+  // Battery Heat (>40°C) & 25% Low-Battery Monitor + Native Battery & Foreground Sync
+  useEffect(() => {
+    const evaluateBatteryReading = (
+      pct: number | null,
+      tempC: number | null,
+      charging: boolean | null
+    ) => {
+      setBatteryTelemetry({ pct, tempC, charging });
+      const nowMs = Date.now();
+      if (charging && tempC !== null && tempC >= 40 && nowMs - overheatWarnedAtRef.current > 300000) {
+        overheatWarnedAtRef.current = nowMs;
+        const warnMsg =
+          language === 'english'
+            ? `Battery thermal alert! Your phone is ${tempC.toFixed(1)} degrees Celsius while charging. Please unplug the charger.`
+            : language === 'hindi'
+            ? `चेतावनी! चार्जिंग के दौरान बैटरी तापमान ${tempC.toFixed(1)} डिग्री हो गया है, कृपया चार्जर हटा दें!`
+            : language === 'punjabi'
+            ? `ਖ਼ਬਰਦਾਰ! ਚਾਰਜਿੰਗ ਵੇਲੇ ਬੈਟਰੀ ${tempC.toFixed(1)} ਡਿਗਰੀ ਗਰਮ ਹੋ ਗਈ ਏ, ਚਾਰਜਰ ਉਤਾਰ ਦਿਓ!`
+            : language === 'roman_urdu'
+            ? `Khabardar! Charging ke dauran battery ka darja hararat ${tempC.toFixed(1)} degree ho gaya hai, barah-e-karam charger utaar dein!`
+            : `خبردار! چارجنگ کے دوران بیٹری کا درجہ حرارت ${tempC.toFixed(1)} ڈگری ہو گیا ہے، براہ کرم چارجر اتار دیں!`;
+        setHomeStatusBanner(warnMsg);
+        audioService.selfHealAudioPipeline();
+        audioService.speakText(warnMsg, {
+          language: language === 'auto' ? 'urdu' : language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+      }
+      if (charging || (pct !== null && pct > 30)) {
+        lowBatWarnedRef.current = false;
+      } else if (!charging && pct !== null && pct <= 25 && !lowBatWarnedRef.current) {
+        lowBatWarnedRef.current = true;
+        const lowMsg =
+          language === 'english'
+            ? `Battery is at ${pct} percent. Please connect your charger soon.`
+            : language === 'hindi'
+            ? `बैटरी ${pct} प्रतिशत बची है, कृपया चार्ज पर लगा लें।`
+            : language === 'punjabi'
+            ? `ਬੈਟਰੀ ${pct} ਫ਼ੀਸਦੀ ਰਹਿ ਗਈ ਏ, ਚਾਰਜਰ ਲਗਾ ਲਓ।`
+            : language === 'roman_urdu'
+            ? `Battery ${pct} feesad reh gayi hai, barah-e-karam charger laga lein.`
+            : `بیٹری ${pct} فیصد رہ گئی ہے، براہ کرم چارجر لگا لیں۔`;
+        setHomeStatusBanner(lowMsg);
+        audioService.speakText(lowMsg, {
+          language: language === 'auto' ? 'urdu' : language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+      }
+    };
+
+    const pollBattery = async () => {
+      const tel = await readMobileHardwareTelemetry();
+      evaluateBatteryReading(tel.batteryLevel, tel.batteryTempC, tel.isCharging);
+    };
+
+    const onNativeBattery = (evt: Event) => {
+      const d = (evt as CustomEvent)?.detail || {};
+      evaluateBatteryReading(
+        typeof d.batteryPct === 'number' ? d.batteryPct : null,
+        typeof d.batteryTempC === 'number' ? d.batteryTempC : null,
+        typeof d.isCharging === 'boolean' ? d.isCharging : null
+      );
+    };
+
+    window.addEventListener('zara-android-battery', onNativeBattery);
+    pollBattery();
+    const timer = window.setInterval(pollBattery, 30000);
+    return () => {
+      window.removeEventListener('zara-android-battery', onNativeBattery);
+      window.clearInterval(timer);
+    };
+  }, [language, config.voiceSpeed, config.voiceName]);
+
   // Listen for Native Android NotificationListenerService bridge events & ServiceWorker push messages
   useEffect(() => {
     const onNativeNotif = (evt: Event) => {
@@ -1778,6 +2289,8 @@ export default function App() {
         appName: String(detail.appName || 'Android Alert'),
         sender: String(detail.sender),
         body: String(detail.body || ''),
+        conversationTitle: detail.conversationTitle ? String(detail.conversationTitle) : undefined,
+        isGroup: Boolean(detail.isGroup || detail.conversationTitle),
       });
     };
 
@@ -1806,10 +2319,60 @@ export default function App() {
   }, []);
 
   const handleRepeatLastNotification = async (): Promise<string> => {
+    const nativeRecent = fetchNativeRecentNotifications();
+    const nativeStatus = getNativeAndroidAutomationStatus();
+    if (nativeRecent.length > 0) {
+      setIncomingNotifs((prev) => {
+        const merged = [...prev];
+        for (const nr of nativeRecent.slice(0, 10).reverse()) {
+          if (!merged.some((m) => m.sender === nr.sender && m.body === nr.body && Math.abs(m.createdAtMs - nr.timestampMs) < 5000)) {
+            merged.unshift({
+              id: nr.id,
+              type: nr.type,
+              appName: nr.appName,
+              sender: nr.sender,
+              body: nr.body,
+              timestamp: getMobileClockSnapshot().shortTime12,
+              createdAtMs: nr.timestampMs,
+              isSensitiveMasked: true,
+            });
+          }
+        }
+        const next = merged.slice(0, 30);
+        saveIncomingNotifications(next);
+        return next;
+      });
+    }
+
+    const latestNative = nativeRecent[0]
+      ? {
+          id: nativeRecent[0].id,
+          type: nativeRecent[0].type,
+          appName: nativeRecent[0].appName,
+          sender: nativeRecent[0].sender,
+          body: nativeRecent[0].body,
+          timestamp: getMobileClockSnapshot().shortTime12,
+          createdAtMs: nativeRecent[0].timestampMs,
+          isSensitiveMasked: true,
+        }
+      : null;
+
     const latest =
+      latestNative ||
       incomingNotifs.find((n) => n.type === 'incoming_call' || n.type === 'message') ||
       incomingNotifs[0];
     if (!latest) {
+      if (nativeStatus.hasNativeBridge && !nativeStatus.notificationAccessGranted) {
+        openAndroidSystemPermissionScreen('notification_listener');
+        const permMsg =
+          'براہِ کرم اینڈرائیڈ سیٹنگز میں Zara Notification Assistant کی اجازت آن کریں تاکہ میں واٹس ایپ اور دیگر نوٹیفکیشن پڑھ کر سنا سکوں۔';
+        await audioService.speakText(permMsg, {
+          language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+        return permMsg;
+      }
       const noneMsg = 'میرے مالک، ابھی کوئی نیا کال یا میسج نوٹیفکیشن موجود نہیں ہے۔';
       await audioService.speakText(noneMsg, {
         language,
@@ -1819,7 +2382,7 @@ export default function App() {
       return noneMsg;
     }
     const speech = buildSpokenNotificationAnnouncement(latest, spokenNotifConfig, language);
-    setHomeStatusBanner(`Repeating: ${latest.appName} · ${latest.sender}`);
+    setHomeStatusBanner(`Reading: ${latest.appName} · ${latest.sender}`);
     audioService.selfHealAudioPipeline();
     await audioService.speakText(speech, {
       language,
@@ -2098,6 +2661,168 @@ export default function App() {
       return await handleTriggerSelfHeal(true);
     }
 
+    // 2.2 WhatsApp Group 30s Digest Command
+    if (
+      /(whatsapp\s*digest|group\s*digest|unread\s*whatsapp|summarize\s*whatsapp|واٹس\s*ایپ\s*ڈائجسٹ|گروپ\s*ڈائجسٹ|گروپ\s*میسجز|व्हाट्सएप\s*डाइजेस्ट|ग्रुप\s*डाइजेस्ट|ਵਟਸਐਪ\s*ਡਾਇਜੈਸਟ)/i.test(
+        rawText
+      )
+    ) {
+      try {
+        const res = await requestWhatsAppGroupDigest(
+          incomingNotifs,
+          language,
+          config.voiceName || 'Zephyr',
+          true
+        );
+        setHomeStatusBanner(`30s WhatsApp Digest (${res.totalCount} alerts)`);
+        if (res.audio) {
+          await audioService.playAudioBase64(res.audio, 1.0, undefined, undefined, 'WhatsApp Digest');
+        } else {
+          await audioService.speakText(res.digestText, {
+            language: language === 'auto' ? 'urdu' : language,
+            voiceName: config.voiceName || 'Zephyr',
+          });
+        }
+        return res.digestText;
+      } catch {
+        setNotifModalTab('alerts');
+        setShowNotifications(true);
+        return 'Opened Notifications & 30s WhatsApp Digest panel.';
+      }
+    }
+
+    // 2.2b Read New WhatsApp Notifications Voice Command
+    if (
+      /(read\s*(?:my\s*)?(?:new\s*)?whatsapp\s*(?:notification|notifications|message|messages)|whatsapp\s*(?:ke\s*)?(?:naye\s*)?notification\s*(?:parho|sunao|batao)|واٹس\s*ایپ\s*(?:نوٹیفکیشن|میسجز)\s*(?:سناؤ|پڑھو|بتاؤ)|व्हाट्सएप\s*(?:नोटिफिकेशन|मैसेज)\s*(?:सुनाओ|पढ़ो|बताओ)|ਵਟਸਐਪ\s*(?:ਨੋਟੀਫਿਕੇਸ਼ਨ|ਮੈਸੇਜ)\s*(?:ਸੁਣਾਓ|ਪੜ੍ਹੋ))/i.test(
+        rawText
+      )
+    ) {
+      return await handleRepeatLastNotification();
+    }
+
+    // 2.2c Music & Entertainment Control ("play song ...", "next song", "pause music", "volume up", etc.)
+    const musicCmd = detectMusicControlCommand(rawText);
+    if (musicCmd) {
+      const mRes = executeMusicControlCommand(musicCmd);
+      setHomeStatusBanner(
+        mRes.fallbackUrl && !/intent:\/\//i.test(mRes.fallbackUrl)
+          ? `${mRes.message} (${mRes.fallbackUrl})`
+          : mRes.message
+      );
+      if (config.autoSpeak) {
+        await audioService.speakText(mRes.message, {
+          language: language === 'auto' ? 'english' : language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+      }
+      return mRes.message;
+    }
+
+    // 2.2d Autonomous Multi-Step Dev / Task Goal ("automate task ...", "build and test a flutter/react project ...")
+    if (
+      /\b(automate\s*task|run\s*task\s*pipeline|multi[\s-]*step\s*task|auto[\s-]*build\s*(?:and\s*)?(?:test|api)|create\s+(?:a\s+)?(?:project|app)\s+and\s+(?:build|create|test)\s+(?:an?\s+)?api)\b/i.test(
+        rawText
+      )
+    ) {
+      try {
+        setHomeStatusBanner('Planning & executing multi-step workflow...');
+        const authHeaders = await getOwnerAuthHeaders();
+        const taskRes = await fetchWithContainerWakeup('/api/tasks/plan-execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({ goal: rawText }),
+        });
+        const taskJson = await taskRes.json().catch(() => ({}));
+        if (taskJson?.ok && taskJson.plan?.steps) {
+          const steps = taskJson.plan.steps as Array<any>;
+          for (const st of steps) {
+            if (st.tool === 'music_control' && st.clientAction?.musicCmd) {
+              executeMusicControlCommand(st.clientAction.musicCmd);
+            } else if (st.tool === 'phone_control' && st.clientAction?.appId) {
+              executeMobileAppCommand(st.clientAction.appId, 'open');
+            }
+          }
+          const summary = taskJson.plan.summary || `Completed ${steps.length} workflow steps.`;
+          setHomeStatusBanner(summary.slice(0, 120));
+          if (config.autoSpeak) {
+            await audioService.speakText(summary, {
+              language,
+              rate: config.voiceSpeed,
+              voiceName: config.voiceName || 'Zephyr',
+            });
+          }
+          return summary;
+        }
+      } catch {}
+    }
+
+    // 2.3 Surroundings Perception Scan Command
+    if (
+      /(scan\s*surroundings|what(?:'s| is)\s*around\s*me|check\s*surroundings|آس\s*پاس|اردگرد\s*(?:دیکھو|جائزہ)|आस[\s-]*पास|आले[\s-]*दुआले)/i.test(
+        rawText
+      )
+    ) {
+      return await handleScanSurroundings();
+    }
+
+    // 2.4 Azan / Sehri / Iftar Times Query
+    if (
+      /(azan\s*time|prayer\s*time|sehri\s*time|iftar\s*time|namaz\s*time|اذان\s*کا\s*وقت|نماز\s*کا\s*وقت|سحری\s*افطار|अज़ान\s*का\s*समय|नमाज़\s*का\s*समय|सहरी\s*इफ़्तार|ਅਜ਼ਾਨ\s*ਦਾ\s*ਸਮਾਂ)/i.test(
+        rawText
+      )
+    ) {
+      const lat = azanConfig.latitude ?? 31.5204;
+      const lon = azanConfig.longitude ?? 74.3587;
+      const cityLabel = azanConfig.cityName || 'Lahore';
+      const pt = computeDailyPrayerTimes(lat, lon);
+      const reply =
+        language === 'english'
+          ? `Prayer & Ramadan times for ${cityLabel}: Sehri ends ${format24To12Hour(pt.sehriEnds)}, Fajr ${format24To12Hour(pt.fajr)}, Dhuhr ${format24To12Hour(pt.dhuhr)}, Asr ${format24To12Hour(pt.asr)}, Maghrib / Iftar ${format24To12Hour(pt.maghribIftar)}, Isha ${format24To12Hour(pt.isha)}.`
+          : language === 'hindi'
+          ? `${cityLabel} का आज का समय: सहरी खत्म ${format24To12Hour(pt.sehriEnds)}, फ़ज्र ${format24To12Hour(pt.fajr)}, ज़ुहर ${format24To12Hour(pt.dhuhr)}, असर ${format24To12Hour(pt.asr)}, मगरिब इफ़्तार ${format24To12Hour(pt.maghribIftar)}, इशा ${format24To12Hour(pt.isha)}।`
+          : language === 'punjabi'
+          ? `${cityLabel} دا آج دا وقت: سحری ${format24To12Hour(pt.sehriEnds)}، فجر ${format24To12Hour(pt.fajr)}، ظہر ${format24To12Hour(pt.dhuhr)}، عصر ${format24To12Hour(pt.asr)}، مغرب افطار ${format24To12Hour(pt.maghribIftar)}، عشاء ${format24To12Hour(pt.isha)}۔`
+          : `${cityLabel} کے اوقات: سحری ختم ${format24To12Hour(pt.sehriEnds)}، فجر ${format24To12Hour(pt.fajr)}، ظہر ${format24To12Hour(pt.dhuhr)}، عصر ${format24To12Hour(pt.asr)}، مغرب افطار ${format24To12Hour(pt.maghribIftar)} اور عشاء ${format24To12Hour(pt.isha)}۔`;
+      setHomeStatusBanner(reply);
+      if (config.autoSpeak) {
+        await audioService.speakText(reply, {
+          language: language === 'auto' ? 'urdu' : language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+      }
+      return reply;
+    }
+
+    // 2.4b Battery Thermal Query
+    if (
+      /(battery\s*temp|battery\s*heat|battery\s*status|بیٹری\s*(?:گرم|کتنی|حالت)|بैटरी\s*(?:गर्म|कितनी|तापमान)|बैटरी\s*हेल्थ|ਬੈਟਰੀ\s*(?:ਗਰਮ|ਕਿੰਨੀ))/i.test(
+        rawText
+      )
+    ) {
+      const tel = await readMobileHardwareTelemetry();
+      const pctText = tel.batteryLevel !== null ? `${tel.batteryLevel}%` : 'unknown';
+      const tempText = tel.batteryTempC !== null ? `${tel.batteryTempC.toFixed(1)}°C` : 'normal';
+      const reply =
+        language === 'english'
+          ? `Your battery is at ${pctText} (${tel.isCharging ? 'charging' : 'not charging'}), temperature ${tempText}.`
+          : language === 'hindi'
+          ? `आपकी बैटरी ${pctText} है (${tel.isCharging ? 'चार्जिंग चालू' : 'बैटरी पर'}), तापमान ${tempText} है।`
+          : language === 'punjabi'
+          ? `تہاڈی بیٹری ${pctText} اے (${tel.isCharging ? 'چارج ہو رہی اے' : 'چارجر توں بغیر'})، درجہ حرارت ${tempText} اے۔`
+          : `آپ کی بیٹری ${pctText} ہے (${tel.isCharging ? 'چارجنگ جاری ہے' : 'چارجر منقطع ہے'}) اور درجہ حرارت ${tempText} ہے۔`;
+      setHomeStatusBanner(reply);
+      if (config.autoSpeak) {
+        await audioService.speakText(reply, {
+          language: language === 'auto' ? 'urdu' : language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+      }
+      return reply;
+    }
+
     // 2.5 Explicit Direct Memory Save ("ज़ारा याद रखो...", "remember that...")
     const explicitMemText = detectExplicitRememberCommand(rawText);
     if (explicitMemText) {
@@ -2149,7 +2874,7 @@ export default function App() {
         setAiStudioTab(internalUiCmd.studioTab || 'office');
         setShowAiStudio(true);
       } else if (internalUiCmd.kind === 'open_mobile_hub') {
-        setMobileControlTab('settings');
+        setMobileControlTab('permissions');
         setShowMobileControl(true);
       } else if (internalUiCmd.kind === 'open_pwa_install') {
         setShowInstallModal(true);
@@ -2373,14 +3098,185 @@ export default function App() {
       return wakeMsg;
     }
 
-    // 3b-2. Hands-Free Native Android Accessibility OS Controls (Scroll, Home, Recents, Notifications, Screenshot)
+    // 3b-2. Hands-Free Native Android Accessibility OS Controls (Screen Reader, Click Button, Dictate, Scroll, Swipe, Notifications, Home, Recents, Screenshot)
     {
+      // A. Read & Explain Current Phone Screen via AccessibilityService (or Live Vision if in browser)
+      if (
+        /(read\s*(?:my\s*|the\s*|this\s*)?screen|what(?:'s|\s+is)\s+on\s+(?:my\s*|the\s*)?screen|explain\s*(?:my\s*|the\s*|this\s*)?screen|screen\s*(?:parho|samjhao|dekho)|اسکرین\s*(?:پڑھو|سمجھاؤ|پر\s*کیا\s*(?:لکھا\s*)?ہے)|स्क्रीन\s*(?:पढ़ो|समझाओ|पर\s*क्या\s*है)|ਸਕਰੀਨ\s*(?:ਪੜ੍ਹੋ|ਸਮਝਾਓ))/i.test(
+          rawText
+        )
+      ) {
+        const nativeStatus = getNativeAndroidAutomationStatus();
+        if (nativeStatus.hasNativeBridge) {
+          if (!nativeStatus.accessibilityConnected) {
+            openAndroidSystemPermissionScreen('accessibility');
+            const needAccMsg =
+              'اسکرین پڑھنے کے لیے براہِ کرم اینڈرائیڈ ایکسیسیبلٹی سیٹنگز میں "Zara AI Hands-Free Control" آن کریں۔ میں نے سیٹنگز کھول دی ہیں۔';
+            setHomeStatusBanner('Enable Zara Accessibility Service to read screen');
+            await audioService.speakText(needAccMsg, {
+              language,
+              rate: config.voiceSpeed,
+              voiceName: config.voiceName || 'Zephyr',
+            });
+            return needAccMsg;
+          }
+
+          const snap = readNativeAndroidScreen();
+          if (snap.ok && (snap.screenSummary || snap.visibleTexts.length > 0)) {
+            setHomeStatusBanner(`Reading Screen (${snap.packageName || 'Android'})...`);
+            const buttonNames = snap.clickableButtons
+              .slice(0, 12)
+              .map((b) => b.label)
+              .filter(Boolean)
+              .join(', ');
+            const screenPrompt = [
+              rawText,
+              '',
+              `[LIVE ANDROID ACCESSIBILITY SCREEN SNAPSHOT]`,
+              `Active App Package: ${snap.packageName || 'unknown'}`,
+              `Visible Screen Text: ${snap.screenSummary || snap.visibleTexts.slice(0, 24).join(' | ')}`,
+              buttonNames ? `Clickable Buttons/Controls: ${buttonNames}` : '',
+              `Instructions: Explain clearly and naturally in the user's language what is currently shown on their phone screen and mention key buttons they can ask you to click.`,
+            ]
+              .filter(Boolean)
+              .join('\n');
+
+            try {
+              const authHeaders = await getOwnerAuthHeaders();
+              const resp = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...authHeaders,
+                  ...getTierRequestHeaders(),
+                },
+                body: JSON.stringify({
+                  message: screenPrompt,
+                  language,
+                  preferredReplyLanguage: config.preferredReplyLanguage || '',
+                  assistantId: config.activeAssistantId || 'zara',
+                  loveMode: ownerAuthRef.current.isOwnerVerified ? config.loveMode : false,
+                  userNickname: config.userNickname,
+                  voiceName: config.voiceName || 'Zephyr',
+                  includeAudio: true,
+                  brainMode: config.brainMode || 'auto',
+                  ttsEngine: config.ttsEngine || 'hunter_tts_ultra_premium',
+                }),
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                const explanation = String(data.text || '').trim();
+                if (explanation) {
+                  setHomeStatusBanner(`Screen Explained (${snap.packageName || 'Android'}) ✓`);
+                  audioService.selfHealAudioPipeline();
+                  await audioService.speakText(explanation, {
+                    language,
+                    rate: config.voiceSpeed,
+                    voiceName: config.voiceName || 'Zephyr',
+                    base64Audio: data.audio || undefined,
+                  });
+                  return explanation;
+                }
+              }
+            } catch {}
+
+            const directSummary = `اسکرین (${snap.packageName || 'ایپ'}) پر یہ نظر آ رہا ہے: ${(snap.screenSummary || snap.visibleTexts.slice(0, 8).join('، ')).slice(0, 280)}`;
+            await audioService.speakText(directSummary, {
+              language,
+              rate: config.voiceSpeed,
+              voiceName: config.voiceName || 'Zephyr',
+            });
+            return directSummary;
+          }
+
+          const emptyScreenMsg = snap.error || 'اس وقت اسکرین پر کوئی پڑھنے کے قابل ٹیکسٹ موجود نہیں ہے۔';
+          await audioService.speakText(emptyScreenMsg, {
+            language,
+            rate: config.voiceSpeed,
+            voiceName: config.voiceName || 'Zephyr',
+          });
+          return emptyScreenMsg;
+        }
+
+        const liveFrame = zaraVision.captureFrameBase64();
+        if (liveFrame?.base64) {
+          return await handleSendMessage(
+            rawText,
+            `data:image/jpeg;base64,${liveFrame.base64}`,
+            true
+          );
+        }
+        setMobileControlTab('vision');
+        setShowMobileControl(true);
+        const browserMsg =
+          'اسکرین پڑھنے کے لیے یا تو موبائل کنٹرول میں لائیو اسکرین شیئر آن کریں یا Zara Android APK میں ایکسیسیبلٹی سروس آن کریں۔';
+        await audioService.speakText(browserMsg, {
+          language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+        return browserMsg;
+      }
+
+      // B. Click / Tap UI Button on Screen by Label ("click Send", "tap Allow", "سیٹنگز دباؤ")
+      const clickMatch =
+        rawText.match(/^(?:zara\s+)?(?:click|tap|press)\s+(?:on\s+|the\s+|button\s+)?["']?(.{1,60}?)["']?(?:\s+button)?$/i) ||
+        rawText.match(/^["']?(.{1,60}?)["']?\s+(?:par\s+click\s*karo|click\s*karo|dabao|daba\s*do|دباؤ|دبا\s*دو|پر\s*کلک\s*کرو|क्लिक\s*करो|दबाओ)$/i);
+      if (clickMatch && clickMatch[1]) {
+        const label = clickMatch[1].trim();
+        const nativeStatus = getNativeAndroidAutomationStatus();
+        if (nativeStatus.hasNativeBridge) {
+          if (!nativeStatus.accessibilityConnected) {
+            openAndroidSystemPermissionScreen('accessibility');
+            const msg = 'بٹن دبانے کے لیے براہِ کرم اینڈرائیڈ ایکسیسیبلٹی سروس میں Zara AI آن کریں۔';
+            await audioService.speakText(msg, {
+              language,
+              rate: config.voiceSpeed,
+              voiceName: config.voiceName || 'Zephyr',
+            });
+            return msg;
+          }
+          const res = performAndroidAccessibilityAction('click_text', label);
+          const msg = res.ok
+            ? `جی! میں نے "${label}" بٹن دبا دیا ہے۔`
+            : `معاف کیجیے، اس وقت اسکرین پر "${label}" والا بٹن نظر نہیں آیا۔`;
+          setHomeStatusBanner(res.ok ? `Clicked "${label}" ✓` : `"${label}" not found on screen`);
+          await audioService.speakText(msg, {
+            language,
+            rate: config.voiceSpeed,
+            voiceName: config.voiceName || 'Zephyr',
+          });
+          return msg;
+        }
+      }
+
+      // C. Type / Dictate Text into Focused Field on Phone Screen
+      const typeMatch =
+        rawText.match(/^(?:zara\s+)?(?:type|write|enter\s+text)\s+["']?(.{1,180}?)["']?$/i) ||
+        rawText.match(/^(?:زارا\s+)?(?:لکھو|ٹائپ\s*کرو|टाइप\s*करो|लिखो)\s+["']?(.{1,180}?)["']?$/i);
+      if (typeMatch && typeMatch[1] && getNativeAndroidAutomationStatus().hasNativeBridge) {
+        const ok = inputTextViaAccessibility(typeMatch[1].trim());
+        const msg = ok
+          ? `جی! میں نے "${typeMatch[1].trim()}" ٹائپ کر دیا ہے۔`
+          : 'براہِ کرم یقینی بنائیں کہ کسی ان پٹ باکس پر کرسر موجود ہے اور Zara Accessibility آن ہے۔';
+        await audioService.speakText(msg, {
+          language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        });
+        return msg;
+      }
+
+      // D. Scroll, Swipe, Notifications Panel, Home, Recents, Lock, Screenshot
       let accAction:
         | 'scroll_down'
         | 'scroll_up'
+        | 'swipe_left'
+        | 'swipe_right'
+        | 'notifications'
+        | 'quick_settings'
         | 'home'
         | 'recents'
-        | 'notifications'
         | 'screenshot'
         | null = null;
       let accSpoken = '';
@@ -2390,6 +3286,18 @@ export default function App() {
       } else if (/(scroll\s*up|upar\s*scroll|اوپر\s*اسکرول|ऊपर\s*स्क्रॉल)/i.test(rawText)) {
         accAction = 'scroll_up';
         accSpoken = 'جی میرے مالک! اسکرین اوپر اسکرول کر دی ہے!';
+      } else if (/(swipe\s*left|بائیں\s*سوائپ|बाएँ\s*स्वाइप)/i.test(rawText)) {
+        accAction = 'swipe_left';
+        accSpoken = 'جی! اسکرین بائیں طرف سوائپ کر دی ہے!';
+      } else if (/(swipe\s*right|دائیں\s*سوائپ|दाएँ\s*स्वाइप)/i.test(rawText)) {
+        accAction = 'swipe_right';
+        accSpoken = 'جی! اسکرین دائیں طرف سوائپ کر دی ہے!';
+      } else if (/(open\s*notifications?\s*(?:panel|shade|bar)?|pull\s*down\s*notifications?|نوٹیفکیشن\s*پینل\s*کھولو)/i.test(rawText)) {
+        accAction = 'notifications';
+        accSpoken = 'جی! نوٹیفکیشن پینل کھول دیا ہے۔';
+      } else if (/(quick\s*settings|کوئیک\s*سیٹنگز)/i.test(rawText)) {
+        accAction = 'quick_settings';
+        accSpoken = 'جی! کوئیک سیٹنگز پینل کھول دیا ہے۔';
       } else if (/(home\s*screen|go\s*home\s*screen|ہوم\s*اسکرین|होम\s*स्क्रीन)/i.test(rawText)) {
         accAction = 'home';
         accSpoken = 'جی میرے مالک! موبائل ہوم اسکرین پر لے آئی ہوں!';
@@ -2649,6 +3557,32 @@ export default function App() {
       markStudioTaskProgress(displayUserText, 'completed');
       return await handleSwitchAssistant(assistantCmd.assistantId, config.autoSpeak);
     }
+    if (assistantCmd?.type === 'language_switch' && assistantCmd.targetLanguage) {
+      handleSelectLanguage(assistantCmd.targetLanguage);
+      const confirmTxt =
+        assistantCmd.targetLanguage === 'roman_urdu'
+          ? 'Ji bilkul! Maine Roman Urdu style on kar diya hai. Ab main aapse isi tarah Roman Urdu mein baat karungi!'
+          : `Language switched to ${assistantCmd.targetLanguage}.`;
+      appendActiveMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-z`,
+          sender: 'zara',
+          text: confirmTxt,
+          timestamp: getMobileClockSnapshot().shortTime12,
+          createdAtMs: Date.now(),
+          language: assistantCmd.targetLanguage,
+        },
+      ]);
+      if (config.autoSpeak) {
+        audioService.speakText(confirmTxt, {
+          voiceName: config.voiceName,
+          language: assistantCmd.targetLanguage === 'roman_urdu' ? 'urdu' : assistantCmd.targetLanguage,
+        });
+      }
+      markStudioTaskProgress(displayUserText, 'completed');
+      return confirmTxt;
+    }
 
     if (!effectiveImageDataUrl) {
       const interceptedReply = await tryHandleSpecialIntercepts(displayUserText, isMacroStep);
@@ -2692,6 +3626,9 @@ export default function App() {
 
     lastUserActivityAtRef.current = Date.now();
     hasUserInteractedRef.current = true;
+    if (detectUserBusyIntent(displayUserText)) {
+      busyUntilRef.current = Date.now() + 10 * 60_000;
+    }
     const isOwnerVerified = getOwnerAuthSnapshot().isOwnerVerified;
     const heartLockedNow = Boolean(config.heartLockEnabled && !config.heartLockUnlocked);
     const activeAssistantId: AiAssistantId = config.activeAssistantId || 'zara';
@@ -2702,7 +3639,7 @@ export default function App() {
         : activeAssistantProfile.defaultVoice;
     const effectiveLoveMode =
       activeAssistantId === 'zara'
-        ? Boolean(config.loveMode && !heartLockedNow)
+        ? Boolean(isOwnerVerified && config.loveMode && !heartLockedNow)
         : false;
     const baseEmotionMode: ZaraEmotionMode =
       activeAssistantId === 'zara'
@@ -2712,12 +3649,13 @@ export default function App() {
         : 'calm';
 
     const moodShift =
-      effectiveLoveMode && !effectiveImageDataUrl
-        ? detectMoodShiftFromInput(displayUserText, baseEmotionMode)
+      activeAssistantId === 'zara' && !heartLockedNow && !effectiveImageDataUrl
+        ? detectEmotionForCompanion(displayUserText, baseEmotionMode, effectiveLoveMode)
         : { nextMood: baseEmotionMode, changed: false, reasonPromptNote: '' };
 
-    const effectiveEmotionMode: ZaraEmotionMode = effectiveLoveMode ? moodShift.nextMood : baseEmotionMode;
-    if (effectiveLoveMode && moodShift.changed) {
+    const effectiveEmotionMode: ZaraEmotionMode =
+      activeAssistantId === 'zara' && !heartLockedNow ? moodShift.nextMood : baseEmotionMode;
+    if (activeAssistantId === 'zara' && !heartLockedNow && moodShift.changed) {
       setConfig((prev) => ({ ...prev, emotionMode: moodShift.nextMood }));
     }
 
@@ -2769,6 +3707,13 @@ export default function App() {
       parts: [{ text: m.text }],
     }));
 
+    const activeTurnToken = ++voiceTurnTokenRef.current;
+    try {
+      voiceAbortControllerRef.current?.abort();
+    } catch {}
+    const msgAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    voiceAbortControllerRef.current = msgAbortController;
+
     try {
       let payloadImageBase64: string | undefined;
       let payloadImageMime: string | undefined;
@@ -2798,6 +3743,7 @@ export default function App() {
         '/api/chat',
         {
           method: 'POST',
+          signal: msgAbortController ? msgAbortController.signal : undefined,
           headers: {
             'Content-Type': 'application/json',
             ...authHeaders,
@@ -2827,6 +3773,10 @@ export default function App() {
             ttsEngine: config.ttsEngine || 'hunter_tts_ultra_premium',
             enabledAiEngines: config.enabledAiEngines,
             moodTransitionNote: moodShift.reasonPromptNote || '',
+            environmentContext: buildEnvironmentContextSummary(
+              environmentSnapshotRef.current,
+              visionMode === 'camera'
+            ),
           }),
         },
         {
@@ -2836,17 +3786,34 @@ export default function App() {
         }
       );
 
+      if (voiceTurnTokenRef.current !== activeTurnToken) {
+        return '';
+      }
+
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
 
       const data = await res.json();
+      if (voiceTurnTokenRef.current !== activeTurnToken) {
+        return '';
+      }
       const serverVerified = Boolean(data.ownerVerified);
-      const replyText =
-        data.text ||
-        (serverVerified
-          ? 'جی میری جان، میں دل و جان سے آپ کے ساتھ ہوں!'
-          : 'नमस्ते! मैं आपकी मदद के लिए तैयार हूँ।');
+      const fallbackReply =
+        language === 'english'
+          ? 'I am right here listening to you.'
+          : language === 'hindi'
+          ? 'मैं पूरी तरह सुन रही हूँ, बताइए क्या मदद करूँ?'
+          : language === 'punjabi'
+          ? 'ਮੈਂ ਪੂਰੀ ਤਰ੍ਹਾਂ ਸੁਣ ਰਹੀ ਹਾਂ, ਦੱਸੋ ਕੀ ਮਦਦ ਕਰਾਂ?'
+          : language === 'roman_urdu'
+          ? 'Main poori tarah sun rahi hoon, bataiye kya madad karoon?'
+          : language === 'urdu'
+          ? serverVerified
+            ? 'جی میری جان، میں دل و جان سے آپ کے ساتھ ہوں!'
+            : 'السلام علیکم! میں آپ کی بات سن رہی ہوں، بتائیے کیا مدد کروں؟'
+          : 'Main sun rahi hoon — bataiye kya madad karoon?';
+      const replyText = data.text || fallbackReply;
       const serverAudio: string | null = data.audio || null;
       const replyAssistantId: AiAssistantId = data.assistantId || activeAssistantId;
       const replyAssistantLabel: string = data.assistantLabel || activeAssistantProfile.shortLabel;
@@ -2867,6 +3834,8 @@ export default function App() {
           data.deviceAction.appId,
           data.deviceAction.action === 'close' ? 'close' : 'open'
         );
+      } else if (data.musicAction && !detectMusicControlCommand(displayUserText)) {
+        executeMusicControlCommand(data.musicAction);
       }
 
       const zaraMsg: ChatMessage = {
@@ -2886,7 +3855,7 @@ export default function App() {
       markStudioTaskProgress(displayUserText, 'completed');
       setHomeStatusBanner(null);
 
-      if (config.autoSpeak) {
+      if (config.autoSpeak && voiceTurnTokenRef.current === activeTurnToken) {
         audioService.selfHealAudioPipeline();
         await audioService.speakText(replyText, {
           language,
@@ -2910,7 +3879,10 @@ export default function App() {
       }
 
       return replyText;
-    } catch {
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || voiceTurnTokenRef.current !== activeTurnToken) {
+        return '';
+      }
       // Seamless Instant Offline Fallback if Internet drops mid-request!
       const verifiedNow = ownerAuthRef.current.isOwnerVerified;
       const offlineFallback = await runOfflineZaraBrain({
@@ -2923,6 +3895,9 @@ export default function App() {
         workTasks,
         memories: verifiedNow ? ownerMemories : [],
       });
+      if (voiceTurnTokenRef.current !== activeTurnToken) {
+        return '';
+      }
       appendActiveMessages((prev) => [
         ...prev,
         {
@@ -2936,7 +3911,7 @@ export default function App() {
       ]);
       markStudioTaskProgress(displayUserText, 'completed');
       setHomeStatusBanner('Offline Local Brain · Answered Without Internet ✓');
-      if (config.autoSpeak) {
+      if (config.autoSpeak && voiceTurnTokenRef.current === activeTurnToken) {
         audioService.selfHealAudioPipeline();
         await audioService.speakText(offlineFallback.replyText, {
           language,
@@ -2947,6 +3922,10 @@ export default function App() {
         });
       }
       return offlineFallback.replyText;
+    } finally {
+      if (voiceAbortControllerRef.current === msgAbortController) {
+        voiceAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -2969,44 +3948,36 @@ export default function App() {
     mimeType = 'audio/wav',
     isAutoRetry = false
   ) => {
+    if (!wavBase64 || wavBase64.length < 180) {
+      setVoiceErrorNotice('No voice audio captured — please check your microphone and speak clearly.');
+      return;
+    }
+
+    setVoiceError(null);
     setIsThinkingHome(true);
     markStudioTaskProgress('Live Voice Command', 'working');
-    setHomeStatusBanner('Zara & AI Team heard your voice — executing...');
+    setHomeStatusBanner('Zara heard your voice — processing...');
 
     lastUserActivityAtRef.current = Date.now();
     hasUserInteractedRef.current = true;
+    let timedOutByWatchdog = false;
     try {
       const isOwnerVerified = getOwnerAuthSnapshot().isOwnerVerified;
       const heartLockedNow = Boolean(config.heartLockEnabled && !config.heartLockUnlocked);
       const effectiveLoveVoice = Boolean(config.loveMode && !heartLockedNow);
-      const effectiveEmotionVoice = heartLockedNow ? 'calm' : config.emotionMode || 'apnapan';
+      const effectiveEmotionVoice = effectiveLoveVoice ? config.emotionMode || 'apnapan' : 'calm';
       const activeMemList = isOwnerVerified ? ownerMemories : deviceMemories;
 
       if (!isAppOnline()) {
-        const offlineVoice = await runOfflineZaraBrain({
-          userText: 'Zara offline voice status',
-          language,
-          isOwnerVerified,
-          userNickname: config.userNickname || 'Friend',
-          loveMode: effectiveLoveVoice,
-          schedules,
-          workTasks,
-          memories: !heartLockedNow ? activeMemList : [],
-        });
-        markStudioTaskProgress('Offline Voice Ready', 'completed');
-        setHomeStatusBanner('Offline Voice Active · Zara & AI Team Listening');
-        await audioService.speakText(offlineVoice.replyText, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-          loveMode: effectiveLoveVoice,
-          emotionMode: effectiveEmotionVoice,
-        });
+        const offlineMsg =
+          'No internet connection — voice recognition needs online connection to understand speech.';
+        setHomeStatusBanner(offlineMsg);
+        setVoiceErrorNotice(offlineMsg, 7000);
         return;
       }
 
       const activeThread = isOwnerVerified ? ownerMessages : guestMessages;
-      const historySnapshot = activeThread.slice(-22).map((m) => ({
+      const historySnapshot = activeThread.slice(-14).map((m) => ({
         role: m.sender === 'user' ? 'user' : 'model',
         parts: [{ text: m.text }],
       }));
@@ -3025,9 +3996,17 @@ export default function App() {
         ? buildMemoryAndScheduleDigest(activeMemList, activeThread, schedules, 'voice command')
         : '';
 
+      const activeTurnToken = ++voiceTurnTokenRef.current;
+      try {
+        voiceAbortControllerRef.current?.abort();
+      } catch {}
       const voiceController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      voiceAbortControllerRef.current = voiceController;
       const voiceAbortTimer = voiceController
-        ? window.setTimeout(() => voiceController.abort(), 42_000)
+        ? window.setTimeout(() => {
+            timedOutByWatchdog = true;
+            voiceController.abort();
+          }, 55_000)
         : null;
 
       let res: Response;
@@ -3071,6 +4050,10 @@ export default function App() {
               brainMode: config.brainMode || 'auto',
               ttsEngine: config.ttsEngine || 'hunter_tts_ultra_premium',
               enabledAiEngines: config.enabledAiEngines,
+              environmentContext: buildEnvironmentContextSummary(
+                environmentSnapshotRef.current,
+                visionMode === 'camera'
+              ),
             }),
           },
           {
@@ -3081,14 +4064,37 @@ export default function App() {
         );
       } finally {
         if (voiceAbortTimer) window.clearTimeout(voiceAbortTimer);
+        if (voiceAbortControllerRef.current === voiceController) {
+          voiceAbortControllerRef.current = null;
+        }
+      }
+
+      if (voiceTurnTokenRef.current !== activeTurnToken) {
+        return;
       }
 
       if (res.ok) {
         const data = await res.json();
-        if (data.silence) {
-          setHomeStatusBanner('آواز بہت ہلکی تھی — دوبارہ بولیں (Voice ON ✓)');
+        if (voiceTurnTokenRef.current !== activeTurnToken) {
           return;
         }
+        if (data.silence) {
+          if (data.sttUnavailable || data.orchestration?.sttModelUsed === 'unavailable') {
+            const msg =
+              data.error ||
+              'Voice speech-to-text service is busy — please repeat your sentence.';
+            setHomeStatusBanner(msg);
+            setVoiceErrorNotice(msg, 7500);
+          } else {
+            const msg =
+              data.message ||
+              'Could not hear clear words — please speak a little louder or closer to the mic.';
+            setHomeStatusBanner(msg);
+            setVoiceErrorNotice(msg, 6500);
+          }
+          return;
+        }
+        setVoiceError(null);
 
         const serverVerified = Boolean(data.ownerVerified);
         const heard = data.userTranscription || '';
@@ -3097,9 +4103,15 @@ export default function App() {
           data.assistantLabel || activeAssistantProfile.shortLabel;
         let reply =
           data.zaraReply ||
-          (serverVerified
+          (language === 'english'
+            ? 'I heard you clearly, how can I help?'
+            : language === 'hindi'
+            ? 'जी, मैं आपकी बात सुन रही हूँ!'
+            : language === 'punjabi'
+            ? 'ਜੀ, ਮੈਂ ਤੁਹਾਡੀ ਗੱਲ ਸੁਣ ਰਹੀ ਆਂ!'
+            : serverVerified
             ? 'جی میری جان، میں آپ کی بات سن رہی ہوں!'
-            : 'जी दोस्त, मैं आपकी बात सुन रही हूँ!');
+            : 'جی دوست، میں آپ کی بات سن رہی ہوں!');
         const timeLabel = getMobileClockSnapshot().shortTime12;
         const nowId = Date.now();
 
@@ -3111,12 +4123,20 @@ export default function App() {
             setSecurityOverlayMode(null);
           }
           capture100DayMemoryIfNotable(heard);
+          if (detectUserBusyIntent(heard)) {
+            busyUntilRef.current = Date.now() + 10 * 60_000;
+          }
           const heardMood = detectMoodFromText(heard);
           if (heardMood) {
             setCurrentMood(heardMood);
           }
-          if (serverVerified && activeAssistantId === 'zara' && config.loveMode && !heartLockedNow) {
-            const voiceShift = detectMoodShiftFromInput(heard, config.emotionMode || 'apnapan');
+          if (activeAssistantId === 'zara' && !heartLockedNow) {
+            const allowRomanticVoice = Boolean(serverVerified && config.loveMode);
+            const voiceShift = detectEmotionForCompanion(
+              heard,
+              config.emotionMode || 'apnapan',
+              allowRomanticVoice
+            );
             if (voiceShift.changed) {
               setConfig((prev) => ({ ...prev, emotionMode: voiceShift.nextMood }));
             }
@@ -3137,6 +4157,41 @@ export default function App() {
               },
             ]);
             await handleSwitchAssistant(voiceAssistantCmd.assistantId, true);
+            setHomeStatusBanner(null);
+            return;
+          }
+          if (voiceAssistantCmd?.type === 'language_switch' && voiceAssistantCmd.targetLanguage) {
+            handleSelectLanguage(voiceAssistantCmd.targetLanguage);
+            const confirmTxt =
+              voiceAssistantCmd.targetLanguage === 'roman_urdu'
+                ? 'Ji bilkul! Ab maine Roman Urdu style active kar diya hai.'
+                : `Language switched to ${voiceAssistantCmd.targetLanguage}.`;
+            appendActiveMessages((prev) => [
+              ...prev,
+              {
+                id: `${nowId}-u`,
+                sender: 'user',
+                text: heard,
+                timestamp: timeLabel,
+                createdAtMs: nowId,
+                language,
+              },
+              {
+                id: `${nowId + 1}-z`,
+                sender: 'zara',
+                text: confirmTxt,
+                timestamp: timeLabel,
+                createdAtMs: nowId + 1,
+                language: voiceAssistantCmd.targetLanguage,
+              },
+            ]);
+            await audioService.speakText(confirmTxt, {
+              voiceName: config.voiceName,
+              language:
+                voiceAssistantCmd.targetLanguage === 'roman_urdu'
+                  ? 'urdu'
+                  : voiceAssistantCmd.targetLanguage,
+            });
             setHomeStatusBanner(null);
             return;
           }
@@ -3219,6 +4274,8 @@ export default function App() {
               data.deviceAction.action === 'close' ? 'close' : 'open'
             );
           }
+        } else if (data.musicAction && (!heard || !detectMusicControlCommand(heard))) {
+          executeMusicControlCommand(data.musicAction);
         }
 
         appendActiveMessages((prev) => [
@@ -3253,6 +4310,9 @@ export default function App() {
         markStudioTaskProgress(heard || 'Voice Command', 'completed');
         setHomeStatusBanner(null);
 
+        if (voiceTurnTokenRef.current !== activeTurnToken) {
+          return;
+        }
         audioService.selfHealAudioPipeline();
         await audioService.speakText(reply, {
           language,
@@ -3277,53 +4337,37 @@ export default function App() {
           base64Audio: heard && detectScheduleCommandFromText(heard) ? undefined : data.audio,
         });
       } else {
-        throw new Error(`HTTP ${res.status}`);
+        const errPayload = await res.json().catch(() => null);
+        const serverErr =
+          errPayload?.error ||
+          (res.status === 503
+            ? 'Speech recognition server is temporarily unavailable. Please try again.'
+            : `Voice upload failed (HTTP ${res.status}).`);
+        throw new Error(serverErr);
       }
-    } catch {
-      if (!isAutoRetry) {
-        setHomeStatusBanner('Reconnecting voice server & retrying automatically...');
-        zaraSelfHealEngine.enqueueFailedTaskForAutoExecution(
-          'Auto-retry voice command',
-          async () => {
-            await sendWavRef.current(wavBase64, mimeType, true);
-          }
-        );
-      } else {
-        const verifiedNow = ownerAuthRef.current.isOwnerVerified;
-        const heartLockedFallback = Boolean(config.heartLockEnabled && !config.heartLockUnlocked);
-        const offlineVoice = await runOfflineZaraBrain({
-          userText: 'Zara please answer me clearly in simple Urdu.',
-          language,
-          isOwnerVerified: verifiedNow,
-          userNickname: verifiedNow ? config.userNickname : 'Friend',
-          loveMode: verifiedNow && !heartLockedFallback ? config.loveMode : false,
-          schedules,
-          workTasks,
-          memories: !heartLockedFallback && verifiedNow ? ownerMemories : [],
-        });
-        appendActiveMessages((prev) => [
-          ...prev,
-          {
-            id: `${Date.now()}-voice-fb`,
-            sender: 'zara',
-            text: offlineVoice.replyText,
-            timestamp: getMobileClockSnapshot().shortTime12,
-            createdAtMs: Date.now(),
-            language,
-          },
-        ]);
-        setHomeStatusBanner('Offline Local Brain · Answered Ready ✓');
-        if (config.autoSpeak) {
-          audioService.selfHealAudioPipeline();
-          await audioService.speakText(offlineVoice.replyText, {
-            language,
-            pitch: config.voicePitch,
-            rate: config.voiceSpeed,
-            voiceName: config.voiceName || 'Zephyr',
-            loveMode: verifiedNow && !heartLockedFallback ? config.loveMode : false,
-          });
+    } catch (err: any) {
+      if (err?.name === 'AbortError' && !timedOutByWatchdog) {
+        return;
+      }
+      const errMsg =
+        err?.name === 'AbortError'
+          ? 'Voice request timed out — please check your internet and speak again.'
+          : String(err?.message || 'Failed to send voice to Zara AI.');
+
+      if (!isAutoRetry && /502|503|504|Failed to fetch|NetworkError|timed out/i.test(errMsg)) {
+        setHomeStatusBanner('Voice connection hiccup — retrying once...');
+        setVoiceErrorNotice('Voice connection hiccup — retrying automatically...', 4000);
+        try {
+          await new Promise((r) => window.setTimeout(r, 900));
+          await sendWavRef.current(wavBase64, mimeType, true);
+          return;
+        } catch {
+          // Handled below if retry also fails
         }
       }
+
+      setHomeStatusBanner(errMsg);
+      setVoiceErrorNotice(errMsg, 8500);
     } finally {
       setIsThinkingHome(false);
     }
@@ -3344,8 +4388,14 @@ export default function App() {
     const listener = new AlwaysOnVoiceListener(
       {
         onStateChange: (active) => setIsAlwaysOnRunning(active),
-        onInterimText: (txt) => setInterimVoiceText(txt),
+        onInterimText: (txt) => {
+          setInterimVoiceText(txt);
+          if (txt && /^(🎤|📡)/.test(txt)) {
+            setVoiceError(null);
+          }
+        },
         onCommandTranscript: async (finalText) => {
+          setVoiceError(null);
           if (
             securityOverlayRef.current === 'zara_closed' &&
             !/(close|band|off|بند|کلوز|آف|बंद|क्लोज)/i.test(finalText)
@@ -3356,6 +4406,8 @@ export default function App() {
           setIsThinkingHome(true);
           try {
             await sendMsgRef.current(finalText);
+          } catch (e: any) {
+            setVoiceErrorNotice(e?.message || 'Failed to process voice command.');
           } finally {
             setIsThinkingHome(false);
           }
@@ -3364,12 +4416,18 @@ export default function App() {
           audioService.selfHealAudioPipeline();
           await sendWavRef.current(wavB64, mime);
         },
-        onVolume: (v) => setHomeMicVol(v),
+        onVolume: (v) => updateHomeMicVolQuantized(v),
         onPermissionError: (msg) => {
           setHomeStatusBanner(msg);
+          setVoiceErrorNotice(msg, 0);
           setNeedsPermissionSetup(true);
         },
+        onVoiceError: (msg) => {
+          setHomeStatusBanner(msg);
+          setVoiceErrorNotice(msg, 7500);
+        },
         onWakeWordTriggered: (phrase) => {
+          setVoiceError(null);
           setHomeStatusBanner(`🎤 Wake-Word "${phrase}" heard — listening...`);
         },
       },
@@ -3429,6 +4487,13 @@ export default function App() {
     alwaysOnRef.current?.setLanguage(language);
   }, [language]);
 
+  useEffect(() => {
+    alwaysOnRef.current?.setWakeWordConfig(
+      Boolean(securityConfig.wakeWordOnlyMode),
+      securityConfig.customWakeWord || 'hey zara'
+    );
+  }, [securityConfig.wakeWordOnlyMode, securityConfig.customWakeWord]);
+
   // Keep 24/7 Voice Commander running even in 'zara_closed' Standby & Minimized Background!
   // Only stop if disabled or locked by PIN/Intruder, and pause temporarily during direct capture.
   useEffect(() => {
@@ -3462,19 +4527,43 @@ export default function App() {
   const handleToggleAlwaysOnVoice = async () => {
     audioService.unlock();
     const next = !alwaysOnVoiceEnabled;
-    setAlwaysOnVoiceEnabled(next);
     if (next) {
       audioService.playChime('activate');
+      setAlwaysOnVoiceEnabled(true);
+      try {
+        localStorage.setItem(ALWAYS_ON_VOICE_KEY, '1');
+      } catch {}
+      await screenKeepAlive.enable();
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
         Notification.requestPermission().catch(() => {});
       }
-      await alwaysOnRef.current?.start();
-      setHomeStatusBanner(
-        '24/7 Voice Commander ON — Zara hears you on Side, Lock Screen & Background!'
-      );
+      const started = (await alwaysOnRef.current?.start()) ?? false;
+      if (!started) {
+        setAlwaysOnVoiceEnabled(false);
+        setIsAlwaysOnRunning(false);
+        try {
+          localStorage.setItem(ALWAYS_ON_VOICE_KEY, '0');
+        } catch {}
+        setNeedsPermissionSetup(true);
+        const errMsg =
+          'Could not start background microphone. Please allow Microphone access in App Permissions.';
+        setHomeStatusBanner(errMsg);
+        setVoiceErrorNotice(errMsg, 0);
+      } else {
+        setNeedsPermissionSetup(false);
+        setVoiceError(null);
+        setHomeStatusBanner(
+          '24/7 Voice Commander ON — Zara hears you on Side, Lock Screen & Background!'
+        );
+      }
     } else {
       audioService.playChime('tap');
+      setAlwaysOnVoiceEnabled(false);
+      try {
+        localStorage.setItem(ALWAYS_ON_VOICE_KEY, '0');
+      } catch {}
       alwaysOnRef.current?.stop();
+      setIsAlwaysOnRunning(false);
       syncForegroundVoiceNotification(false).catch(() => {});
       setHomeStatusBanner('Background & Lock-Screen Voice Listening disabled.');
     }
@@ -3502,7 +4591,7 @@ export default function App() {
     if (isHomeMicActive) {
       const wav = homeMicRef.current?.finishAndGetWav();
       setIsHomeMicActive(false);
-      setHomeMicVol(0);
+      updateHomeMicVolQuantized(0);
       if (wav) {
         await handleSendAudioWav(wav);
       } else {
@@ -3522,15 +4611,15 @@ export default function App() {
     setIsHomeMicActive(true);
 
     const ok = await session.start({
-      onVolume: (v) => setHomeMicVol(v),
+      onVolume: (v) => updateHomeMicVolQuantized(v),
       onAutoFinish: async (wav) => {
         setIsHomeMicActive(false);
-        setHomeMicVol(0);
+        updateHomeMicVolQuantized(0);
         await handleSendAudioWav(wav);
       },
       onError: (msg) => {
         setIsHomeMicActive(false);
-        setHomeMicVol(0);
+        updateHomeMicVolQuantized(0);
         setHomeStatusBanner(msg);
         setNeedsPermissionSetup(true);
       },
@@ -3543,7 +4632,7 @@ export default function App() {
     }
   };
 
-  // Single Master Assistant ON / OFF Button Handler (Continuous Listen -> Answer -> Speak -> Listen loop)
+  // Single Master Assistant ON / OFF Button Handler (One press starts continuous conversation; press again to stop)
   const handleToggleFrontMicMaster = async () => {
     if (voiceToggleBusyRef.current) return;
     voiceToggleBusyRef.current = true;
@@ -3562,16 +4651,16 @@ export default function App() {
         homeMicRef.current?.stopAndDiscard();
         setIsAlwaysOnRunning(false);
         setIsHomeMicActive(false);
-        setHomeMicVol(0);
+        updateHomeMicVolQuantized(0);
         setInterimVoiceText('');
+        setVoiceError(null);
         setIsThinkingHome(false);
         syncForegroundVoiceNotification(false).catch(() => {});
-        setHomeStatusBanner(
-          'Assistant OFF — Tap ON anytime for continuous hands-free listening & replies.'
-        );
+        setHomeStatusBanner('Voice conversation stopped. Tap the voice button once to start again.');
         return;
       }
 
+      setVoiceError(null);
       audioService.stopAudio();
       audioService.playChime('activate');
       setAlwaysOnVoiceEnabled(true);
@@ -3582,50 +4671,63 @@ export default function App() {
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
         Notification.requestPermission().catch(() => {});
       }
+
       const alwaysOnStarted = (await alwaysOnRef.current?.start()) ?? false;
 
       if (!alwaysOnStarted) {
-        // Fallback: try direct single-turn mic session cleanly if continuous pipeline failed
-        const fallbackSession = new DirectMicSession();
-        homeMicRef.current = fallbackSession;
-        const directOk = await fallbackSession.start({
-          onVolume: (v) => setHomeMicVol(v),
-          onAutoFinish: async (wav) => {
-            setIsHomeMicActive(false);
-            setHomeMicVol(0);
-            await sendWavRef.current(wav);
-          },
-          onError: (msg) => {
-            setIsHomeMicActive(false);
-            setHomeMicVol(0);
-            setHomeStatusBanner(msg);
-          },
-        });
-
-        if (directOk) {
-          setAlwaysOnVoiceEnabled(false);
-          setIsHomeMicActive(true);
-          setNeedsPermissionSetup(false);
-          setHomeStatusBanner('Mic ON — اب بولیں، میں سن رہی ہوں!');
-        } else {
-          setAlwaysOnVoiceEnabled(false);
-          try {
-            localStorage.setItem(ALWAYS_ON_VOICE_KEY, '0');
-          } catch {}
-          setNeedsPermissionSetup(true);
-          setHomeStatusBanner(
-            'Allow Microphone permission so Zara can listen continuously & reply.'
-          );
-        }
+        setAlwaysOnVoiceEnabled(false);
+        setIsAlwaysOnRunning(false);
+        try {
+          localStorage.setItem(ALWAYS_ON_VOICE_KEY, '0');
+        } catch {}
+        setNeedsPermissionSetup(true);
+        const failMsg =
+          'Could not start microphone. Please allow microphone access and tap the voice button once.';
+        setHomeStatusBanner(failMsg);
+        setVoiceErrorNotice(failMsg, 0);
       } else {
         setNeedsPermissionSetup(false);
+        setVoiceError(null);
         setHomeStatusBanner(
-          'Assistant ON — Zara is listening continuously and will answer by voice.'
+          'Continuous Voice ON — Speak naturally; Zara listens and replies automatically until you tap Stop.'
         );
       }
-    } finally {
+      } finally {
       voiceToggleBusyRef.current = false;
     }
+  };
+
+  // Single-press Skip button handler: skips active speech/thinking turn and keeps continuous conversation listening smoothly
+  const handleSkipVoiceTurn = async () => {
+    audioService.unlock();
+    voiceTurnTokenRef.current += 1;
+    try {
+      voiceAbortControllerRef.current?.abort();
+    } catch {}
+    voiceAbortControllerRef.current = null;
+
+    audioService.stopAudio(true);
+    setIsThinkingHome(false);
+    setVoiceError(null);
+    setInterimVoiceText('');
+
+    if (!alwaysOnVoiceEnabled) {
+      setAlwaysOnVoiceEnabled(true);
+      try {
+        localStorage.setItem(ALWAYS_ON_VOICE_KEY, '1');
+      } catch {}
+      const started = (await alwaysOnRef.current?.start()) ?? false;
+      if (!started) {
+        setAlwaysOnVoiceEnabled(false);
+        const errMsg = 'Could not resume microphone — please allow microphone access.';
+        setHomeStatusBanner(errMsg);
+        setVoiceErrorNotice(errMsg, 0);
+        return;
+      }
+    }
+
+    alwaysOnRef.current?.skipCurrentTurn();
+    setHomeStatusBanner('Skipped — continuous listening active, speak anytime.');
   };
 
   // Dedicated Front ('user') & Back ('environment') Camera Switch + 1-Tap Photo Snap to Chat
@@ -3962,6 +5064,162 @@ export default function App() {
     ]);
   };
 
+  const handleDismissVoiceError = useCallback(() => setVoiceError(null), []);
+  const handleUpdateConfigInline = useCallback(
+    (updates: Partial<PersonalityConfig>) => setConfig((prev) => ({ ...prev, ...updates })),
+    []
+  );
+  const handleSendMessageStable = useCallback(
+    (text: string, customImageBase64?: string) => sendMsgRef.current(text, customImageBase64),
+    []
+  );
+  const handleSendAudioWavStable = useCallback(
+    (wavBase64: string, mimeType?: string) => sendWavRef.current(wavBase64, mimeType),
+    []
+  );
+  const handleOpenAudioCallStable = useCallback(() => {
+    audioService.unlock();
+    audioService.stopAudio();
+    setAudioCallMinimized(false);
+    setShowAudioCall(true);
+  }, []);
+  const handleStartLiveModeStable = useCallback(() => {
+    audioService.unlock();
+    audioService.stopAudio();
+    homeMicRef.current?.stopAndDiscard();
+    setIsHomeMicActive(false);
+    setAudioCallMinimized(false);
+    setShowAudioCall(true);
+  }, []);
+  const handleOpenSettingsControlsStable = useCallback(() => {
+    setSettingsInitialTab('controls');
+    setShowSettings(true);
+  }, []);
+  const handleOpenNotificationsAlertsStable = useCallback(() => {
+    setNotifModalTab('alerts');
+    setShowNotifications(true);
+  }, []);
+  const handleOpenMemoriesStable = useCallback(() => setShowMemories(true), []);
+  const handleOpenChatStable = useCallback(() => setShowChatDrawer(true), []);
+  const handleOpenAiStudioStable = useCallback((tab?: AiStudioTab) => {
+    setAiStudioTab(tab || 'office');
+    setShowAiStudio(true);
+  }, []);
+  const handleOpenCharacterStable = useCallback(() => setShowSoul(true), []);
+  const handleStopCameraStable = useCallback(() => {
+    setIsManualCameraPreview(false);
+    zaraVision.stop();
+    setHomeStatusBanner('Camera turned OFF.');
+  }, []);
+  const handleOpenDriverModeStable = useCallback(() => setShowDriverMode(true), []);
+  const handleOpenFileManagerStable = useCallback(() => setShowFileManager(true), []);
+  const handleOpenMobileControlStable = useCallback(() => {
+    setHighlightedSettingId(null);
+    setMobileControlTab('permissions');
+    setShowMobileControl(true);
+  }, []);
+  const handleOpenMoodWorkStable = useCallback(() => {
+    setMoodWorkInitialTab('mood_gesture');
+    setShowMoodWorkModal(true);
+  }, []);
+  const handleOpenProjectFilesStable = useCallback(() => setShowProjectExport(true), []);
+  const handleOpenInstallStable = useCallback(() => {
+    setAutoStartPlayDownload(true);
+    setShowInstallModal(true);
+  }, []);
+  const handleOpenWhatsAppQuickStable = useCallback(() => {
+    audioService.unlock();
+    audioService.playChime('activate');
+    setPendingConfirmAction({
+      id: `confirm-wa-${Date.now()}`,
+      kind: 'message',
+      contactName: 'Choose Recipient in App',
+      phone: '',
+      messagingApp: 'whatsapp',
+      messageBody: 'Assalam o Alaikum!',
+      createdAtMs: Date.now(),
+    });
+    setHomeStatusBanner('WhatsApp message composer ready — pick contact or enter number.');
+  }, []);
+
+  const handleScanSurroundings = useCallback(async (): Promise<string> => {
+    audioService.unlock();
+    setHomeStatusBanner('Scanning surroundings (weather, battery thermal, network)...');
+    const tel = await readMobileHardwareTelemetry();
+    const lat = azanConfig.latitude ?? 31.5204;
+    const lon = azanConfig.longitude ?? 74.3587;
+    const cityLabel = azanConfig.cityName || 'Lahore';
+    let weatherTempC: number | null = null;
+    let weatherCondition = 'Clear';
+    let weatherHumidity = 60;
+    try {
+      const wRes = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code`
+      );
+      if (wRes.ok) {
+        const wd = await wRes.json();
+        weatherTempC = wd?.current?.temperature_2m !== undefined ? Math.round(Number(wd.current.temperature_2m)) : null;
+        weatherHumidity = wd?.current?.relative_humidity_2m !== undefined ? Math.round(Number(wd.current.relative_humidity_2m)) : 60;
+        const code = Number(wd?.current?.weather_code ?? 0);
+        weatherCondition = code === 0 ? 'Clear' : code <= 3 ? 'Partly Cloudy' : code >= 80 ? 'Rainy' : 'Mild';
+      }
+    } catch {}
+
+    const brief = buildSurroundingsPerceptionBrief(
+      {
+        capturedAtIso: new Date().toISOString(),
+        locationLabel: cityLabel,
+        tempC: weatherTempC,
+        weatherCondition,
+        humidity: weatherHumidity,
+        batteryPct: tel.batteryLevel,
+        batteryTempC: tel.batteryTempC,
+        isCharging: tel.isCharging,
+        networkType: tel.networkType,
+        online: tel.online,
+      },
+      language
+    );
+    setHomeStatusBanner(brief);
+    appendActiveMessages((prev) => [
+      ...prev,
+      {
+        id: `surroundings-${Date.now()}`,
+        sender: 'zara',
+        text: brief,
+        timestamp: getMobileClockSnapshot().shortTime12,
+        createdAtMs: Date.now(),
+        language,
+      },
+    ]);
+    await audioService.speakText(brief, {
+      language: language === 'auto' ? 'urdu' : language,
+      rate: config.voiceSpeed,
+      voiceName: config.voiceName || 'Zephyr',
+    });
+    return brief;
+  }, [azanConfig.latitude, azanConfig.longitude, azanConfig.cityName, language, config.voiceSpeed, config.voiceName]);
+
+  const handleTriggerOverheatTest = useCallback(() => {
+    const warnMsg =
+      language === 'english'
+        ? 'Test Alert: Battery temperature is 41.5 degrees Celsius while charging! Please unplug the charger now.'
+        : language === 'hindi'
+        ? 'टेस्ट चेतावनी: चार्जिंग के दौरान बैटरी 41.5 डिग्री गरम हो गई है! कृपया चार्जर हटा दें।'
+        : language === 'punjabi'
+        ? 'ਟੈਸਟ ਚੇਤਾਵਨੀ: ਚਾਰਜਿੰਗ ਵੇਲੇ ਬੈਟਰੀ 41.5 ਡਿਗਰੀ ਗਰਮ ਹੋ ਗਈ ਏ! ਚਾਰਜਰ ਉਤਾਰ ਦਿਓ।'
+        : language === 'roman_urdu'
+        ? 'Test Intibah: Charging ke dauran battery ka darja hararat 41.5 degree ho gaya hai! Barah-e-karam charger utaar dein.'
+        : 'ٹیسٹ انتباہ: چارجنگ کے دوران بیٹری کا درجہ حرارت 41.5 ڈگری ہو گیا ہے! براہ کرم چارجر اتار دیں۔';
+    setHomeStatusBanner(warnMsg);
+    audioService.selfHealAudioPipeline();
+    audioService.speakText(warnMsg, {
+      language: language === 'auto' ? 'urdu' : language,
+      rate: config.voiceSpeed,
+      voiceName: config.voiceName || 'Zephyr',
+    });
+  }, [language, config.voiceSpeed, config.voiceName]);
+
   // 1. Owner Face Verification / Anti-Touch Intruder Screen Lock / Zara Standby Overlay
   if (securityOverlayMode) {
     return (
@@ -4035,12 +5293,10 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen w-full bg-[#060913] flex items-center justify-center ${
+      className={`min-h-screen w-full bg-[#0b0424] flex items-center justify-center ${
         isMobileFrame ? 'p-0 sm:p-4' : 'p-0'
-      } text-slate-100 overflow-x-hidden relative selection:bg-sky-500 selection:text-slate-950`}
+      } text-white overflow-x-hidden relative selection:bg-fuchsia-500 selection:text-white`}
     >
-      <div className="fixed inset-0 bg-command-grid opacity-70 pointer-events-none" />
-
       <input
         ref={homeScreenInputRef}
         type="file"
@@ -4056,12 +5312,15 @@ export default function App() {
         micVolume={homeMicVol}
         interimTranscript={interimVoiceText}
         subtitleText={homeStatusBanner || latestZaraMessage}
+        voiceError={voiceError}
+        onDismissVoiceError={handleDismissVoiceError}
         messages={messages}
         config={config}
-        onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
-        onSendMessage={handleSendMessage}
-        onSendAudioWav={handleSendAudioWav}
+        onUpdateConfig={handleUpdateConfigInline}
+        onSendMessage={handleSendMessageStable}
+        onSendAudioWav={handleSendAudioWavStable}
         onToggleMic={handleToggleFrontMicMaster}
+        onSkipVoiceTurn={handleSkipVoiceTurn}
         onEnableAllFunctions={handleEnableAllZaraFunctions}
         allFunctionsActive={Boolean(
           alwaysOnVoiceEnabled &&
@@ -4071,26 +5330,38 @@ export default function App() {
             config.autoSelfCheckEnabled &&
             securityConfig.voiceControlEnabled
         )}
-        onOpenAudioCall={() => {
-          audioService.unlock();
-          audioService.stopAudio();
-          setShowAudioCall(true);
-        }}
-        onOpenSettings={() => openSettingsAtTab('controls')}
+        isAudioCallOpen={showAudioCall}
+        onOpenAudioCall={handleOpenAudioCallStable}
+        onStartLiveMode={handleStartLiveModeStable}
+        onOpenSettings={handleOpenSettingsControlsStable}
+        onOpenNotifications={handleOpenNotificationsAlertsStable}
+        unreadNotificationsCount={incomingNotifs.length}
+        onOpenMemories={handleOpenMemoriesStable}
+        onOpenChat={handleOpenChatStable}
+        onOpenAiStudio={handleOpenAiStudioStable}
+        onOpenCharacter={handleOpenCharacterStable}
         securityConfig={securityConfig}
         isOwnerVerified={ownerAuth.isOwnerVerified}
         language={language}
+        onSelectLanguage={handleSelectLanguage}
         visionMode={visionMode}
         cameraFacing={cameraFacing}
         onStartCamera={() => handleSelectCameraLens('user')}
-        onStopCamera={() => {
-          setIsManualCameraPreview(false);
-          zaraVision.stop();
-          setHomeStatusBanner('Camera turned OFF.');
-        }}
+        onStopCamera={handleStopCameraStable}
         onToggleScreenShare={handleToggleHomeScreenShare}
-        onOpenDriverMode={() => setShowDriverMode(true)}
-        onOpenFileManager={() => setShowFileManager(true)}
+        onOpenDriverMode={handleOpenDriverModeStable}
+        onOpenFileManager={handleOpenFileManagerStable}
+        batteryTelemetry={batteryTelemetry}
+        onScanSurroundings={handleScanSurroundings}
+        onOpenWhatsAppDigest={() => {
+          setNotifModalTab('alerts');
+          setShowNotifications(true);
+        }}
+        onOpenWhatsAppQuick={handleOpenWhatsAppQuickStable}
+        onOpenMobileControl={handleOpenMobileControlStable}
+        onOpenMoodWork={handleOpenMoodWorkStable}
+        onOpenProjectFiles={handleOpenProjectFilesStable}
+        onOpenInstall={handleOpenInstallStable}
       />
 
       {/* Event-Only Floating Overlays (Alarms, Call/Msg Confirmations, Mic Permission Prompt) */}
@@ -4210,11 +5481,25 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setPendingConfirmAction(null);
-                      setHomeStatusBanner('Action cancelled.');
+                      setHomeStatusBanner(
+                        language === 'english'
+                          ? 'Action cancelled.'
+                          : language === 'hindi'
+                          ? 'रद्द कर दिया गया।'
+                          : language === 'punjabi'
+                          ? 'ਰੱਦ ਕਰ ਦਿੱਤਾ ਗਿਆ।'
+                          : 'منسوخ کر دیا گیا۔'
+                      );
                     }}
                     className="min-h-[42px] py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 text-slate-200 font-bold text-xs cursor-pointer"
                   >
-                    Cancel (نہیں)
+                    {language === 'english'
+                      ? 'Cancel'
+                      : language === 'hindi'
+                      ? 'Cancel (नहीं)'
+                      : language === 'punjabi'
+                      ? 'Cancel (ਨਹੀਂ)'
+                      : 'Cancel (نہیں)'}
                   </button>
                   <button
                     type="button"
@@ -4226,7 +5511,25 @@ export default function App() {
                   >
                     <Check className="w-4 h-4 shrink-0" />
                     <span>
-                      {pendingConfirmAction.kind === 'message' ? 'Confirm & Prepare' : 'Confirm Call'}
+                      {language === 'hindi'
+                        ? pendingConfirmAction.kind === 'message'
+                          ? 'Confirm (हाँ)'
+                          : 'Confirm Call (हाँ)'
+                        : language === 'punjabi'
+                        ? pendingConfirmAction.kind === 'message'
+                          ? 'Confirm (ਹਾਂ)'
+                          : 'Confirm Call (ਹਾਂ)'
+                        : language === 'roman_urdu'
+                        ? pendingConfirmAction.kind === 'message'
+                          ? 'Confirm (Haan)'
+                          : 'Confirm Call (Haan)'
+                        : language === 'urdu'
+                        ? pendingConfirmAction.kind === 'message'
+                          ? 'Confirm (ہاں)'
+                          : 'Confirm Call (ہاں)'
+                        : pendingConfirmAction.kind === 'message'
+                        ? 'Confirm & Prepare'
+                        : 'Confirm Call'}
                     </span>
                   </button>
                 </div>
@@ -4366,46 +5669,8 @@ export default function App() {
         </div>
       )}
 
-      {/* LAZY-LOADED MODALS (zero startup download overhead on mobile 4G!) */}
-      <Suspense fallback={null}>
-        {showMemories && (
-          <MemoriesModal
-            isOpen={showMemories}
-            onClose={() => setShowMemories(false)}
-            memories={memories}
-            onAddMemory={handleAddMemory}
-            onUpdateMemory={handleUpdateMemory}
-            onDeleteMemory={handleDeleteMemory}
-          />
-        )}
-
-        {showSoul && (
-          <SoulModal
-            isOpen={showSoul}
-            onClose={() => setShowSoul(false)}
-            config={config}
-            ownerPinCode={securityConfig.pinCode}
-            onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
-          />
-        )}
-
-        {showData && (
-          <DataModal
-            isOpen={showData}
-            onClose={() => setShowData(false)}
-            selectedLanguage={language}
-            onSelectLanguage={setLanguage}
-          />
-        )}
-
-        {showStats && (
-          <StatsModal
-            isOpen={showStats}
-            onClose={() => setShowStats(false)}
-            affectionLevel={config.affectionLevel}
-          />
-        )}
-
+      {/* MODALS */}
+      <ModalErrorBoundary onReset={() => setShowSettings(false)}>
         {showSettings && (
           <SettingsModal
             isOpen={showSettings}
@@ -4425,7 +5690,7 @@ export default function App() {
             }}
             onCloseZaraAppNow={handleCloseZaraAppNow}
             language={language}
-            onSelectLanguage={setLanguage}
+            onSelectLanguage={handleSelectLanguage}
             isMobileFrame={isMobileFrame}
             onToggleMobileFrame={() => setIsMobileFrame(!isMobileFrame)}
             downloadLinkUrl={playStoreLaunchUrl}
@@ -4436,7 +5701,7 @@ export default function App() {
             }}
             onOpenMobileControl={() => {
               setHighlightedSettingId(null);
-              setMobileControlTab('settings');
+              setMobileControlTab('permissions');
               setShowMobileControl(true);
             }}
             onOpenMobilePermissions={() => {
@@ -4470,6 +5735,13 @@ export default function App() {
             isFloatingPiP={isFloatingPiP}
             autoGestureWatch={autoGestureWatch}
             spokenAlertsEnabled={spokenNotifConfig.enabled}
+            spokenNotifConfig={spokenNotifConfig}
+            onUpdateSpokenNotifConfig={(updates) =>
+              setSpokenNotifConfig((prev) => ({ ...prev, ...updates }))
+            }
+            onTestSpokenNotification={() => {
+              handleRepeatLastNotification();
+            }}
             latestZaraMessage={latestZaraMessage}
             onToggleAlwaysOnVoice={handleToggleAlwaysOnVoice}
             onToggleDirectMic={handleToggleDirectMic}
@@ -4516,6 +5788,7 @@ export default function App() {
               audioService.selfHealAudioPipeline();
               audioService.speakText(latestZaraMessage, {
                 language,
+                pitch: config.voicePitch,
                 rate: config.voiceSpeed,
                 voiceName: config.voiceName || 'Zephyr',
                 loveMode: config.loveMode,
@@ -4524,6 +5797,58 @@ export default function App() {
               });
             }}
             onEnableAllFunctions={handleEnableAllZaraFunctions}
+            azanConfig={azanConfig}
+            onUpdateAzanConfig={(updates) =>
+              setAzanConfig((prev: AzanRamadanConfig) => ({ ...prev, ...updates }))
+            }
+            onTestAzanAlert={() => {
+              const pt = computeDailyPrayerTimes(
+                azanConfig.latitude ?? 31.5204,
+                azanConfig.longitude ?? 74.3587
+              );
+              const prompt = buildAzanVoicePrompt(
+                'maghrib_iftar',
+                pt.maghribIftar,
+                azanConfig.cityName || 'Lahore',
+                language
+              );
+              setHomeStatusBanner(prompt);
+              audioService.speakText(prompt, {
+                language: language === 'auto' ? 'urdu' : language,
+                rate: config.voiceSpeed,
+                voiceName: config.voiceName || 'Zephyr',
+              });
+            }}
+          />
+        )}
+
+      <Suspense
+        fallback={
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none">
+            <div className="px-4 py-2 rounded-2xl bg-slate-950/90 border border-pink-500/40 text-xs font-bold text-pink-200">
+              Loading Zara Panel...
+            </div>
+          </div>
+        }
+      >
+        {showMemories && (
+          <MemoriesModal
+            isOpen={showMemories}
+            onClose={() => setShowMemories(false)}
+            memories={memories}
+            onAddMemory={handleAddMemory}
+            onUpdateMemory={handleUpdateMemory}
+            onDeleteMemory={handleDeleteMemory}
+          />
+        )}
+
+        {showSoul && (
+          <SoulModal
+            isOpen={showSoul}
+            onClose={() => setShowSoul(false)}
+            config={config}
+            ownerPinCode={securityConfig.pinCode}
+            onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
           />
         )}
 
@@ -4534,11 +5859,13 @@ export default function App() {
             initialTab={mobileControlTab}
             highlightedSettingId={highlightedSettingId}
             visionMode={visionMode}
+            language={language}
             securityConfig={securityConfig}
             onUpdateSecurity={(updates) =>
               setSecurityConfig((prev) => ({ ...prev, ...updates }))
             }
             onAskZaraAboutVision={handleAskZaraAboutVision}
+            onTriggerOverheatTest={handleTriggerOverheatTest}
             onLockNow={() => {
               setIntruderReason('Locked via Mobile Security Hub');
               setSecurityOverlayMode('intruder_lockout');
@@ -4586,11 +5913,21 @@ export default function App() {
             onSelectAssistant={(id) => {
               handleSwitchAssistant(id, false);
             }}
+            onOpenVoiceCall={() => {
+              setShowChatDrawer(false);
+              handleStartLiveModeStable();
+            }}
             loveMode={config.loveMode}
             romanceIntensity={config.romanceIntensity}
             onOpenBuiltAppById={(id) => {
               const found = builtApps.find((b) => b.id === id);
               if (found) setActivePreviewApp(found);
+            }}
+            onEnsureMissZsNoteInChat={() => {
+              appendActiveMessages((prev) => {
+                const withoutOld = prev.filter((m) => m.id !== MISS_ZS_CHAT_NOTE_ID);
+                return [...withoutOld, createMissZsChatNoteMessage()];
+              });
             }}
           />
         )}
@@ -4612,7 +5949,7 @@ export default function App() {
             autoStartDownload={autoStartPlayDownload}
             onOpenMobileSettings={() => {
               setHighlightedSettingId(null);
-              setMobileControlTab('settings');
+              setMobileControlTab('permissions');
               setShowMobileControl(true);
             }}
           />
@@ -4665,8 +6002,13 @@ export default function App() {
         {showAudioCall && (
           <VoiceCallModal
             isOpen={showAudioCall}
+            isMinimized={audioCallMinimized}
+            onToggleMinimize={() => setAudioCallMinimized((prev) => !prev)}
             audioOnly={true}
-            onClose={() => setShowAudioCall(false)}
+            onClose={() => {
+              setShowAudioCall(false);
+              setAudioCallMinimized(false);
+            }}
             onCloseZaraApp={handleCloseZaraAppNow}
             config={config}
             onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
@@ -4695,6 +6037,7 @@ export default function App() {
             isSpeaking={isSpeaking}
             isThinking={isThinkingHome}
             interimTranscript={interimVoiceText}
+            voiceError={voiceError}
             latestZaraMessage={latestZaraMessage}
             latestNotification={incomingNotifs[0] || null}
             spokenConfig={spokenNotifConfig}
@@ -4702,6 +6045,7 @@ export default function App() {
               setSpokenNotifConfig((prev) => ({ ...prev, ...updates }))
             }
             onToggleMic={handleToggleFrontMicMaster}
+            onSkipVoiceTurn={handleSkipVoiceTurn}
             onSendVoicePrompt={async (prompt) => {
               await handleSendMessage(prompt);
             }}
@@ -4721,6 +6065,7 @@ export default function App() {
           />
         )}
       </Suspense>
+      </ModalErrorBoundary>
     </div>
   );
 }

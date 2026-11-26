@@ -46,6 +46,7 @@ export interface OrchestratedSttResult {
   modelIdUsed: string;
   fallbackTriggered: boolean;
   latencyMs: number;
+  errorReason?: string;
 }
 
 export interface OrchestratedTtsResult {
@@ -261,10 +262,13 @@ export class ZaraAiOrchestrator {
       const isDailyOrBilling =
         msg.includes('PerDay') ||
         msg.includes('credits remaining') ||
-        msg.includes('billing') ||
-        cooldownKey === 'gemini-4-hydrogen' ||
+        msg.includes('limit: 0') ||
         cooldownKey.startsWith('openai');
-      const ttl = isDailyOrBilling ? 15 * 60 * 1000 : 8 * 1000;
+      const ttl = isDailyOrBilling
+        ? 15 * 60 * 1000
+        : cooldownKey.includes('gemini-3.8-flash')
+        ? 60 * 1000
+        : 12 * 1000;
       this.modelCooldownUntil.set(cooldownKey, Date.now() + ttl);
       if (cooldownKey.startsWith('openai')) {
         this.modelCooldownUntil.set('openai', Date.now() + ttl);
@@ -390,12 +394,12 @@ export class ZaraAiOrchestrator {
         role: 'stt',
         description: 'Multilingual voice recognition engine across Urdu, Hindi, Punjabi & English.',
         provider: keys.groq || keys.openai ? 'hybrid' : 'gemini',
-        modelId: 'gemini-3.5-transcribe',
+        modelId: 'gemini-3.8-flash',
         enabled: enabledMap.hunter_stt_beta !== false,
         configured: keys.gemini || keys.groq || keys.openai || keys.hunterCustom,
         healthy:
           this.isEngineHealthy('hunter_stt_beta') &&
-          (this.isEngineHealthy('stt:gemini-3.5-transcribe') ||
+          (this.isEngineHealthy('stt:gemini-3.8-flash') ||
             this.isEngineHealthy('stt:gemini-3.1-flash-lite')),
       },
       {
@@ -630,7 +634,7 @@ export class ZaraAiOrchestrator {
   }
 
   private async callGeminiEngine(
-    model: 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite' | 'gemini-2.5-flash',
+    model: 'gemini-4-hydrogen' | 'gemini-3.8-flash' | 'gemini-3.1-flash-lite',
     thinkingLevel: ThinkingLevel | null,
     contents: Array<{ role: string; parts: Array<any> }>,
     systemInstruction: string,
@@ -680,7 +684,7 @@ export class ZaraAiOrchestrator {
           thinkingLevel,
           contents,
           directive,
-          primaryTimeoutMs
+          Math.min(primaryTimeoutMs, 4200)
         );
         if (text) {
           return { text, providerUsed: 'gemini', modelIdUsed: 'gemini-4-hydrogen' };
@@ -690,16 +694,29 @@ export class ZaraAiOrchestrator {
       }
     }
 
-    // Automatic resilient fallback to gemini-3.1-flash-lite -> gemini-2.5-flash under the same profile persona
-    for (const fbModel of ['gemini-3.1-flash-lite', 'gemini-2.5-flash'] as const) {
+    // Automatic resilient fallback to gemini-3.1-flash-lite -> gemini-3.8-flash under the same profile persona
+    for (const fbModel of ['gemini-3.1-flash-lite', 'gemini-3.8-flash'] as const) {
       if (!this.isEngineHealthy(fbModel)) continue;
       try {
-        const text = await this.callGeminiEngine(fbModel, null, contents, directive, 12500);
+        const text = await this.callGeminiEngine(fbModel, null, contents, directive, 12000);
         if (text) {
           return { text, providerUsed: 'gemini', modelIdUsed: fbModel };
         }
       } catch (err: any) {
         this.recordEngineError(brainId, fbModel, err);
+      }
+    }
+
+    // Final last-chance attempt ignoring transient short cooldowns
+    for (const lastModel of ['gemini-3.1-flash-lite', 'gemini-3.8-flash'] as const) {
+      try {
+        const text = await this.callGeminiEngine(lastModel, null, contents, directive, 12000);
+        if (text) {
+          this.modelCooldownUntil.delete(lastModel);
+          return { text, providerUsed: 'gemini', modelIdUsed: lastModel };
+        }
+      } catch (err: any) {
+        this.recordEngineError(brainId, lastModel, err);
       }
     }
 
@@ -863,12 +880,12 @@ export class ZaraAiOrchestrator {
       }
 
       case 'normal_swift_mode': {
-        const swiftModels = ['gemini-3.1-flash-lite', 'gemini-2.5-flash'] as const;
+        const swiftModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'] as const;
         const healthySwift = swiftModels.filter((m) => this.isEngineHealthy(m));
         const pool = healthySwift.length > 0 ? healthySwift : swiftModels;
         for (const swiftModel of pool) {
           try {
-            const text = await this.callGeminiEngine(swiftModel, null, contents, systemInstruction, 12500);
+            const text = await this.callGeminiEngine(swiftModel, null, contents, systemInstruction, 14000);
             if (text) {
               this.modelCooldownUntil.delete(swiftModel);
               return { text, providerUsed: 'gemini', modelIdUsed: swiftModel };
@@ -1030,7 +1047,7 @@ export class ZaraAiOrchestrator {
     };
 
     if (this.ai) {
-      const candidates = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+      const candidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
       for (let i = 0; i < candidates.length; i++) {
         const model = candidates[i];
         if (!this.isEngineHealthy(model) && i === 0) continue;
@@ -1152,7 +1169,7 @@ export class ZaraAiOrchestrator {
     const cleanMime = (mimeType || 'audio/wav').split(';')[0].trim() || 'audio/wav';
     const keys = this.getProviderKeys();
 
-    // Fast 0.1ms WAV digital-silence check so blank/muted mic buffers never reach STT or hallucinate text
+    // Fast 0.1ms WAV digital-silence & RMS gate so ambient static/muted mic buffers never reach STT or hallucinate fake text
     if (cleanMime.includes('wav')) {
       try {
         const wavBuf = Buffer.from(audioBase64, 'base64');
@@ -1161,16 +1178,25 @@ export class ZaraAiOrchestrator {
           wavBuf.toString('ascii', 0, 4) === 'RIFF' &&
           wavBuf.toString('ascii', 8, 12) === 'WAVE'
         ) {
+          const sampleRate = wavBuf.readUInt32LE(24) || 16000;
+          const pcmBytes = wavBuf.length - 44;
+          const durationMs = Math.round(((pcmBytes / 2) / sampleRate) * 1000);
           let peakAbs = 0;
-          const step = Math.max(2, Math.floor((wavBuf.length - 44) / 8000) & ~1);
+          let totalAbs = 0;
+          let sumSq = 0;
+          let samplesChecked = 0;
+          const step = Math.max(2, Math.floor(pcmBytes / 8000) & ~1);
           for (let off = 44; off + 1 < wavBuf.length; off += step) {
-            const s = Math.abs(wavBuf.readInt16LE(off));
-            if (s > peakAbs) {
-              peakAbs = s;
-              if (peakAbs >= 90) break;
-            }
+            const raw = wavBuf.readInt16LE(off);
+            const s = raw < 0 ? -raw : raw;
+            if (s > peakAbs) peakAbs = s;
+            totalAbs += s;
+            sumSq += raw * raw;
+            samplesChecked += 1;
           }
-          if (peakAbs < 90) {
+          const avgAbs = samplesChecked > 0 ? totalAbs / samplesChecked : 0;
+          const rms = samplesChecked > 0 ? Math.sqrt(sumSq / samplesChecked) : 0;
+          if (durationMs < 240 || peakAbs < 200 || avgAbs < 16 || rms < 28) {
             return {
               transcript: '__SILENCE__',
               sttEngineUsed: 'hunter_stt_beta',
@@ -1186,6 +1212,33 @@ export class ZaraAiOrchestrator {
       }
     }
 
+    const sanitizeSttTranscript = (rawText: string): string => {
+      let t = (rawText || '').replace(/\s+/g, ' ').trim();
+      if (!t) return '__SILENCE__';
+      t = t
+        .replace(/^(transcript|transcription|user said|spoken words)\s*:\s*/i, '')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim();
+      if (!t || t.includes('__SILENCE__')) return '__SILENCE__';
+      if (
+        /^[_*\[\(]*(silence|no[\s_-]*speech|inaudible|background[\s_-]*noise|music|applause|laughter|static)[_*\)\]]*\.?$/i.test(
+          t
+        )
+      ) {
+        return '__SILENCE__';
+      }
+      if (
+        /^(thanks for watching|thank you for watching|please subscribe|subscribe to|like and subscribe|amara\.org|subtitles by|transcribed by|you\.?|bye\.?)$/i.test(
+          t
+        )
+      ) {
+        return '__SILENCE__';
+      }
+      const stripped = t.replace(/[\s.,!?'"،؟\-:;()\[\]{}]/g, '');
+      if (stripped.length < 2) return '__SILENCE__';
+      return t;
+    };
+
     // Optional Custom Hunter STT endpoint hook
     if (process.env.HUNTER_STT_API_URL && process.env.HUNTER_API_KEY) {
       try {
@@ -1199,7 +1252,7 @@ export class ZaraAiOrchestrator {
         });
         if (res.ok) {
           const data: any = await res.json();
-          const txt = String(data?.text || data?.transcript || '').trim();
+          const txt = sanitizeSttTranscript(String(data?.text || data?.transcript || '').trim());
           if (txt) {
             const latencyMs = Date.now() - t0;
             this.recordEngineSuccess('hunter_stt_beta', latencyMs, false);
@@ -1219,11 +1272,21 @@ export class ZaraAiOrchestrator {
     }
 
     const hintNote =
-      languageHint && languageHint !== 'auto' ? ` Expected language bias: ${languageHint}.` : '';
+      languageHint === 'hindi'
+        ? ' Speaker is speaking Hindi (may include English tech/app words). Write Hindi words cleanly in Devanagari (हिंदी) script, never Urdu Perso-Arabic script.'
+        : languageHint === 'urdu'
+        ? ' Speaker is speaking Urdu (may include English tech/app words). Write Urdu words cleanly in Urdu script (اردو).'
+        : languageHint === 'roman_urdu'
+        ? ' Speaker is speaking Roman Urdu/Hinglish. Transcribe cleanly in natural Latin/Roman letters.'
+        : languageHint && languageHint !== 'auto'
+        ? ` Preferred language context: ${languageHint} (may still mix English app/command names).`
+        : ' Speaker may naturally speak Hindi, Urdu, Punjabi, English, or Hinglish/Roman Urdu. Keep clear Hindi in Devanagari (हिंदी) or natural Hinglish and Urdu in Urdu/Roman consistently — never swap Hindi sentences into unrelated scripts.';
     const transcribePrompt =
-      `Transcribe the spoken words faithfully in their original spoken language(s) and natural script — supports Uzbek (O'zbekcha Latin/Cyrillic), Urdu (اردو), Hindi (हिंदी), Punjabi (پੰਜਾਬੀ / ਪੰਜਾਬੀ), English, Malay (Bahasa Melayu), Arabic (العربية), and mid-sentence multilingual mixing.${hintNote} Do NOT translate what the speaker said. Output ONLY the exact spoken transcript, or __SILENCE__ if there is zero speech.`;
+      `Transcribe this audio accurately in its original spoken language.${hintNote} Preserve app & command words clearly (e.g. Zara, WhatsApp, YouTube, Camera, Settings, Alarm, Back, Close, Call, Skip, Stop, Live). Output ONLY the exact verbatim spoken words, or __SILENCE__ if no clear human speech is audible.`;
+    const transcribeSystem =
+      'You are an ultra-accurate verbatim multilingual Speech-to-Text engine. Focus strictly on the primary speaker, wait for the complete utterance, and ignore background fan, traffic, or ambient static. NEVER answer questions, NEVER switch languages mid-transcription, NEVER guess unclear mumbling into unrelated words, and NEVER invent sentences for noise. Output ONLY the exact spoken words, or __SILENCE__ if no clear human speech is audible.';
 
-    let lastPrimarySttError = '';
+    const sttErrorTrail: string[] = [];
     if (this.ai) {
       const audioPart = {
         inlineData: {
@@ -1231,63 +1294,85 @@ export class ZaraAiOrchestrator {
           data: audioBase64,
         },
       };
-      const geminiModels = [
-        'gemini-3.5-transcribe',
-        'gemini-3.1-flash-lite',
-        'gemini-2.5-flash',
-        'gemini-4-hydrogen',
-      ];
-      const healthyGemini = geminiModels.filter(
-        (m) => this.isEngineHealthy(`stt:${m}`) && (m !== 'gemini-4-hydrogen' || this.isEngineHealthy('gemini-4-hydrogen'))
-      );
-      const pool = healthyGemini.length > 0 ? healthyGemini : ['gemini-3.1-flash-lite', 'gemini-2.5-flash'];
 
-      for (let i = 0; i < pool.length; i++) {
-        const model = pool[i];
-        const sttTimeoutMs =
-          model === 'gemini-3.5-transcribe' ? 3800 : model === 'gemini-3.1-flash-lite' ? 11500 : 10500;
+      const callSingleGeminiStt = async (
+        model: string,
+        timeoutMs: number
+      ): Promise<{ text: string; model: string }> => {
+        const controller = new AbortController();
         try {
-          const reqConfig: any =
-            model === 'gemini-4-hydrogen'
-              ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-              : undefined;
+          const isDedicatedStt = model === 'gemini-3.5-transcribe';
+          const reqConfig: any = {
+            abortSignal: controller.signal,
+            ...(isDedicatedStt
+              ? {}
+              : model === 'gemini-4-hydrogen'
+              ? {
+                  systemInstruction: transcribeSystem,
+                  thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+                }
+              : model === 'gemini-3.1-flash-lite'
+              ? {
+                  systemInstruction: transcribeSystem,
+                  thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+                }
+              : { systemInstruction: transcribeSystem }),
+          };
           const resp = await this.withTimeout(
-            this.ai.models.generateContent({
+            this.ai!.models.generateContent({
               model,
-              contents: [{ role: 'user', parts: [audioPart, { text: transcribePrompt }] }],
-              ...(reqConfig ? { config: reqConfig } : {}),
+              contents: isDedicatedStt
+                ? {
+                    parts: [
+                      audioPart,
+                      {
+                        text: `Transcribe this audio verbatim in its spoken language.${hintNote} Output ONLY the exact spoken words, or __SILENCE__ if no clear human speech is audible.`,
+                      },
+                    ],
+                  }
+                : [{ role: 'user', parts: [audioPart, { text: transcribePrompt }] }],
+              config: reqConfig,
             }),
-            sttTimeoutMs,
+            timeoutMs,
             `hunter-stt-${model}`
           );
-          const text = resp.text?.trim() || '';
-          if (text) {
-            const latencyMs = Date.now() - t0;
-            this.recordEngineSuccess('hunter_stt_beta', latencyMs, model !== 'gemini-3.5-transcribe');
-            if (model !== 'gemini-3.5-transcribe' && lastPrimarySttError) {
-              const m = this.metrics.get('hunter_stt_beta');
-              if (m) m.lastError = `Primary STT note: ${lastPrimarySttError}`;
-            }
-            return {
-              transcript: text,
-              sttEngineUsed: 'hunter_stt_beta',
-              providerUsed: 'gemini',
-              modelIdUsed: model,
-              fallbackTriggered: model !== 'gemini-3.5-transcribe',
-              latencyMs,
-            };
-          }
-          if (model === 'gemini-3.5-transcribe') {
-            this.modelCooldownUntil.set('stt:gemini-3.5-transcribe', Date.now() + 15 * 60 * 1000);
-          }
+          const rawText = resp.text?.trim() || '';
+          if (!rawText) throw new Error(`${model}: empty_text`);
+          return { text: sanitizeSttTranscript(rawText), model };
         } catch (err: any) {
-          const msg = String(err?.message || err || 'STT failed').slice(0, 140);
-          if (i === 0) lastPrimarySttError = `${model}: ${msg}`;
+          controller.abort();
+          const msg = String(err?.message || err || 'STT failed').slice(0, 120);
+          sttErrorTrail.push(`${model}: ${msg}`);
           this.recordEngineError('hunter_stt_beta', `stt:${model}`, err);
-          if (model === 'gemini-3.5-transcribe') {
-            this.modelCooldownUntil.set('stt:gemini-3.5-transcribe', Date.now() + 15 * 60 * 1000);
-          }
-          console.warn(`[Hunter STT Beta] ${model} fallback:`, msg);
+          console.warn(`[Hunter STT Beta] ${model}:`, msg);
+          throw err;
+        }
+      };
+
+      const candidates = [
+        { model: 'gemini-3.5-transcribe', timeoutMs: 10000 },
+        { model: 'gemini-4-hydrogen', timeoutMs: 11000 },
+        { model: 'gemini-3.1-flash-lite', timeoutMs: 12000 },
+      ];
+      const healthyCandidates = candidates.filter((c) => this.isEngineHealthy(`stt:${c.model}`));
+      const pool = healthyCandidates.length > 0 ? healthyCandidates : candidates;
+
+      for (const item of pool) {
+        try {
+          const resStt = await callSingleGeminiStt(item.model, item.timeoutMs);
+          const latencyMs = Date.now() - t0;
+          this.modelCooldownUntil.delete(`stt:${resStt.model}`);
+          this.recordEngineSuccess('hunter_stt_beta', latencyMs, resStt.model !== candidates[0].model);
+          return {
+            transcript: resStt.text,
+            sttEngineUsed: 'hunter_stt_beta',
+            providerUsed: 'gemini',
+            modelIdUsed: resStt.model,
+            fallbackTriggered: resStt.model !== candidates[0].model,
+            latencyMs,
+          };
+        } catch {
+          // Try next healthy model cleanly without wasting double quota
         }
       }
     }
@@ -1305,7 +1390,7 @@ export class ZaraAiOrchestrator {
           const latencyMs = Date.now() - t0;
           this.recordEngineSuccess('hunter_stt_beta', latencyMs, true);
           return {
-            transcript: w.text,
+            transcript: sanitizeSttTranscript(w.text),
             sttEngineUsed: 'hunter_stt_beta',
             providerUsed: 'groq',
             modelIdUsed: w.modelId,
@@ -1314,6 +1399,7 @@ export class ZaraAiOrchestrator {
           };
         }
       } catch (err: any) {
+        sttErrorTrail.push(`groq: ${String(err?.message || err).slice(0, 60)}`);
         this.recordEngineError('hunter_stt_beta', 'groq-whisper', err);
       }
     }
@@ -1330,7 +1416,7 @@ export class ZaraAiOrchestrator {
           const latencyMs = Date.now() - t0;
           this.recordEngineSuccess('hunter_stt_beta', latencyMs, true);
           return {
-            transcript: w.text,
+            transcript: sanitizeSttTranscript(w.text),
             sttEngineUsed: 'hunter_stt_beta',
             providerUsed: 'openai',
             modelIdUsed: w.modelId,
@@ -1339,8 +1425,15 @@ export class ZaraAiOrchestrator {
           };
         }
       } catch (err: any) {
+        sttErrorTrail.push(`openai: ${String(err?.message || err).slice(0, 60)}`);
         this.recordEngineError('hunter_stt_beta', 'openai-whisper', err);
       }
+    }
+
+    if (sttErrorTrail.length > 0) {
+      const m = this.metrics.get('hunter_stt_beta') || { totalCalls: 0, totalFallbacks: 0 };
+      m.lastError = sttErrorTrail.join(' | ').slice(0, 300);
+      this.metrics.set('hunter_stt_beta', m);
     }
 
     return {
@@ -1350,59 +1443,78 @@ export class ZaraAiOrchestrator {
       modelIdUsed: 'unavailable',
       fallbackTriggered: true,
       latencyMs: Date.now() - t0,
+      errorReason:
+        sttErrorTrail[0] ||
+        (!this.ai ? 'Gemini API key is not configured on the server.' : 'All speech recognition engines failed or timed out.'),
     };
+  }
+
+  private applyPcmEdgeRamp(pcm: Buffer, sampleRate = 24000, fadeMs = 10): Buffer {
+    const evenLen = pcm.length - (pcm.length % 2);
+    if (evenLen < 8) return pcm;
+    const out = Buffer.from(evenLen === pcm.length ? pcm : pcm.subarray(0, evenLen));
+    const totalSamples = out.length / 2;
+    const rampSamples = Math.min(Math.floor((sampleRate * fadeMs) / 1000), Math.floor(totalSamples / 4));
+    if (rampSamples > 1) {
+      for (let i = 0; i < rampSamples; i++) {
+        const g = 0.5 - 0.5 * Math.cos((Math.PI * i) / rampSamples);
+        out.writeInt16LE(Math.round(out.readInt16LE(i * 2) * g), i * 2);
+        const tailOff = (totalSamples - 1 - i) * 2;
+        out.writeInt16LE(Math.round(out.readInt16LE(tailOff) * g), tailOff);
+      }
+    }
+    return out;
+  }
+
+  private stripVocalBurstTags(text: string): string {
+    return (text || '')
+      .replace(/<\s*(?:laugh|breath|sigh|gasp|chuckle|giggle)\s*>/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private injectExpressiveVocalBurst(chunkText: string, emotion?: string): string {
+    if (!chunkText) return chunkText;
+    if (/<\s*(?:laugh|breath|sigh|gasp)\s*>/i.test(chunkText)) return chunkText;
+    if (emotion === 'masti' || emotion === 'khushi') {
+      // Natural warm chuckle at a sentence/comma boundary or opening playful joke
+      if (/(!|haha|hehe|lol|😄|😂|مزاح|مذاق|हँसी|मज़ाक|ਹਾਸਾ)/i.test(chunkText)) {
+        return `<laugh> ${chunkText}`;
+      }
+      return chunkText;
+    }
+    if (emotion === 'udaas' || emotion === 'emotional') {
+      return `<breath> ${chunkText}`;
+    }
+    return chunkText;
   }
 
   private async synthesizeSingleChunk(
     chunkText: string,
     voiceName: string,
     stylePrompt: string,
-    enableBreath: boolean,
-    preferredTtsEngine: TtsEngineId
-  ): Promise<{ pcm: Buffer; modelId: string; provider: string; fallbackUsed: boolean } | null> {
+    _enableBreath: boolean,
+    preferredTtsEngine: TtsEngineId,
+    preferExpressive = false,
+    expressiveEmotion = 'calm'
+  ): Promise<{ pcm: Buffer; sampleRate: number; modelId: string; provider: string; fallbackUsed: boolean } | null> {
     if (!this.ai || !chunkText) return null;
 
-    const ultraChain = [
-      {
-        model: 'gemini-3.8-flash-tts',
-        supportsStyleMetadata: true,
-        supportsVocalBursts: true,
-        timeoutMs: 12000,
-      },
-      {
-        model: 'gemini-3.8-flash-lite-tts',
-        supportsStyleMetadata: true,
-        supportsVocalBursts: false,
-        timeoutMs: 11500,
-      },
-      {
-        model: 'gemini-2.5-flash-preview-tts',
-        supportsStyleMetadata: false,
-        supportsVocalBursts: false,
-        timeoutMs: 11000,
-      },
-    ];
+    const flashExpressive = {
+      model: 'gemini-3.8-flash-tts',
+      supportsStyleMetadata: true,
+      supportsVocalBursts: true,
+      timeoutMs: 12000,
+    };
+    const flashLite = {
+      model: 'gemini-3.8-flash-lite-tts',
+      supportsStyleMetadata: true,
+      supportsVocalBursts: false,
+      timeoutMs: 12000,
+    };
 
-    const customChain = [
-      {
-        model: 'gemini-3.8-flash-lite-tts',
-        supportsStyleMetadata: true,
-        supportsVocalBursts: false,
-        timeoutMs: 11500,
-      },
-      {
-        model: 'gemini-3.8-flash-tts',
-        supportsStyleMetadata: true,
-        supportsVocalBursts: true,
-        timeoutMs: 12000,
-      },
-      {
-        model: 'gemini-2.5-flash-preview-tts',
-        supportsStyleMetadata: false,
-        supportsVocalBursts: false,
-        timeoutMs: 11000,
-      },
-    ];
+    const ultraChain = preferExpressive ? [flashExpressive, flashLite] : [flashLite, flashExpressive];
+    const customChain = [flashLite, flashExpressive];
 
     const rawChain = preferredTtsEngine === 'custom_hunter_tts' ? customChain : ultraChain;
     const healthyChain = rawChain.filter((m) => this.isEngineHealthy(m.model));
@@ -1413,9 +1525,11 @@ export class ZaraAiOrchestrator {
       const controller = new AbortController();
       try {
         const textForModel =
-          enableBreath && item.supportsVocalBursts && !chunkText.includes('<breath>')
-            ? `<breath> ${chunkText}`
-            : chunkText;
+          item.supportsVocalBursts && preferExpressive
+            ? this.injectExpressiveVocalBurst(chunkText, expressiveEmotion)
+            : this.stripVocalBurstTags(chunkText);
+        if (!textForModel) continue;
+
         const part: any = item.supportsStyleMetadata
           ? { text: textForModel, speechMetadata: { style: stylePrompt } }
           : { text: textForModel };
@@ -1437,10 +1551,14 @@ export class ZaraAiOrchestrator {
           item.timeoutMs,
           item.model
         );
-        const rawBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+        const rawBase64 = inlineData?.data;
         if (rawBase64) {
+          const rateMatch = String(inlineData?.mimeType || '').match(/rate=(\d+)/i);
+          const sampleRate = rateMatch ? Math.max(8000, Math.min(48000, Number(rateMatch[1]) || 24000)) : 24000;
           return {
             pcm: this.extractPcmFromWavOrRaw(Buffer.from(rawBase64, 'base64')),
+            sampleRate,
             modelId: item.model,
             provider: 'gemini',
             fallbackUsed: i > 0,
@@ -1465,6 +1583,8 @@ export class ZaraAiOrchestrator {
     enableSultryBreath: boolean;
     preferredTtsEngine?: TtsEngineId;
     tierPlan?: 'standard' | 'pro';
+    preferExpressive?: boolean;
+    expressiveEmotion?: string;
   }): Promise<OrchestratedTtsResult> {
     const t0 = Date.now();
     const requestedEngine: TtsEngineId =
@@ -1473,14 +1593,17 @@ export class ZaraAiOrchestrator {
       params.tierPlan === 'standard' && !params.preferredTtsEngine
         ? 'custom_hunter_tts'
         : requestedEngine;
+    const preferExpressive = Boolean(params.preferExpressive) && ttsEngine !== 'custom_hunter_tts';
+    const expressiveEmotion = params.expressiveEmotion || 'calm';
+    const strippedText = this.stripVocalBurstTags(params.cleanText);
 
-    const fullCacheKey = `${ttsEngine}:${params.cacheKey}`;
+    const fullCacheKey = `${ttsEngine}:${preferExpressive ? expressiveEmotion : 'std'}:${params.cacheKey}`;
     if (this.ttsAudioCache.has(fullCacheKey)) {
       return {
         audioBase64: this.ttsAudioCache.get(fullCacheKey)!,
         ttsEngineUsed: ttsEngine,
         providerUsed: 'gemini-cache',
-        modelIdUsed: ttsEngine === 'custom_hunter_tts' ? 'gemini-3.8-flash-lite-tts' : 'gemini-3.8-flash-tts',
+        modelIdUsed: preferExpressive ? 'gemini-3.8-flash-tts' : 'gemini-3.8-flash-lite-tts',
         fallbackTriggered: false,
         latencyMs: Date.now() - t0,
       };
@@ -1496,7 +1619,7 @@ export class ZaraAiOrchestrator {
             Authorization: `Bearer ${process.env.HUNTER_API_KEY}`,
           },
           body: JSON.stringify({
-            text: params.cleanText,
+            text: strippedText,
             voiceName: params.voiceName,
             engine: ttsEngine,
           }),
@@ -1521,17 +1644,20 @@ export class ZaraAiOrchestrator {
       }
     }
 
-    const chunks = this.splitTextIntoTtsChunks(params.cleanText, 430);
+    const chunks = this.splitTextIntoTtsChunks(strippedText, 1500);
     if (chunks.length === 1) {
       const single = await this.synthesizeSingleChunk(
         chunks[0],
         params.voiceName,
         params.stylePrompt,
-        params.enableSultryBreath,
-        ttsEngine
+        false,
+        ttsEngine,
+        preferExpressive,
+        expressiveEmotion
       );
       if (single && single.pcm.length > 0) {
-        const wavB64 = this.pcmBufferToWavBase64(single.pcm, 24000);
+        const rampedPcm = this.applyPcmEdgeRamp(single.pcm, single.sampleRate, 6);
+        const wavB64 = this.pcmBufferToWavBase64(rampedPcm, single.sampleRate);
         this.putTtsAudioCache(fullCacheKey, wavB64);
         const latencyMs = Date.now() - t0;
         this.recordEngineSuccess(ttsEngine, latencyMs, single.fallbackUsed);
@@ -1545,8 +1671,13 @@ export class ZaraAiOrchestrator {
         };
       }
     } else {
-      const results: Array<{ pcm: Buffer; modelId: string; provider: string; fallbackUsed: boolean } | null> =
-        new Array(chunks.length).fill(null);
+      const results: Array<{
+        pcm: Buffer;
+        sampleRate: number;
+        modelId: string;
+        provider: string;
+        fallbackUsed: boolean;
+      } | null> = new Array(chunks.length).fill(null);
       for (let i = 0; i < chunks.length; i += 4) {
         const batch = chunks.slice(i, i + 4);
         const settled = await Promise.all(
@@ -1555,8 +1686,10 @@ export class ZaraAiOrchestrator {
               ch,
               params.voiceName,
               params.stylePrompt,
-              params.enableSultryBreath && i + bIdx === 0,
-              ttsEngine
+              false,
+              ttsEngine,
+              preferExpressive && i + bIdx === 0,
+              expressiveEmotion
             )
           )
         );
@@ -1565,17 +1698,26 @@ export class ZaraAiOrchestrator {
         }
       }
       const valid = results.filter(
-        (r): r is { pcm: Buffer; modelId: string; provider: string; fallbackUsed: boolean } =>
-          Boolean(r && r.pcm.length > 0)
+        (
+          r
+        ): r is {
+          pcm: Buffer;
+          sampleRate: number;
+          modelId: string;
+          provider: string;
+          fallbackUsed: boolean;
+        } => Boolean(r && r.pcm.length > 0)
       );
       if (valid.length > 0) {
-        const pauseBuf = Buffer.alloc(params.effectiveLove ? 5200 : 4000);
+        const targetRate = valid[0].sampleRate || 24000;
+        const pauseSamples = Math.round(targetRate * 0.065);
+        const pauseBuf = Buffer.alloc(pauseSamples * 2);
         const stitched: Buffer[] = [];
         valid.forEach((entry, idx) => {
           if (idx > 0) stitched.push(pauseBuf);
-          stitched.push(entry.pcm);
+          stitched.push(this.applyPcmEdgeRamp(entry.pcm, entry.sampleRate || targetRate, 6));
         });
-        const wavB64 = this.pcmBufferToWavBase64(Buffer.concat(stitched), 24000);
+        const wavB64 = this.pcmBufferToWavBase64(Buffer.concat(stitched), targetRate);
         this.putTtsAudioCache(fullCacheKey, wavB64);
         const latencyMs = Date.now() - t0;
         this.recordEngineSuccess(ttsEngine, latencyMs, valid[0].fallbackUsed);
@@ -1784,7 +1926,10 @@ export class ZaraAiOrchestrator {
 
       const sttRes = await this.orchestrateTranscription(sampleWav, 'audio/wav');
       const latencyMs = Date.now() - t0;
-      if (!sttRes.transcript) throw new Error('Transcription returned empty text');
+      if (!sttRes.transcript) {
+        const prevErr = this.metrics.get('hunter_stt_beta')?.lastError;
+        throw new Error(prevErr || 'Transcription returned empty text');
+      }
       return {
         id: meta.id,
         name: meta.name,

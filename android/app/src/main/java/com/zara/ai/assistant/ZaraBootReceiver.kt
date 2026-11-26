@@ -7,36 +7,37 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 
-/**
- * Restores Zara Low-Power Wake-Word Service after device reboot or app update
- * when the user opted in and microphone permission is granted.
- */
 class ZaraBootReceiver : BroadcastReceiver() {
-
     override fun onReceive(context: Context?, intent: Intent?) {
-        val ctx = context ?: return
-        val action = intent?.action ?: return
+        if (context == null || intent == null) return
+        val action = intent.action ?: return
         if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) {
             return
         }
 
-        val wakeEnabled = ZaraBridgeContract.prefs(ctx).getBoolean(
-            ZaraBridgeContract.KEY_WAKE_WORD_ENABLED,
-            false
-        )
-        if (!wakeEnabled) return
-
-        val hasMic = ContextCompat.checkSelfPermission(
-            ctx,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
+        val hasMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
         if (!hasMic) return
 
+        val prefs = ZaraBridgeContract.prefs(context)
+        val wakeEnabled = prefs.getBoolean(ZaraBridgeContract.KEY_WAKE_WORD_ENABLED, false)
+        val fgVoiceEnabled = prefs.getBoolean(ZaraBridgeContract.KEY_FOREGROUND_VOICE_ENABLED, false) ||
+            prefs.getBoolean(ZaraBridgeContract.KEY_LEGACY_FOREGROUND_VOICE_ENABLED, false)
+
         try {
-            val svcIntent = Intent(ctx, ZaraWakeWordService::class.java)
-            ContextCompat.startForegroundService(ctx, svcIntent)
-        } catch (_: Throwable) {
-            // Android 14+ may restrict background microphone FGS start until user opens MainActivity
+            if (wakeEnabled) {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, ZaraWakeWordService::class.java)
+                )
+            } else if (fgVoiceEnabled) {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, ZaraForegroundVoiceService::class.java)
+                )
+            }
+        } catch (_: Exception) {
+            // Android 12–15 restricts FGS microphone start from BOOT_COMPLETED unless Battery/AutoStart is exempt
         }
     }
 }

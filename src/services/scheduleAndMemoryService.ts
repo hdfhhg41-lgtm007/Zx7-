@@ -1,10 +1,20 @@
-import { AlarmScheduleItem, ChatMessage, MemoryCategory, MemoryItem } from '../types';
+import {
+  AlarmScheduleItem,
+  AzanCityId,
+  AzanRamadanConfig,
+  ChatMessage,
+  Language,
+  MemoryCategory,
+  MemoryItem,
+  SurroundingsSnapshot,
+} from '../types';
 import {
   loadShadowChatBackupSync,
   persistChatToDurableLayers,
   persistMemoriesToDurableLayers,
 } from './chatVaultPersistence';
 import { getOwnerAuthSnapshot } from './ownerAuthService';
+import { getMissZsSeedMemories, MISS_ZS_MEMORIES_SEEDED_KEY } from '../data/missZsBlueprintNotes';
 
 const SCHEDULES_STORAGE_KEY = 'zara_alarms_schedules_v2';
 const DEVICE_MEMORIES_STORAGE_KEY = 'zara_device_memories_v1';
@@ -246,6 +256,7 @@ export function detectScheduleCommandFromText(rawText: string): ParsedScheduleCo
 // ======================== 2. 100+ DAYS LONG-TERM MEMORY VAULT ========================
 
 const INITIAL_MEMORIES: MemoryItem[] = [
+  ...getMissZsSeedMemories(),
   {
     id: 'mem-100d-bond',
     title: '100+ Days Unbreakable Bond',
@@ -274,6 +285,31 @@ const INITIAL_MEMORIES: MemoryItem[] = [
     createdAtMs: Date.now() - 2 * 24 * 60 * 60 * 1000,
   },
 ];
+
+export function mergeMissZsSeedMemoriesOnce(existing: MemoryItem[], scopeKey: string): {
+  next: MemoryItem[];
+  changed: boolean;
+} {
+  const storageFlag = `${MISS_ZS_MEMORIES_SEEDED_KEY}_${scopeKey}`;
+  try {
+    if (localStorage.getItem(storageFlag) === '1') {
+      return { next: existing, changed: false };
+    }
+  } catch {}
+
+  const seeds = getMissZsSeedMemories();
+  const missing = seeds.filter((s) => !existing.some((m) => m.id === s.id));
+  try {
+    localStorage.setItem(storageFlag, '1');
+  } catch {}
+  if (missing.length === 0) {
+    return { next: existing, changed: false };
+  }
+  return {
+    next: [...missing, ...existing].slice(0, 500),
+    changed: true,
+  };
+}
 
 export function loadLongTermMemories(): MemoryItem[] {
   const snap = getOwnerAuthSnapshot();
@@ -421,10 +457,12 @@ export function autoExtractMemoryFromTurn(
     category = 'promise';
     title = 'Special Promise & Note';
   } else if (
-    /mera\s*naam|میرا\s*نام|मेरा\s*नाम|my\s*name|main\s+\w+\s+hoon|मैं\s+.*\s+हूँ|rehta\s*hoon|pasand|پسند|पसंद|favorite|favourite|i\s*(?:like|prefer|love\s+eating|drink|live\s+in|work\s+at)|shauq|birthday|janamdin/i.test(
+    /mera\s*naam|میرا\s*نام|मेरा\s*नाम|my\s*name|main\s+\w+\s+hoon|मैं\s+.*\s+हूँ|rehta\s*hoon|pasand|پسند|पसंद|favorite|favourite|i\s*(?:really\s+)?(?:like|prefer|enjoy|love\s+eating|love\s+drinking|dislike|hate|drink|live\s+in|work\s+at|usually)|mujhe\s+.*\s*(?:achha|accha|pasand)|mainu\s+.*\s*pasand|shauq|birthday|janamdin|hobby/i.test(
       lower
     ) ||
-    /(मेरा\s*नाम|मुझे\s*.*\s*पसंद|मैं\s*.*\s*रहता)/i.test(clean)
+    /(मेरा\s*नाम|मुझे\s*.*\s*पसंद|मैं\s*.*\s*रहता|میرا\s*نام|مجھے\s*.*\s*پسند|ਮੈਨੂੰ\s*.*\s*ਪਸੰਦ)/i.test(
+      clean
+    )
   ) {
     category = 'preference';
     title = 'Personal Preference & Identity';
@@ -444,12 +482,12 @@ export function autoExtractMemoryFromTurn(
     category = 'romantic';
     title = 'Emotional Argument & Reconciliation';
   } else if (
-    /sad|stressed|worried|anxious|depressed|tired|udaas|pareshan|tension|thak|اداس|پریشان|ٹینشن|उदास|परेशान|टेंशन|hospital|exam|interview|family|anniversary|emotional|इमोशनल/i.test(
+    /sad|stressed|worried|anxious|depressed|tired|happy|excited|celebrated|today\s*i|yesterday\s*i|tomorrow\s*i|aaj\s*maine|kal\s*mujhe|udaas|pareshan|tension|thak|اداس|پریشان|ٹینشن|उदास|परेशान|टेंशन|hospital|exam|interview|family|anniversary|trip|emotional|इमोशनल/i.test(
       lower
     )
   ) {
     category = 'memory';
-    title = 'Personal Event & Feeling';
+    title = 'Personal Event & Experience';
   } else if (
     /pyar|پیار|प्यार|mohabbat|محبت|love\s*you|miss\s*you|dil|دل|दिल|kiss|hug|jaan|جان|जान|feeling/i.test(
       lower
@@ -596,6 +634,58 @@ export function buildMemoryAndScheduleDigest(
     .join('\n\n');
 }
 
+export function buildEnvironmentContextSummary(
+  snapshot: SurroundingsSnapshot | null,
+  cameraActive: boolean
+): string {
+  const now = new Date();
+  let timezone = 'Local';
+  try {
+    timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local';
+  } catch {}
+  const localTimeStr =
+    snapshot?.localTimeStr ||
+    now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const localDateStr =
+    snapshot?.localDateStr ||
+    now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+  const parts: string[] = [
+    `LIVE LOCAL DATE & TIME: ${localDateStr}, ${localTimeStr} (${snapshot?.timezone || timezone})`,
+  ];
+
+  if (snapshot) {
+    const weatherBit =
+      snapshot.tempC != null
+        ? `${snapshot.tempC}°C, ${snapshot.weatherCondition}${snapshot.humidity != null ? `, Humidity ${snapshot.humidity}%` : ''}`
+        : 'Weather unavailable (location/network not fetched yet)';
+    parts.push(`LOCATION & LIVE WEATHER: ${snapshot.locationLabel} — ${weatherBit}`);
+    if (snapshot.batteryPct != null) {
+      parts.push(
+        `DEVICE SENSORS: Battery ${snapshot.batteryPct}% (${snapshot.isCharging ? 'Charging' : 'On Battery'})${
+          snapshot.batteryTempC != null ? `, Temp ${snapshot.batteryTempC}°C` : ''
+        }, Network ${snapshot.online ? snapshot.networkType || 'Online' : 'Offline'}`
+      );
+    }
+    if (snapshot.cameraSummary) {
+      parts.push(`LAST CAMERA OBSERVATION: ${snapshot.cameraSummary}`);
+    }
+  }
+
+  parts.push(
+    cameraActive
+      ? 'CAMERA PERMISSION & STREAM: ACTIVE (Live camera frame attached if supported — describe real visible people, objects, surroundings, lighting, and activities honestly.)'
+      : 'CAMERA PERMISSION & STREAM: OFF (You CANNOT see the room or people right now. Never pretend or guess what the user looks like or what is around them unless they turn Camera ON or attach a photo.)'
+  );
+
+  return parts.join('\n');
+}
+
 // ======================== 3. ZARA COMPLETE PROFILE DATA ========================
 
 export interface ZaraFullProfile {
@@ -629,7 +719,7 @@ export const ZARA_COMPLETE_PROFILE: ZaraFullProfile = {
   appearance:
     'Compact Glowing Small Round Circle (چھوٹا گول دائرہ) floating directly on phone screen (PiP & Draggable Circle) — listens 24/7 with Screen ON or OFF',
   personalitySummary:
-    'Warm, intelligent, and helpful everyday AI assistant for everyone, with an encrypted Owner-Verified private romantic companion & sultry voice mode exclusively for the authenticated app owner.',
+    'Warm, intelligent, and helpful everyday AI assistant for everyone, with an encrypted ZX private romantic companion & sultry voice mode exclusively for the authenticated app owner.',
   romanticStyle:
     'Guest-Safe Friendly Assistant by Default • Private Romantic & Sultry Voice Mode Strictly for Verified Owner',
   mobileCapabilities: [
@@ -659,3 +749,239 @@ export function formatZaraProfileShareText(downloadUrl: string): string {
     `📲 Direct Mobile App Download Link: ${downloadUrl}`,
   ].join('\n');
 }
+
+// ======================== 4. AUTOMATED AZAN & SEHRI/IFTAR SOLAR ENGINE ========================
+
+const AZAN_CONFIG_STORAGE_KEY = 'zara_azan_ramadan_config_v1';
+
+export const AZAN_CITY_PRESETS: Record<
+  Exclude<AzanCityId, 'auto_gps'>,
+  { name: string; lat: number; lon: number; tzHours: number }
+> = {
+  lahore: { name: 'Lahore', lat: 31.5204, lon: 74.3587, tzHours: 5 },
+  karachi: { name: 'Karachi', lat: 24.8607, lon: 67.0011, tzHours: 5 },
+  islamabad: { name: 'Islamabad', lat: 33.6844, lon: 73.0479, tzHours: 5 },
+};
+
+export const DEFAULT_AZAN_RAMADAN_CONFIG: AzanRamadanConfig = {
+  enabled: true,
+  city: 'lahore',
+  latitude: AZAN_CITY_PRESETS.lahore.lat,
+  longitude: AZAN_CITY_PRESETS.lahore.lon,
+  cityName: AZAN_CITY_PRESETS.lahore.name,
+  azanAudioAlert: true,
+  sehriAlert: true,
+  sehriMinutesBefore: 30,
+  iftarAlert: true,
+  prayerTimeMute: false,
+  lastTriggeredKeys: {},
+};
+
+export function loadAzanRamadanConfig(): AzanRamadanConfig {
+  try {
+    const raw = localStorage.getItem(AZAN_CONFIG_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...DEFAULT_AZAN_RAMADAN_CONFIG,
+        ...parsed,
+        lastTriggeredKeys:
+          parsed?.lastTriggeredKeys && typeof parsed.lastTriggeredKeys === 'object'
+            ? parsed.lastTriggeredKeys
+            : {},
+      };
+    }
+  } catch {}
+  return { ...DEFAULT_AZAN_RAMADAN_CONFIG };
+}
+
+export function saveAzanRamadanConfig(cfg: AzanRamadanConfig): void {
+  try {
+    localStorage.setItem(AZAN_CONFIG_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {}
+}
+
+export interface DailyPrayerTimes {
+  dateKey: string;
+  sehriEnds: string; // HH:MM (Fajr - 10 min ihtiyat)
+  fajr: string;
+  sunrise: string;
+  dhuhr: string;
+  asr: string;
+  maghribIftar: string;
+  isha: string;
+}
+
+function formatHoursToHHMM(hoursRaw: number): string {
+  const hNorm = ((hoursRaw % 24) + 24) % 24;
+  const totalMin = Math.round(hNorm * 60) % 1440;
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/**
+ * Pure astronomical solar position algorithm (Karachi / Univ. of Islamic Sciences Fajr 18deg, Isha 18deg, Hanafi/Shafi Asr).
+ */
+export function computeDailyPrayerTimes(
+  latitude: number,
+  longitude: number,
+  date: Date = new Date()
+): DailyPrayerTimes {
+  const d2r = Math.PI / 180;
+  const r2d = 180 / Math.PI;
+  const tzOffsetHours = -date.getTimezoneOffset() / 60;
+
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  // Julian date calculation
+  let y = year;
+  let m = month;
+  if (m <= 2) {
+    y -= 1;
+    m += 12;
+  }
+  const A = Math.floor(y / 100);
+  const B = 2 - A + Math.floor(A / 4);
+  const jd = Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + day + B - 1524.5;
+  const d = jd - 2451545.0;
+
+  const g = (357.529 + 0.98560028 * d) % 360;
+  const q = (280.459 + 0.98564736 * d) % 360;
+  const L = (q + 1.915 * Math.sin(g * d2r) + 0.02 * Math.sin(2 * g * d2r)) % 360;
+  const e = 23.439 - 0.00000036 * d;
+
+  const ra = Math.atan2(Math.cos(e * d2r) * Math.sin(L * d2r), Math.cos(L * d2r)) * r2d / 15;
+  const eqT = q / 15 - (((ra % 24) + 24) % 24);
+  const eqTClean = eqT > 12 ? eqT - 24 : eqT < -12 ? eqT + 24 : eqT;
+
+  const decl = Math.asin(Math.sin(e * d2r) * Math.sin(L * d2r)) * r2d;
+  const noon = 12 + tzOffsetHours - longitude / 15 - eqTClean;
+
+  const hourAngleForSunAlt = (altDeg: number): number => {
+    const num =
+      Math.sin(altDeg * d2r) - Math.sin(latitude * d2r) * Math.sin(decl * d2r);
+    const den = Math.cos(latitude * d2r) * Math.cos(decl * d2r);
+    const ratio = Math.max(-0.999, Math.min(0.999, num / (den || 1e-6)));
+    return Math.acos(ratio) * r2d / 15;
+  };
+
+  const fajrH = noon - hourAngleForSunAlt(-18);
+  const sunriseH = noon - hourAngleForSunAlt(-0.833);
+  const dhuhrH = noon + 2 / 60;
+  const asrShadowFactor = 1; // Standard
+  const asrAlt = Math.atan(1 / (asrShadowFactor + Math.tan(Math.abs(latitude - decl) * d2r))) * r2d;
+  const asrH = noon + hourAngleForSunAlt(asrAlt);
+  const maghribH = noon + hourAngleForSunAlt(-0.833) + 1 / 60;
+  const ishaH = noon + hourAngleForSunAlt(-18);
+  const sehriH = fajrH - 10 / 60;
+
+  return {
+    dateKey,
+    sehriEnds: formatHoursToHHMM(sehriH),
+    fajr: formatHoursToHHMM(fajrH),
+    sunrise: formatHoursToHHMM(sunriseH),
+    dhuhr: formatHoursToHHMM(dhuhrH),
+    asr: formatHoursToHHMM(asrH),
+    maghribIftar: formatHoursToHHMM(maghribH),
+    isha: formatHoursToHHMM(ishaH),
+  };
+}
+
+export type AzanAlertEventKey =
+  | 'sehri_pre'
+  | 'sehri_end'
+  | 'fajr'
+  | 'dhuhr'
+  | 'asr'
+  | 'maghrib_iftar'
+  | 'isha';
+
+export function buildAzanVoicePrompt(
+  eventKey: AzanAlertEventKey,
+  time24: string,
+  cityName: string,
+  language: Language = 'auto'
+): string {
+  const lang =
+    language === 'english' ||
+    language === 'hindi' ||
+    language === 'punjabi' ||
+    language === 'urdu' ||
+    language === 'roman_urdu'
+      ? language
+      : 'urdu';
+
+  if (eventKey === 'sehri_pre') {
+    if (lang === 'english') {
+      return `Assalam o Alaikum. Sehri pre-alert for ${cityName}: about 30 minutes remain before Sehri ends at ${time24}.`;
+    }
+    if (lang === 'hindi') {
+      return `अस्सलामु अलैकुम। ${cityName} में सहरी ख़त्म होने में लगभग 30 मिनट बाकी हैं (${time24})।`;
+    }
+    if (lang === 'punjabi') {
+      return `السلام علیکم۔ ${cityName} وچ سحری ختم ہون چ تقریباً 30 منٹ باقی نیں (${time24})۔`;
+    }
+    if (lang === 'roman_urdu') {
+      return `Assalam o Alaikum. ${cityName} mein Sehri khatam hone mein taqreeban 30 minute baqi hain (${time24}).`;
+    }
+    return `السلام علیکم۔ ${cityName} میں سحری ختم ہونے میں تقریباً 30 منٹ باقی ہیں (${time24})۔`;
+  }
+
+  if (eventKey === 'sehri_end') {
+    if (lang === 'english') {
+      return `Sehri time has ended in ${cityName} (${time24}). May Allah accept your fast.`;
+    }
+    if (lang === 'hindi') {
+      return `${cityName} में सहरी का समय समाप्त हो गया है (${time24})। अल्लाह आपका रोज़ा कुबूल फरमाए।`;
+    }
+    if (lang === 'punjabi') {
+      return `${cityName} وچ سحری دا وقت ختم ہو گیا اے (${time24})۔ اللہ تہاڈا روزہ قبول فرمائے۔`;
+    }
+    if (lang === 'roman_urdu') {
+      return `${cityName} mein Sehri ka waqt khatam ho gaya hai (${time24}). Allah aapka roza qubool farmaye.`;
+    }
+    return `${cityName} میں سحری کا وقت ختم ہو گیا ہے (${time24})۔ اللہ آپ کا روزہ قبول فرمائے۔`;
+  }
+
+  if (eventKey === 'maghrib_iftar') {
+    if (lang === 'english') {
+      return `Allahu Akbar. Maghrib Azan & Iftar time in ${cityName} (${time24}). Please break your fast.`;
+    }
+    if (lang === 'hindi') {
+      return `अल्लाहु अकबर। ${cityName} में मगरिब की अज़ान और इफ़्तार का समय हो गया है (${time24})। रोज़ा इफ़्तार कर लीजिए।`;
+    }
+    if (lang === 'punjabi') {
+      return `اللہ اکبر۔ ${cityName} وچ مغرب دی اذان تے افطار دا وقت ہو گیا اے (${time24})۔ روزہ افطار کر لو۔`;
+    }
+    if (lang === 'roman_urdu') {
+      return `Allahu Akbar. ${cityName} mein Maghrib ki Azan aur Iftar ka waqt ho gaya hai (${time24}). Roza Iftar kar lijiye.`;
+    }
+    return `اللہ اکبر۔ ${cityName} میں مغرب کی اذان اور افطار کا وقت ہو گیا ہے (${time24})۔ روزہ افطار کر لیجیے۔`;
+  }
+
+  const labels: Record<'fajr' | 'dhuhr' | 'asr' | 'isha', { en: string; ur: string; hi: string; pa: string }> = {
+    fajr: { en: 'Fajr', ur: 'فجر', hi: 'फ़ज्र', pa: 'فجر' },
+    dhuhr: { en: 'Dhuhr', ur: 'ظہر', hi: 'ज़ुहर', pa: 'ظہر' },
+    asr: { en: 'Asr', ur: 'عصر', hi: 'असर', pa: 'عصر' },
+    isha: { en: 'Isha', ur: 'عشاء', hi: 'इशा', pa: 'عشاء' },
+  };
+  const label = labels[eventKey];
+  if (lang === 'english') {
+    return `Allahu Akbar. It is time for ${label.en} Azan in ${cityName} (${time24}).`;
+  }
+  if (lang === 'hindi') {
+    return `अल्लाहु अकबर। ${cityName} में ${label.hi} की अज़ान का समय हो गया है (${time24})।`;
+  }
+  if (lang === 'punjabi') {
+    return `اللہ اکبر۔ ${cityName} وچ ${label.pa} دی اذان دا وقت ہو گیا اے (${time24})۔`;
+  }
+  if (lang === 'roman_urdu') {
+    return `Allahu Akbar. ${cityName} mein ${label.en} ki Azan ka waqt ho gaya hai (${time24}).`;
+  }
+  return `اللہ اکبر۔ ${cityName} میں ${label.ur} کی اذان کا وقت ہو گیا ہے (${time24})۔`;
+}
+

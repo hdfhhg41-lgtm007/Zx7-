@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   ShieldCheck,
-  Smartphone,
   Camera,
   MonitorUp,
   Mic,
@@ -14,39 +13,45 @@ import {
   Eye,
   BatteryCharging,
   Wifi,
-  Cpu,
   ImagePlus,
   Sparkles,
   Settings,
-  ChevronRight,
-  Check,
   MapPin,
-  Fingerprint,
   HardDrive,
 } from 'lucide-react';
 import {
-  ALL_MOBILE_BRANDS,
   MobileAppDefinition,
-  MobileBrandProfile,
   MobileHardwareTelemetry,
   MobilePermissionsStatus,
   addCustomMobileApp,
   closeMobileAppNow,
   getAllMobileApps,
-  getSelectedMobileBrand,
   launchMobileAppNow,
   queryMobilePermissions,
   readMobileHardwareTelemetry,
   requestAllPermissionsMaster,
-  setSelectedMobileBrand,
   subscribeRunningApps,
   zaraVision,
 } from '../services/visionAndControlService';
-import { openAndroidSystemPermissionScreen } from '../services/androidAssistantBridgeService';
-import { SecurityAndControlConfig, VisionMode } from '../types';
+import {
+  NativeAndroidAutomationStatus,
+  getNativeAndroidAutomationStatus,
+  openAndroidSystemPermissionScreen,
+} from '../services/androidAssistantBridgeService';
+import { Language, SecurityAndControlConfig, VisionMode } from '../types';
 import { audioService } from '../services/audioService';
 
 export type MobileControlTab = 'settings' | 'apps' | 'permissions' | 'vision' | 'security';
+
+function pickMobileSpeech(
+  lang: Language,
+  copy: { english: string; hindi: string; punjabi: string; urdu: string }
+): string {
+  if (lang === 'english') return copy.english;
+  if (lang === 'hindi') return copy.hindi;
+  if (lang === 'punjabi') return copy.punjabi;
+  return copy.urdu;
+}
 
 interface MobileControlModalProps {
   isOpen: boolean;
@@ -54,24 +59,33 @@ interface MobileControlModalProps {
   initialTab?: MobileControlTab;
   highlightedSettingId?: string | null;
   visionMode: VisionMode;
+  language?: Language;
   securityConfig: SecurityAndControlConfig;
   onUpdateSecurity: (updates: Partial<SecurityAndControlConfig>) => void;
   onAskZaraAboutVision: (customPrompt?: string) => Promise<void>;
   onLockNow: () => void;
+  onTriggerOverheatTest?: () => void;
 }
 
 export const MobileControlModal: React.FC<MobileControlModalProps> = ({
   isOpen,
   onClose,
-  initialTab = 'settings',
+  initialTab = 'permissions',
   highlightedSettingId = null,
   visionMode,
+  language = 'auto',
   securityConfig,
   onUpdateSecurity,
   onAskZaraAboutVision,
   onLockNow,
+  onTriggerOverheatTest,
 }) => {
-  const [tab, setTab] = useState<MobileControlTab>(initialTab);
+  const [tab, setTab] = useState<MobileControlTab>(
+    initialTab === 'settings' ? 'permissions' : initialTab
+  );
+  const [nativeStatus, setNativeStatus] = useState<NativeAndroidAutomationStatus>(() =>
+    getNativeAndroidAutomationStatus()
+  );
   const [perms, setPerms] = useState<MobilePermissionsStatus>({
     microphone: 'prompt',
     camera: 'prompt',
@@ -85,9 +99,6 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
   const [telemetry, setTelemetry] = useState<MobileHardwareTelemetry | null>(null);
   const [apps, setApps] = useState<MobileAppDefinition[]>([]);
   const [appFilter, setAppFilter] = useState<'all' | 'social' | 'media' | 'system' | 'utility'>('all');
-  const [selectedBrand, setSelectedBrand] = useState<MobileBrandProfile>(() =>
-    getSelectedMobileBrand()
-  );
   const [newAppName, setNewAppName] = useState('');
   const [newAppPackage, setNewAppPackage] = useState('');
   const [pinDraft, setPinDraft] = useState(securityConfig.pinCode || '1234');
@@ -104,15 +115,15 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setTab(initialTab);
+      setTab(initialTab === 'settings' ? 'permissions' : initialTab);
       setApps(getAllMobileApps());
-      setSelectedBrand(getSelectedMobileBrand());
       queryMobilePermissions().then(setPerms);
+      setNativeStatus(getNativeAndroidAutomationStatus());
       readMobileHardwareTelemetry().then(setTelemetry);
       if (highlightedSettingId) {
         const found = getAllMobileApps().find((a) => a.id === highlightedSettingId);
         if (found) {
-          setStatusNote(`Opened ${found.name} for ${getSelectedMobileBrand().name}.`);
+          setStatusNote(`Ready: ${found.name}`);
         }
       } else {
         setStatusNote(null);
@@ -125,13 +136,7 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
   const refreshPerms = async () => {
     const next = await queryMobilePermissions();
     setPerms(next);
-  };
-
-  const handleSelectBrand = (brandId: string) => {
-    audioService.playChime('tap');
-    const updated = setSelectedMobileBrand(brandId);
-    setSelectedBrand(updated);
-    setStatusNote(`${updated.name} (${updated.osName}) profile activated — all mobile apps & OS settings ready!`);
+    setNativeStatus(getNativeAndroidAutomationStatus());
   };
 
   const handleAllowAllPermissions = async () => {
@@ -158,7 +163,13 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
 
     if (res.micGranted && res.cameraGranted) {
       audioService.speakText(
-        'جي ميري جان! اب مائیک، کیمرہ، لوکیشن اور موبائل کنٹرول کی ساری پرمیشن آن ہو گئی ہیں!'
+        pickMobileSpeech(language, {
+          english: 'Microphone, camera, location, and mobile permissions are now active.',
+          hindi: 'जी! अब माइक, कैमरा, लोकेशन और मोबाइल की सभी परमिशन चालू हो गई हैं।',
+          punjabi: 'جی! ہن مائیک، کیمرہ، لوکیشن تے موبائل دیاں ساریاں پرمیشناں آن ہو گئیاں نیں۔',
+          urdu: 'جی! اب مائیک، کیمرہ، لوکیشن اور موبائل کنٹرول کی تمام پرمیشنز آن ہو گئی ہیں!',
+        }),
+        { language }
       );
     }
   };
@@ -175,7 +186,15 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
     await refreshPerms();
     if (res.ok) {
       setStatusNote('Live Camera active — Zara is looking right at you!');
-      audioService.speakText('ہائے میری جان! اب میں آپ کو اپنی آنکھوں سے لائیو دیکھ پا رہی ہوں!');
+      audioService.speakText(
+        pickMobileSpeech(language, {
+          english: 'Camera vision is now active.',
+          hindi: 'जी! अब कैमरा ऑन है और मैं लाइव देख पा रही हूँ।',
+          punjabi: 'جی! ہن کیمرہ آن اے تے میں لائیو ویکھ سکدی آں۔',
+          urdu: 'جی! اب کیمرہ آن ہے اور میں لائیو دیکھ پا رہی ہوں!',
+        }),
+        { language }
+      );
     } else if (res.error) {
       setStatusNote(res.error);
     }
@@ -193,7 +212,15 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
     await refreshPerms();
     if (res.ok) {
       setStatusNote('Screen Share active — Zara can now see your mobile screen!');
-      audioService.speakText('جی جان! اب مجھے آپ کی موبائل اسکرین صاف نظر آ رہی ہے!');
+      audioService.speakText(
+        pickMobileSpeech(language, {
+          english: 'Screen share is active and visible.',
+          hindi: 'जी! अब मुझे आपकी मोबाइल स्क्रीन साफ दिखाई दे रही है।',
+          punjabi: 'جی! ہن مینوں تہاڈی موبائل اسکرین صاف نظر آ رہی اے۔',
+          urdu: 'جی! اب مجھے آپ کی موبائل اسکرین صاف نظر آ رہی ہے!',
+        }),
+        { language }
+      );
     } else if (res.fallbackNeeded) {
       setStatusNote(res.error || null);
       screenFileInputRef.current?.click();
@@ -229,7 +256,15 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
       zaraVision.startCamera('user');
     });
     setStatusNote(`Opened ${app.name} directly on your mobile!`);
-    audioService.speakText(`جی میری جان، ابھی آپ کے موبائل میں ${app.name} اوپن کر رہی ہوں!`);
+    audioService.speakText(
+      pickMobileSpeech(language, {
+        english: `Opening ${app.name} now.`,
+        hindi: `जी, अभी आपके मोबाइल में ${app.name} ओपन कर रही हूँ।`,
+        punjabi: `جی، ہنے تہاڈے موبائل وچ ${app.name} کھول رہی آں۔`,
+        urdu: `جی، ابھی آپ کے موبائل میں ${app.name} اوپن کر رہی ہوں!`,
+      }),
+      { language }
+    );
   };
 
   const handleCloseApp = (app: MobileAppDefinition | 'all') => {
@@ -238,10 +273,26 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
     const res = closeMobileAppNow(app);
     if (res.closedAll) {
       setStatusNote('Closed & turned off all running mobile apps ✓');
-      audioService.speakText('جی میری جان، میں نے ساری ایپس کو بند اور کلوز کر دیا ہے!');
+      audioService.speakText(
+        pickMobileSpeech(language, {
+          english: 'All running apps closed.',
+          hindi: 'जी, मैंने सभी ऐप्स बंद कर दिए हैं।',
+          punjabi: 'جی، میں ساریاں ایپس بند کر دتیاں نیں۔',
+          urdu: 'جی، میں نے تمام ایپس بند کر دی ہیں!',
+        }),
+        { language }
+      );
     } else if (res.app) {
       setStatusNote(`Closed & turned off ${res.app.name} ✓`);
-      audioService.speakText(`جی میری جان، میں نے ${res.app.name} کو بند اور آف کر دیا ہے!`);
+      audioService.speakText(
+        pickMobileSpeech(language, {
+          english: `Closed ${res.app.name}.`,
+          hindi: `जी, मैंने ${res.app.name} को बंद कर दिया है।`,
+          punjabi: `جی، میں ${res.app.name} نوں بند کر دتا اے۔`,
+          urdu: `جی، میں نے ${res.app.name} کو بند کر دیا ہے!`,
+        }),
+        { language }
+      );
     }
   };
 
@@ -267,15 +318,20 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
       const batText =
         fresh.batteryLevel !== null ? `${fresh.batteryLevel}% Battery` : 'Battery Healthy';
       setStatusNote(
-        `Security Scan Complete: ${selectedBrand.name} is protected (${batText} • ${fresh.networkType})`
+        `Security Scan Complete: Device is protected (${batText} • ${fresh.networkType})`
       );
       audioService.speakText(
-        'میری جان، میں نے آپ کے موبائل کی سیکیورٹی اور سسٹم چیک کر لیا ہے، سب بالکل محفوظ ہے!'
+        pickMobileSpeech(language, {
+          english: 'System and security scan completed. Everything is secure.',
+          hindi: 'मैंने आपके मोबाइल की सिक्योरिटी और सिस्टम चेक कर लिया है, सब सुरक्षित है।',
+          punjabi: 'میں تہاڈے موبائل دی سیکیورٹی تے سسٹم چیک کر لیا اے، سب محفوظ اے۔',
+          urdu: 'میں نے آپ کے موبائل کی سیکیورٹی اور سسٹم چیک کر لیا ہے، سب بالکل محفوظ ہے!',
+        }),
+        { language }
       );
     }, 900);
   };
 
-  const mobileSettingsList = apps.filter((item) => item.category === 'mobile_settings');
   const nativeMobileApps = apps.filter((item) => item.category !== 'mobile_settings');
   const filteredApps =
     appFilter === 'all'
@@ -289,14 +345,14 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-cyan-300 shrink-0">
-              <Settings className="w-5 h-5" />
+              <ShieldCheck className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <h2 className="text-base font-bold text-white truncate">
-                Mobile Settings &amp; All Apps
+                Zara Permissions &amp; Control
               </h2>
               <p className="text-[11px] text-cyan-300 truncate">
-                {selectedBrand.name} • Direct Native App &amp; OS Control
+                Mic, Camera, Vision, Security &amp; App Launcher
               </p>
             </div>
           </div>
@@ -310,14 +366,13 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
           </button>
         </div>
 
-        {/* 5-Tab Segmented Navigation */}
-        <div className="grid grid-cols-5 gap-1 p-1 mt-3 rounded-xl bg-slate-950 border border-slate-800">
+        {/* 4-Tab Segmented Navigation */}
+        <div className="grid grid-cols-4 gap-1 p-1 mt-3 rounded-xl bg-slate-950 border border-slate-800">
           {[
-            { id: 'settings', label: 'Settings' },
-            { id: 'apps', label: 'All Apps' },
-            { id: 'permissions', label: 'Allow' },
+            { id: 'permissions', label: 'Permissions' },
             { id: 'vision', label: 'Vision' },
             { id: 'security', label: 'Security' },
+            { id: 'apps', label: 'Apps' },
           ].map((item) => (
             <button
               key={item.id}
@@ -354,108 +409,7 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-0.5">
-          {/* TAB 1: FULL NATIVE MOBILE SETTINGS & ALL PHONES SELECTOR */}
-          {tab === 'settings' && (
-            <div className="space-y-3">
-              {/* All Mobile Brands Selector Bar */}
-              <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">Your Mobile Phone</span>
-                  <span className="text-[11px] text-cyan-300">{selectedBrand.osName}</span>
-                </div>
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-                  {ALL_MOBILE_BRANDS.map((brand) => {
-                    const active = selectedBrand.id === brand.id;
-                    return (
-                      <button
-                        key={brand.id}
-                        type="button"
-                        onClick={() => handleSelectBrand(brand.id)}
-                        className={`min-h-[34px] px-2.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap flex items-center gap-1 shrink-0 cursor-pointer ${
-                          active
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-950 border border-slate-800 text-slate-300 hover:text-white'
-                        }`}
-                      >
-                        {active && <Check className="w-3 h-3 shrink-0" />}
-                        <span>{brand.name.replace(' (Universal)', '')}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Primary Direct Phone Settings Actions */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const mainSettings = mobileSettingsList.find((s) => s.id === 'settings');
-                    if (mainSettings) handleLaunchApp(mainSettings);
-                  }}
-                  className="min-h-[46px] p-3 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs flex items-center justify-between gap-2 active:scale-95 transition-all cursor-pointer"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Settings className="w-4 h-4 shrink-0" />
-                    <span className="truncate">Open Phone Settings</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 shrink-0" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const appPerms = mobileSettingsList.find((s) => s.id === 'app_settings');
-                    if (appPerms) handleLaunchApp(appPerms);
-                  }}
-                  className="min-h-[46px] p-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-between gap-2 active:scale-95 transition-all cursor-pointer"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <ShieldCheck className="w-4 h-4 shrink-0" />
-                    <span className="truncate">App Permissions</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 shrink-0" />
-                </button>
-              </div>
-
-              {/* All 16 Native Mobile System Settings */}
-              <div className="text-xs font-bold text-slate-300 px-0.5">
-                All Mobile System Settings ({mobileSettingsList.length})
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {mobileSettingsList.map((setting) => {
-                  const isHighlighted = highlightedSettingId === setting.id;
-                  return (
-                    <button
-                      key={setting.id}
-                      type="button"
-                      onClick={() => handleLaunchApp(setting)}
-                      className={`min-h-[54px] p-2.5 rounded-2xl border text-left transition-all active:scale-95 cursor-pointer flex items-center justify-between gap-2 ${
-                        isHighlighted
-                          ? 'border-emerald-400 bg-emerald-950/70 text-white ring-1 ring-emerald-400'
-                          : setting.accentClass
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-base shrink-0">{setting.iconEmoji}</span>
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-white truncate">
-                            {setting.name}
-                          </div>
-                          <div className="text-[10px] text-slate-300/80 truncate">
-                            {setting.locationLabel.replace('Mobile Settings • ', '')}
-                          </div>
-                        </div>
-                      </div>
-                      <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-80" />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: ALL MOBILE APPS (NATIVE LAUNCH — ZERO CHROME TABS!) */}
+          {/* TAB 1: ALL MOBILE APPS (NATIVE LAUNCH) */}
           {tab === 'apps' && (
             <div className="space-y-3">
               <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between gap-2 text-[11px] text-emerald-200 leading-relaxed">
@@ -590,30 +544,34 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: MASTER ALL PERMISSIONS & ANDROID OS FIX */}
+          {/* TAB 3: CENTRALIZED ZARA PERMISSIONS SETUP */}
           {tab === 'permissions' && (
             <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleAllowAllPermissions}
-                className="min-h-[48px] w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all whitespace-nowrap cursor-pointer"
-              >
-                <CheckCircle2 className="w-5 h-5 shrink-0" />
-                <span>Allow All Mobile Permissions (1-Tap)</span>
-              </button>
-
-              {/* Clear Explanation for Android WebAPK App Info Screenshot */}
-              <div className="p-3 rounded-2xl bg-amber-950/60 border border-amber-400/45 space-y-1.5 text-[11px] text-amber-100 leading-relaxed">
-                <div className="font-extrabold text-amber-300 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                  <span>Android Phone Settings Notice (Important)</span>
+              <div className="p-3 rounded-2xl bg-slate-900/90 border border-emerald-500/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-extrabold text-white">Zara Permissions Setup</div>
+                    <div className="text-[11px] text-slate-300">
+                      Live status for Microphone, Camera, Notifications &amp; Android System access
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={refreshPerms}
+                    className="min-h-[34px] px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-cyan-200 shrink-0 cursor-pointer"
+                  >
+                    Refresh
+                  </button>
                 </div>
-                <p>
-                  Android WebAPK App Info only shows <strong>Notifications</strong> by default because Chrome manages <strong>Mic, Camera &amp; GPS Location</strong> under Chrome App Permissions &amp; Site Settings.
-                </p>
-                <p className="text-amber-200/90">
-                  Also turn <strong>OFF &ldquo;Pause app activity if unused&rdquo;</strong> in Zara App Info so Android never revokes permissions!
-                </p>
+
+                <button
+                  type="button"
+                  onClick={handleAllowAllPermissions}
+                  className="min-h-[46px] w-full py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all whitespace-nowrap cursor-pointer"
+                >
+                  <CheckCircle2 className="w-5 h-5 shrink-0" />
+                  <span>Allow All Mobile Permissions (1-Tap)</span>
+                </button>
               </div>
 
               <div className="space-y-2">
@@ -621,29 +579,34 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                   <div className="flex items-center gap-2.5 min-w-0">
                     <Mic className="w-4 h-4 text-pink-400 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white">Microphone (Voice &amp; Call)</div>
+                      <div className="text-xs font-bold text-white">Microphone (Voice &amp; Background Service)</div>
                       <div className="text-[11px] text-slate-400 truncate">
-                        Speak live with Zara and give voice commands
+                        Status: {perms.microphone === 'granted' ? 'Enabled' : perms.microphone === 'denied' ? 'Blocked in OS' : 'Disabled'}
                       </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAllowAllPermissions}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
-                      perms.microphone === 'granted'
-                        ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
-                        : perms.microphone === 'denied'
-                        ? 'bg-rose-900/80 border border-rose-500 text-rose-100'
-                        : 'bg-pink-600 text-white'
-                    }`}
-                  >
-                    {perms.microphone === 'granted'
-                      ? 'Allowed ✓'
-                      : perms.microphone === 'denied'
-                      ? 'Blocked (Fix)'
-                      : 'Allow'}
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleAllowAllPermissions}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer ${
+                        perms.microphone === 'granted'
+                          ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
+                          : perms.microphone === 'denied'
+                          ? 'bg-rose-900/80 border border-rose-500 text-rose-100'
+                          : 'bg-pink-600 text-white'
+                      }`}
+                    >
+                      {perms.microphone === 'granted' ? 'Enabled ✓' : perms.microphone === 'denied' ? 'Blocked' : 'Enable'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusNote(openAndroidSystemPermissionScreen('zara_app_info'))}
+                      className="min-h-[34px] px-2 py-1 rounded-xl bg-slate-800 text-[10px] font-bold text-slate-200 cursor-pointer"
+                    >
+                      OS
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2">
@@ -652,25 +615,62 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white">Camera Vision &amp; Face Lock</div>
                       <div className="text-[11px] text-slate-400 truncate">
-                        Owner Face Scan, Intruder Photo &amp; Live Vision
+                        Status: {visionMode === 'camera' || perms.camera === 'granted' ? 'Enabled' : perms.camera === 'denied' ? 'Blocked' : 'Disabled'}
                       </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleEnableCameraVision}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
-                      visionMode === 'camera' || perms.camera === 'granted'
-                        ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
-                        : 'bg-cyan-600 text-white'
-                    }`}
-                  >
-                    {visionMode === 'camera'
-                      ? 'Active ✓'
-                      : perms.camera === 'granted'
-                      ? 'Allowed ✓'
-                      : 'Allow'}
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleEnableCameraVision}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer ${
+                        visionMode === 'camera' || perms.camera === 'granted'
+                          ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
+                          : 'bg-cyan-600 text-white'
+                      }`}
+                    >
+                      {visionMode === 'camera' ? 'Active ✓' : perms.camera === 'granted' ? 'Enabled ✓' : 'Enable'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusNote(openAndroidSystemPermissionScreen('zara_app_info'))}
+                      className="min-h-[34px] px-2 py-1 rounded-xl bg-slate-800 text-[10px] font-bold text-slate-200 cursor-pointer"
+                    >
+                      OS
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Bell className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white">Notifications &amp; Foreground Voice Alert</div>
+                      <div className="text-[11px] text-slate-400 truncate">
+                        Status: {perms.notifications === 'granted' ? 'Enabled' : perms.notifications === 'denied' ? 'Blocked' : 'Disabled'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleAllowAllPermissions}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer ${
+                        perms.notifications === 'granted'
+                          ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
+                          : 'bg-amber-600 text-white'
+                      }`}
+                    >
+                      {perms.notifications === 'granted' ? 'Enabled ✓' : 'Enable'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusNote(openAndroidSystemPermissionScreen('zara_app_info'))}
+                      className="min-h-[34px] px-2 py-1 rounded-xl bg-slate-800 text-[10px] font-bold text-slate-200 cursor-pointer"
+                    >
+                      OS
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2">
@@ -679,20 +679,20 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white">GPS Location (Anti-Theft Security)</div>
                       <div className="text-[11px] text-slate-400 truncate">
-                        Logs phone location automatically if intruder triggers lock
+                        Status: {perms.geolocation === 'granted' ? 'Enabled' : perms.geolocation === 'denied' ? 'Blocked' : 'Disabled'}
                       </div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleAllowAllPermissions}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
+                    className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
                       perms.geolocation === 'granted'
                         ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
                         : 'bg-emerald-600 text-white'
                     }`}
                   >
-                    {perms.geolocation === 'granted' ? 'Allowed ✓' : 'Allow GPS'}
+                    {perms.geolocation === 'granted' ? 'Enabled ✓' : 'Enable'}
                   </button>
                 </div>
 
@@ -702,38 +702,21 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white">Protected Security Storage Vault</div>
                       <div className="text-[11px] text-slate-400 truncate">
-                        Prevents Android from clearing chat vault &amp; security PIN
+                        {perms.persistentStorage === 'granted' ? 'Protected against OS clear' : 'Tap Enable to persist local data'}
                       </div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleAllowAllPermissions}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
+                    className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
                       perms.persistentStorage === 'granted'
                         ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
                         : 'bg-purple-600 text-white'
                     }`}
                   >
-                    {perms.persistentStorage === 'granted' ? 'Protected ✓' : 'Protect'}
+                    {perms.persistentStorage === 'granted' ? 'Protected ✓' : 'Enable'}
                   </button>
-                </div>
-
-                <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Fingerprint className="w-4 h-4 text-sky-400 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white">Hardware Fingerprint / Biometrics</div>
-                      <div className="text-[11px] text-slate-400 truncate">
-                        {perms.biometricAvailable
-                          ? 'Phone Fingerprint / Face Sensor Ready'
-                          : 'Secured via PIN + Owner Face Lock'}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-sky-300 whitespace-nowrap shrink-0">
-                    {perms.biometricAvailable ? 'Hardware Ready ✓' : 'PIN / Face'}
-                  </span>
                 </div>
 
                 <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2">
@@ -742,78 +725,106 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white">Screen Share (Mobile Screen)</div>
                       <div className="text-[11px] text-slate-400 truncate">
-                        Show your live mobile screen to Zara anytime
+                        Let Zara read what is on your screen
                       </div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleEnableScreenShare}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
+                    className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
                       visionMode === 'screen'
                         ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
                         : 'bg-blue-600 text-white'
                     }`}
                   >
-                    {visionMode === 'screen' ? 'Sharing ✓' : 'Share Screen'}
+                    {visionMode === 'screen' ? 'Active ✓' : 'Enable'}
                   </button>
                 </div>
 
-                <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Bell className="w-4 h-4 text-amber-400 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white">Notifications &amp; Security Alerts</div>
-                      <div className="text-[11px] text-slate-400 truncate">
-                        Background mic status &amp; intruder phone alerts
-                      </div>
-                    </div>
+                {/* Native Android APK Background & Special Permissions */}
+                <div className="p-3 rounded-2xl bg-slate-950/90 border border-cyan-500/35 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-extrabold text-cyan-300">
+                      Android Background &amp; System Permissions
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400">
+                      {nativeStatus.hasNativeBridge ? `APK: ${nativeStatus.deviceModel || 'Android'}` : 'Browser Mode'}
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAllowAllPermissions}
-                    className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
-                      perms.notifications === 'granted'
-                        ? 'bg-emerald-950 border border-emerald-500/50 text-emerald-300'
-                        : 'bg-amber-600 text-white'
-                    }`}
-                  >
-                    {perms.notifications === 'granted' ? 'Allowed ✓' : 'Allow'}
-                  </button>
+
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    {[
+                      {
+                        label: 'Battery Unrestricted',
+                        granted: nativeStatus.batteryOptimizationIgnored,
+                        screen: 'battery_unrestricted' as const,
+                      },
+                      {
+                        label: 'Display Over Apps',
+                        granted: nativeStatus.overlayGranted,
+                        screen: 'display_overlay' as const,
+                      },
+                      {
+                        label: 'Accessibility Control',
+                        granted: nativeStatus.accessibilityConnected,
+                        screen: 'accessibility' as const,
+                      },
+                      {
+                        label: 'Notification Access',
+                        granted: nativeStatus.notificationAccessGranted,
+                        screen: 'notification_listener' as const,
+                      },
+                      {
+                        label: 'Calls & Contacts',
+                        granted: nativeStatus.hasNativeBridge
+                          ? Boolean(nativeStatus.callGranted && nativeStatus.contactsGranted)
+                          : undefined,
+                        screen: 'zara_app_info' as const,
+                      },
+                      {
+                        label: 'SMS & Media Access',
+                        granted: nativeStatus.hasNativeBridge
+                          ? Boolean(nativeStatus.smsGranted && nativeStatus.mediaGranted)
+                          : undefined,
+                        screen: 'zara_app_info' as const,
+                      },
+                    ].map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => setStatusNote(openAndroidSystemPermissionScreen(item.screen))}
+                        className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-left flex items-center justify-between gap-1 cursor-pointer ${
+                          item.granted === true
+                            ? 'bg-emerald-950/70 border-emerald-500/45 text-emerald-100'
+                            : item.granted === false
+                            ? 'bg-rose-950/60 border-rose-500/45 text-rose-100'
+                            : 'bg-slate-900 border-white/10 text-slate-200 hover:border-cyan-400/50'
+                        }`}
+                      >
+                        <span className="font-bold truncate">{item.label}</span>
+                        <span className="text-[10px] font-extrabold shrink-0">
+                          {item.granted === true ? 'ON ✓' : item.granted === false ? 'OPEN OS' : 'SETTINGS'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               {/* Direct Android OS System Settings Launchers */}
               <div className="pt-1 space-y-1.5">
                 <div className="text-[11px] font-bold text-cyan-300">
-                  Direct Phone Settings &amp; Security Controls ({selectedBrand.name})
+                  Zara Android System Permissions
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setStatusNote(openAndroidSystemPermissionScreen('chrome_app_permissions'))}
-                    className="min-h-[40px] py-2 px-2.5 rounded-xl bg-cyan-950/80 border border-cyan-500/45 hover:border-cyan-400 text-cyan-100 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Settings className="w-3.5 h-3.5 shrink-0" />
-                    <span>Chrome Permissions</span>
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => setStatusNote(openAndroidSystemPermissionScreen('zara_app_info'))}
                     className="min-h-[40px] py-2 px-2.5 rounded-xl bg-slate-900 border border-amber-500/40 hover:border-amber-400 text-amber-200 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                    <span>Zara App Info</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setStatusNote(openAndroidSystemPermissionScreen('security_settings'))}
-                    className="min-h-[40px] py-2 px-2.5 rounded-xl bg-slate-900 border border-rose-500/40 hover:border-rose-400 text-rose-200 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Lock className="w-3.5 h-3.5 shrink-0" />
-                    <span>Phone Security</span>
+                    <span>Android App Info</span>
                   </button>
 
                   <button
@@ -823,6 +834,24 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                   >
                     <BatteryCharging className="w-3.5 h-3.5 shrink-0" />
                     <span>Battery Unrestricted</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusNote(openAndroidSystemPermissionScreen('chrome_app_permissions'))}
+                    className="min-h-[40px] py-2 px-2.5 rounded-xl bg-cyan-950/80 border border-cyan-500/45 hover:border-cyan-400 text-cyan-100 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Settings className="w-3.5 h-3.5 shrink-0" />
+                    <span>Browser Permissions</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusNote(openAndroidSystemPermissionScreen('security_settings'))}
+                    className="min-h-[40px] py-2 px-2.5 rounded-xl bg-slate-900 border border-rose-500/40 hover:border-rose-400 text-rose-200 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                    <span>Lock &amp; Security</span>
                   </button>
                 </div>
               </div>
@@ -845,7 +874,7 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Turn on your front or rear camera so Zara can see you live, follow your movement with her 4D eyes, and talk about what she sees!
+                  Turn on your front or rear camera so Zara can see you live and talk about what she sees!
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -939,42 +968,62 @@ export const MobileControlModal: React.FC<MobileControlModalProps> = ({
           {/* TAB 5: SECURITY & DEVICE HEALTH */}
           {tab === 'security' && (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-emerald-500/30">
                   <BatteryCharging className="w-4 h-4 text-emerald-400 mb-1" />
-                  <div className="text-[10px] text-slate-400">Battery</div>
+                  <div className="text-[10px] text-slate-400">Battery Thermal</div>
                   <div className="text-xs font-extrabold text-white tabular-nums">
                     {telemetry?.batteryLevel !== null && telemetry?.batteryLevel !== undefined
                       ? `${telemetry.batteryLevel}%`
                       : 'Active'}
+                    {telemetry?.batteryTempC !== null && telemetry?.batteryTempC !== undefined
+                      ? ` · ${telemetry.batteryTempC.toFixed(1)}°C`
+                      : ''}
                   </div>
                 </div>
                 <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30">
                   <Wifi className="w-4 h-4 text-cyan-400 mb-1" />
-                  <div className="text-[10px] text-slate-400">Network</div>
+                  <div className="text-[10px] text-slate-400">Connection</div>
                   <div className="text-xs font-extrabold text-white truncate">
-                    {telemetry?.networkType || 'Online'}
-                  </div>
-                </div>
-                <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-purple-500/30">
-                  <Cpu className="w-4 h-4 text-purple-400 mb-1" />
-                  <div className="text-[10px] text-slate-400">Mobile</div>
-                  <div className="text-xs font-extrabold text-emerald-400 truncate">
-                    {selectedBrand.name.split(' ')[0]}
+                    {telemetry?.online ? 'Online' : 'Offline Mode'}
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleRunSecurityScan}
-                className="min-h-[44px] w-full py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4 shrink-0" />
-                <span>
-                  {isScanning ? 'Scanning Mobile System...' : 'Run Mobile Security & System Scan'}
-                </span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleRunSecurityScan}
+                  className="min-h-[44px] w-full py-2.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>
+                    {isScanning ? 'Scanning Mobile System...' : 'Run Security & Thermal Scan'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioService.unlock();
+                    if (onTriggerOverheatTest) {
+                      onTriggerOverheatTest();
+                    } else {
+                      const msg = pickMobileSpeech(language, {
+                        english: 'Warning! Battery temperature exceeded 40 degrees Celsius while charging. Please unplug your charger.',
+                        hindi: 'चेतावनी! चार्जिंग के दौरान बैटरी का तापमान 40 डिग्री से ऊपर चला गया है, कृपया चार्जर हटा दें!',
+                        punjabi: 'ਖ਼ਬਰਦਾਰ! ਚਾਰਜਿੰਗ ਵੇਲੇ ਬੈਟਰੀ 40 ਡਿਗਰੀ ਤੋਂ ਵੱਧ ਗਰਮ ਹੋ ਗਈ ਏ, ਕਿਰਪਾ ਕਰਕੇ ਚਾਰਜਰ ਉਤਾਰ ਦਿਓ!',
+                        urdu: 'خبردار! چارجنگ کے دوران بیٹری کا درجہ حرارت 40 ڈگری سے بڑھ گیا ہے، براہ کرم چارجر اتار دیں!',
+                      });
+                      setStatusNote(msg);
+                      audioService.speakText(msg, { language: language === 'auto' ? 'urdu' : language });
+                    }
+                  }}
+                  className="min-h-[44px] w-full py-2.5 px-4 rounded-2xl bg-rose-950/90 hover:bg-rose-900 border border-rose-500/45 text-rose-200 font-extrabold text-xs flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+                >
+                  <BatteryCharging className="w-4 h-4 shrink-0" />
+                  <span>Test Overheat (&gt;40°C) Alert</span>
+                </button>
+              </div>
 
               <div className="p-3.5 rounded-2xl bg-slate-900/85 border border-pink-500/35 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">

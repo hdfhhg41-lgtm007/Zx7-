@@ -1,4 +1,4 @@
-import { VisionMode } from '../types';
+import { Language, MusicControlCommand, SurroundingsSnapshot, VisionMode } from '../types';
 
 export type MobileItemCategory = 'mobile_settings' | 'social' | 'media' | 'system' | 'utility';
 
@@ -47,6 +47,7 @@ export interface MobilePermissionsStatus {
 
 export interface MobileHardwareTelemetry {
   batteryLevel: number | null;
+  batteryTempC: number | null;
   isCharging: boolean | null;
   networkType: string;
   online: boolean;
@@ -97,10 +98,10 @@ export const ALL_MOBILE_BRANDS: MobileBrandProfile[] = [
   },
   {
     id: 'infinix',
-    name: 'Infinix',
-    osName: 'XOS Android',
+    name: 'Infinix (SMART 9 / XOS)',
+    osName: 'XOS Android 14',
     badgeText: 'Infinix Ready',
-    settingsPathHint: 'Settings -> App Management -> App Settings -> Permissions',
+    settingsPathHint: 'Settings -> Accessibility -> Zara AI · Notifications -> Notification access · Phone Master -> Auto-start',
   },
   {
     id: 'tecno',
@@ -196,17 +197,16 @@ function nativeAppIntent(schemeAndPath: string, packageId?: string, playStorePkg
   return `intent://${hostPath}#Intent;scheme=${scheme};${pkgSegment}action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;${fallbackSegment}end`;
 }
 
-// Complete Pre-Added Directory: All Native Mobile Settings + All Popular Mobile Apps (ZERO Chrome Website Fallbacks!)
-// Specific sub-settings and specific app variants come first so voice matching hits exact targets accurately.
+// Complete Pre-Added Directory: Zara-Essential Permissions & Popular Mobile Apps (ZERO OS Settings Clutter!)
 export const BUILTIN_MOBILE_APPS: MobileAppDefinition[] = [
-  // ======================== 1. NATIVE MOBILE SYSTEM SETTINGS ========================
+  // ======================== 1. ZARA-ESSENTIAL PERMISSION & SECURITY SETTINGS ========================
   {
     id: 'app_settings',
     name: 'Apps & Permissions Settings',
     nameHindi: 'ऐप्स और परमिशन सेटिंग्स',
     nameUrdu: 'ایپس اور پرمیشن سیٹنگز',
     category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • App Manager',
+    locationLabel: 'Zara Permissions • App Manager',
     iconEmoji: '🛡️',
     accentClass: 'border-emerald-500/40 bg-emerald-950/40 text-emerald-200',
     keywords: [
@@ -228,177 +228,12 @@ export const BUILTIN_MOBILE_APPS: MobileAppDefinition[] = [
     nativeScheme: 'intent:#Intent;action=android.settings.APPLICATION_SETTINGS;end',
   },
   {
-    id: 'wifi',
-    name: 'Wi-Fi & Internet Settings',
-    nameHindi: 'वाई-फाई सेटिंग',
-    nameUrdu: 'وائی فائی سیٹنگ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Network & Wi-Fi',
-    iconEmoji: '📶',
-    accentClass: 'border-cyan-500/40 bg-cyan-950/40 text-cyan-200',
-    keywords: ['wifi', 'wi-fi', 'وائی فائی', 'وائفائی', 'वाईफाई', 'वाई-फाई'],
-    androidIntent:
-      'intent:#Intent;action=android.settings.WIFI_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=WIFI',
-    nativeScheme: 'intent:#Intent;action=android.settings.WIFI_SETTINGS;end',
-  },
-  {
-    id: 'bluetooth',
-    name: 'Bluetooth Settings',
-    nameHindi: 'ब्लूटूथ सेटिंग',
-    nameUrdu: 'بلوٹوتھ سیٹنگ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Connected Devices',
-    iconEmoji: '📘',
-    accentClass: 'border-blue-500/40 bg-blue-950/40 text-blue-200',
-    keywords: ['bluetooth', 'بلوٹوتھ', 'بلو ٹوتھ', 'ब्लूटूथ'],
-    androidIntent:
-      'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=Bluetooth',
-    nativeScheme: 'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;end',
-  },
-  {
-    id: 'mobile_data',
-    name: 'SIM & Mobile Data',
-    nameHindi: 'सिम और मोबाइल डेटा',
-    nameUrdu: 'سم اور موبائل ڈیٹا',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • SIM & Network',
-    iconEmoji: '📡',
-    accentClass: 'border-teal-500/40 bg-teal-950/40 text-teal-200',
-    keywords: [
-      'mobile data',
-      'sim setting',
-      'data setting',
-      'network setting',
-      'موبائل ڈیٹا',
-      'سم سیٹنگ',
-      'نیٹ ورک سیٹنگ',
-      'मोबाइल डेटा',
-      'सिम सेटिंग',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.settings.DATA_ROAMING_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=MOBILE_DATA_SETTINGS_ID',
-    nativeScheme: 'intent:#Intent;action=android.settings.DATA_ROAMING_SETTINGS;end',
-  },
-  {
-    id: 'hotspot',
-    name: 'Hotspot & Tethering',
-    nameHindi: 'हॉटस्पॉट सेटिंग',
-    nameUrdu: 'ہاٹ اسپاٹ سیٹنگ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Portable Hotspot',
-    iconEmoji: '🔥',
-    accentClass: 'border-orange-500/40 bg-orange-950/40 text-orange-200',
-    keywords: ['hotspot', 'tethering', 'ہاٹ اسپاٹ', 'ہاٹ سپاٹ', 'हॉटस्पॉट'],
-    androidIntent:
-      'intent:#Intent;action=android.settings.WIRELESS_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=INTERNET_TETHERING',
-    nativeScheme: 'intent:#Intent;action=android.settings.WIRELESS_SETTINGS;end',
-  },
-  {
-    id: 'display_settings',
-    name: 'Display & Brightness',
-    nameHindi: 'डिस्प्ले और ब्राइटनेस',
-    nameUrdu: 'ڈسپلے اور برائٹنس',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Screen & Wallpaper',
-    iconEmoji: '🔆',
-    accentClass: 'border-amber-500/40 bg-amber-950/40 text-amber-200',
-    keywords: [
-      'display setting',
-      'brightness',
-      'screen setting',
-      'ڈسپلے سیٹنگ',
-      'ڈسپلے',
-      'برائٹنس',
-      'डिस्प्ले सेटिंग',
-      'ब्राइटनेस',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.settings.DISPLAY_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=DISPLAY',
-    nativeScheme: 'intent:#Intent;action=android.settings.DISPLAY_SETTINGS;end',
-  },
-  {
-    id: 'sound_settings',
-    name: 'Sound, Volume & Vibration',
-    nameHindi: 'साउंड और वॉल्यूम सेटिंग',
-    nameUrdu: 'ساؤنڈ اور والیوم سیٹنگ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Audio & Ringtone',
-    iconEmoji: '🔊',
-    accentClass: 'border-purple-500/40 bg-purple-950/40 text-purple-200',
-    keywords: [
-      'sound setting',
-      'volume setting',
-      'ringtone setting',
-      'ringtone',
-      'ساؤنڈ سیٹنگ',
-      'آواز کی سیٹنگ',
-      'رنگ ٹون',
-      'साउंड सेटिंग',
-      'वॉल्यूम सेटिंग',
-      'रिंगटोन',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.settings.SOUND_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=Sounds',
-    nativeScheme: 'intent:#Intent;action=android.settings.SOUND_SETTINGS;end',
-  },
-  {
-    id: 'battery_settings',
-    name: 'Battery & Power Saving',
-    nameHindi: 'बैटरी सेटिंग',
-    nameUrdu: 'بیٹری سیٹنگ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Battery Health',
-    iconEmoji: '🔋',
-    accentClass: 'border-emerald-500/40 bg-emerald-950/40 text-emerald-200',
-    keywords: [
-      'battery setting',
-      'battery saver',
-      'power saving',
-      'بیٹری سیٹنگ',
-      'بیٹری سیور',
-      'बैटरी सेटिंग',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.intent.action.POWER_USAGE_SUMMARY;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=BATTERY_USAGE',
-    nativeScheme: 'intent:#Intent;action=android.intent.action.POWER_USAGE_SUMMARY;end',
-  },
-  {
-    id: 'storage_settings',
-    name: 'Storage & Memory',
-    nameHindi: 'स्टोरेज और मेमोरी',
-    nameUrdu: 'اسٹوریج اور میموری',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Device Storage',
-    iconEmoji: '💾',
-    accentClass: 'border-indigo-500/40 bg-indigo-950/40 text-indigo-200',
-    keywords: [
-      'storage setting',
-      'phone storage',
-      'memory setting',
-      'اسٹوریج سیٹنگ',
-      'اسٹوریج',
-      'میموری سیٹنگ',
-      'स्टोरेज सेटिंग',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.settings.INTERNAL_STORAGE_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=General&path=STORAGE_ICLOUD_USAGE',
-    nativeScheme: 'intent:#Intent;action=android.settings.INTERNAL_STORAGE_SETTINGS;end',
-  },
-  {
     id: 'security_settings',
     name: 'Security, Lock & Fingerprint',
     nameHindi: 'सिक्योरिटी और फिंगरप्रिंट',
     nameUrdu: 'سیکیورٹی اور فنگر پرنٹ',
     category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Lock Screen & Biometrics',
+    locationLabel: 'Zara Security • Lock Screen & Biometrics',
     iconEmoji: '🔐',
     accentClass: 'border-pink-500/40 bg-pink-950/40 text-pink-200',
     keywords: [
@@ -418,27 +253,12 @@ export const BUILTIN_MOBILE_APPS: MobileAppDefinition[] = [
     nativeScheme: 'intent:#Intent;action=android.settings.SECURITY_SETTINGS;end',
   },
   {
-    id: 'location_settings',
-    name: 'Location & GPS Settings',
-    nameHindi: 'लोकेशन और जीपीएस',
-    nameUrdu: 'لوکیشن اور جی پی ایس',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • GPS & Location',
-    iconEmoji: '📍',
-    accentClass: 'border-rose-500/40 bg-rose-950/40 text-rose-200',
-    keywords: ['location setting', 'gps', 'لوکیشن سیٹنگ', 'لوکیشن', 'جی پی ایس', 'लोकेशन सेटिंग'],
-    androidIntent:
-      'intent:#Intent;action=android.settings.LOCATION_SOURCE_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=Privacy&path=LOCATION',
-    nativeScheme: 'intent:#Intent;action=android.settings.LOCATION_SOURCE_SETTINGS;end',
-  },
-  {
     id: 'notification_settings',
     name: 'Notifications Settings',
     nameHindi: 'नोटिफिकेशन सेटिंग',
     nameUrdu: 'نوٹیفکیشن سیٹنگ',
     category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Status Bar & Alerts',
+    locationLabel: 'Zara Alerts • Notifications',
     iconEmoji: '🔔',
     accentClass: 'border-amber-500/40 bg-amber-950/40 text-amber-200',
     keywords: [
@@ -453,34 +273,12 @@ export const BUILTIN_MOBILE_APPS: MobileAppDefinition[] = [
     nativeScheme: 'intent:#Intent;action=android.settings.NOTIFICATION_SETTINGS;end',
   },
   {
-    id: 'airplane_settings',
-    name: 'Airplane Mode',
-    nameHindi: 'एयरप्लेन / फ्लाइट मोड',
-    nameUrdu: 'ایئرپلین موڈ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Flight Mode',
-    iconEmoji: '✈️',
-    accentClass: 'border-sky-500/40 bg-sky-950/40 text-sky-200',
-    keywords: [
-      'airplane mode',
-      'flight mode',
-      'ایئرپلین موڈ',
-      'فلائٹ موڈ',
-      'एयरप्लेन मोड',
-      'फ्लाइट मोड',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.settings.AIRPLANE_MODE_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=AIRPLANE_MODE',
-    nativeScheme: 'intent:#Intent;action=android.settings.AIRPLANE_MODE_SETTINGS;end',
-  },
-  {
     id: 'accessibility_settings',
-    name: 'Accessibility & Control',
+    name: 'Accessibility & Voice Control',
     nameHindi: 'एक्सेसिबिलिटी सेटिंग',
     nameUrdu: 'ایکسیسیبلٹی سیٹنگ',
     category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Smart Assistance',
+    locationLabel: 'Zara Background Control • Accessibility',
     iconEmoji: '🪄',
     accentClass: 'border-violet-500/40 bg-violet-950/40 text-violet-200',
     keywords: ['accessibility', 'ایکسیسیبلٹی', 'एक्सेसिबिलिटी'],
@@ -488,30 +286,6 @@ export const BUILTIN_MOBILE_APPS: MobileAppDefinition[] = [
       'intent:#Intent;action=android.settings.ACCESSIBILITY_SETTINGS;category=android.intent.category.DEFAULT;end',
     iosScheme: 'App-Prefs:root=ACCESSIBILITY',
     nativeScheme: 'intent:#Intent;action=android.settings.ACCESSIBILITY_SETTINGS;end',
-  },
-  {
-    id: 'about_phone',
-    name: 'About Phone & System Update',
-    nameHindi: 'अबाउट फ़ोन और अपडेट',
-    nameUrdu: 'اباؤٹ فون اور اپڈیٹ',
-    category: 'mobile_settings',
-    locationLabel: 'Mobile Settings • Device Info',
-    iconEmoji: '📲',
-    accentClass: 'border-slate-500/40 bg-slate-900/80 text-slate-200',
-    keywords: [
-      'about phone',
-      'device info',
-      'software update',
-      'system update',
-      'اباؤٹ فون',
-      'سافٹ ویئر اپڈیٹ',
-      'अबाउट फोन',
-      'सॉफ्टवेयर अपडेट',
-    ],
-    androidIntent:
-      'intent:#Intent;action=android.settings.DEVICE_INFO_SETTINGS;category=android.intent.category.DEFAULT;end',
-    iosScheme: 'App-Prefs:root=General&path=About',
-    nativeScheme: 'intent:#Intent;action=android.settings.DEVICE_INFO_SETTINGS;end',
   },
   {
     id: 'settings',
@@ -1586,23 +1360,24 @@ export function launchMobileAppNow(
   }
 
   const href = resolveAppLaunchHref(app, query);
-  if (href.startsWith('#')) {
-    if (onOpenMobileSettingsInApp) {
-      onOpenMobileSettingsInApp(app.id);
-    }
-    return {
-      launched: true,
-      app,
-      href,
-      executionChannel: 'in_app',
-      honestReport: `Opened Zara in-app Mobile Control view for ${app.name}. Direct OS settings launch requires Android/iOS.`,
-    };
-  }
 
   // Prefer direct Android PackageManager / Settings Bridge when running inside Zara Native Android Companion
   if (!query && typeof window !== 'undefined') {
     try {
       const nativeBridge = (window as any).ZaraAndroidBridge;
+      if (
+        app.category === 'mobile_settings' &&
+        nativeBridge?.openDeviceSetting &&
+        nativeBridge.openDeviceSetting(app.id)
+      ) {
+        return {
+          launched: true,
+          app,
+          href,
+          executionChannel: 'native_bridge',
+          honestReport: `Opened ${app.name} directly on Android via Zara Native Bridge.`,
+        };
+      }
       if (
         app.id.endsWith('_app_settings') &&
         app.packageId &&
@@ -1628,15 +1403,41 @@ export function launchMobileAppNow(
             honestReport: `Launched ${app.name} (${app.packageId}) via Zara Native Android Bridge.`,
           };
         }
-        return {
-          launched: false,
-          app,
-          href,
-          executionChannel: 'failed',
-          honestReport: `${app.name} (${app.packageId}) is not installed on this Android device.`,
-        };
+      }
+      if (app.category !== 'mobile_settings' && nativeBridge?.openAppByName) {
+        const okByName = Boolean(nativeBridge.openAppByName(app.name));
+        if (okByName) {
+          return {
+            launched: true,
+            app,
+            href,
+            executionChannel: 'native_bridge',
+            honestReport: `Launched ${app.name} directly on your phone via Zara Native Android Bridge.`,
+          };
+        }
+        if (app.packageId && nativeBridge?.launchPackage) {
+          return {
+            launched: false,
+            app,
+            href,
+            executionChannel: 'failed',
+            honestReport: `${app.name} (${app.packageId}) is not installed on this Android device.`,
+          };
+        }
       }
     } catch {}
+  }
+  if (href.startsWith('#')) {
+    if (onOpenMobileSettingsInApp) {
+      onOpenMobileSettingsInApp(app.id);
+    }
+    return {
+      launched: true,
+      app,
+      href,
+      executionChannel: 'in_app',
+      honestReport: `Opened Zara in-app Mobile Control view for ${app.name}. Direct OS settings launch requires Android/iOS.`,
+    };
   }
 
   if (platform === 'other') {
@@ -2324,6 +2125,20 @@ export async function queryMobilePermissions(): Promise<MobilePermissionsStatus>
     } catch {}
   }
 
+  if (typeof window !== 'undefined' && window.ZaraAndroidBridge?.getDeviceStatusJson) {
+    try {
+      const raw = window.ZaraAndroidBridge.getDeviceStatusJson();
+      const dev = raw ? JSON.parse(raw) : null;
+      if (dev) {
+        if (dev.micGranted === true) microphone = 'granted';
+        else if (dev.micGranted === false && microphone === 'prompt') microphone = 'prompt';
+        if (dev.cameraGranted === true) camera = 'granted';
+        if (dev.locationGranted === true) geolocation = 'granted';
+        if (dev.notificationsGranted === true) notifications = 'granted';
+      }
+    } catch {}
+  }
+
   return {
     microphone,
     camera,
@@ -2407,6 +2222,7 @@ export async function requestAllPermissionsMaster(): Promise<{
 
 export async function readMobileHardwareTelemetry(): Promise<MobileHardwareTelemetry> {
   let batteryLevel: number | null = null;
+  let batteryTempC: number | null = null;
   let isCharging: boolean | null = null;
   let networkType = '4G / Wi-Fi';
   let storageUsedMb: number | null = null;
@@ -2420,6 +2236,22 @@ export async function readMobileHardwareTelemetry(): Promise<MobileHardwareTelem
       isCharging = Boolean(bat.charging);
     } catch {}
   }
+
+  try {
+    const rawNative = (window as any).ZaraAndroidBridge?.getDeviceStatusJson?.();
+    if (rawNative) {
+      const parsed = JSON.parse(rawNative);
+      if (typeof parsed.batteryPct === 'number' && parsed.batteryPct >= 0) {
+        batteryLevel = Math.round(parsed.batteryPct);
+      }
+      if (typeof parsed.batteryTempC === 'number' && parsed.batteryTempC > 0) {
+        batteryTempC = Number(parsed.batteryTempC);
+      }
+      if (typeof parsed.batteryCharging === 'boolean') {
+        isCharging = parsed.batteryCharging;
+      }
+    }
+  } catch {}
 
   if (nav.connection) {
     const eff = nav.connection.effectiveType ? String(nav.connection.effectiveType).toUpperCase() : '';
@@ -2449,6 +2281,7 @@ export async function readMobileHardwareTelemetry(): Promise<MobileHardwareTelem
 
   return {
     batteryLevel,
+    batteryTempC,
     isCharging,
     networkType,
     online: navigator.onLine,
@@ -2458,3 +2291,218 @@ export async function readMobileHardwareTelemetry(): Promise<MobileHardwareTelem
     platformLabel,
   };
 }
+
+export function buildSurroundingsPerceptionBrief(
+  snapshot: SurroundingsSnapshot,
+  language: Language = 'auto'
+): string {
+  const lang =
+    language === 'english' ||
+    language === 'hindi' ||
+    language === 'punjabi' ||
+    language === 'urdu' ||
+    language === 'roman_urdu'
+      ? language
+      : 'urdu';
+
+  const city = snapshot.locationLabel || 'your area';
+  const weatherPart =
+    snapshot.tempC !== null
+      ? `${snapshot.tempC}°C${snapshot.weatherCondition ? `, ${snapshot.weatherCondition}` : ''}`
+      : snapshot.weatherCondition || 'unavailable';
+  const batPct = snapshot.batteryPct !== null ? `${snapshot.batteryPct}%` : 'unknown';
+  const batTemp =
+    snapshot.batteryTempC !== null ? `${snapshot.batteryTempC.toFixed(1)}°C` : 'normal';
+  const chargeTxt = snapshot.isCharging ? 'charging' : 'on battery';
+  const netTxt = snapshot.online ? snapshot.networkType || 'Online' : 'Offline';
+
+  if (lang === 'english') {
+    return `Surroundings report for ${city}: Weather is ${weatherPart}. Battery is ${batPct} (${chargeTxt}, temperature ${batTemp}). Network is ${netTxt}.${
+      snapshot.cameraSummary ? ` Camera view: ${snapshot.cameraSummary}` : ''
+    }`;
+  }
+  if (lang === 'hindi') {
+    return `${city} का आस-पास का माहौल: मौसम ${weatherPart} है। बैटरी ${batPct} (${
+      snapshot.isCharging ? 'चार्जिंग चालू' : 'बैटरी मोड'
+    }, तापमान ${batTemp}) और नेटवर्क ${netTxt} है।${
+      snapshot.cameraSummary ? ` कैमरा दृश्य: ${snapshot.cameraSummary}` : ''
+    }`;
+  }
+  if (lang === 'punjabi') {
+    return `${city} دے آلے دوالے دا ماحول: موسم ${weatherPart} اے۔ بیٹری ${batPct} (${
+      snapshot.isCharging ? 'چارجنگ لگّی اے' : 'بغیر چارجر'
+    }، درجہ حرارت ${batTemp}) تے نیٹ ورک ${netTxt} اے۔${
+      snapshot.cameraSummary ? ` کیمرہ ویکھ: ${snapshot.cameraSummary}` : ''
+    }`;
+  }
+  if (lang === 'roman_urdu') {
+    return `${city} ke aas paas ka jaiza: Mausam ${weatherPart} hai. Battery ${batPct} (${
+      snapshot.isCharging ? 'charging jaari hai' : 'battery par hai'
+    }, temperature ${batTemp}) aur network ${netTxt} hai.${
+      snapshot.cameraSummary ? ` Camera mushahida: ${snapshot.cameraSummary}` : ''
+    }`;
+  }
+  return `${city} کے آس پاس کا جائزہ: موسم ${weatherPart} ہے۔ بیٹری ${batPct} (${
+    snapshot.isCharging ? 'چارجنگ جاری ہے' : 'بیٹری پر ہے'
+  }، درجہ حرارت ${batTemp}) اور نیٹ ورک ${netTxt} ہے۔${
+    snapshot.cameraSummary ? ` کیمرہ مشاہدہ: ${snapshot.cameraSummary}` : ''
+  }`;
+}
+
+export function detectMusicControlCommand(rawText: string): MusicControlCommand | null {
+  if (!rawText) return null;
+  const trimmed = rawText.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (/\b(mute|awaz\s*band|volume\s*band|آواز\s*بند|میوٹ|म्यूट|आवाज़\s*बंद|ਮਿਊਟ)\b/i.test(lower)) {
+    return { action: 'mute', provider: 'system' };
+  }
+  if (
+    /\b(volume\s*(?:up|barhao|badhao|high|tez|zyada)|awaz\s*(?:tez|barhao|badhao|zyada|ooper))\b/i.test(lower) ||
+    /(آواز\s*(?:بڑھاؤ|تیز|زیادہ)|والیم\s*بڑھاؤ|आवाज़\s*(?:बढ़ाओ|तेज़|ज़्यादा)|वॉल्यूम\s*बढ़ाओ|ਆਵਾਜ਼\s*(?:ਵਧਾਓ|ਤੇਜ਼))/i.test(lower)
+  ) {
+    return { action: 'volume_up', provider: 'system' };
+  }
+  if (
+    /\b(volume\s*(?:down|kam|low|halka|slow)|awaz\s*(?:kam|halki|dheemi|neeche))\b/i.test(lower) ||
+    /(آواز\s*(?:کم|ہلکی)|والیم\s*کم|आवाज़\s*(?:कम|धीमी)|वॉल्यूम\s*कम|ਆਵਾਜ਼\s*(?:ਘੱਟ|ਹੌਲੀ))/i.test(lower)
+  ) {
+    return { action: 'volume_down', provider: 'system' };
+  }
+  if (
+    /\b(next\s*(?:song|track|music|video|gaana|gana)|agla\s*(?:gaana|gana|song|track)|skip\s*(?:song|track))\b/i.test(lower) ||
+    /(اگلا\s*(?:گانا|سونگ)|نیکسٹ\s*(?:گانا|سونگ)|अगला\s*(?:गाना|सॉन्ग)|नेक्स्ट\s*(?:गाना|सॉन्ग)|ਅਗਲਾ\s*(?:ਗਾਣਾ|ਗੀਤ))/i.test(lower)
+  ) {
+    return { action: 'next', provider: 'system' };
+  }
+  if (
+    /\b(previous\s*(?:song|track|music|gaana|gana)|pichla\s*(?:gaana|gana|song|track)|last\s*song)\b/i.test(lower) ||
+    /(پچھلا\s*(?:گانا|سونگ)|पिछला\s*(?:गाना|सॉन्ग)|ਪਿਛਲਾ\s*(?:ਗਾਣਾ|ਗੀਤ))/i.test(lower)
+  ) {
+    return { action: 'previous', provider: 'system' };
+  }
+  if (
+    /\b(pause\s*(?:the\s*)?(?:music|song|gaana|gana|audio)|stop\s*(?:music|song|gaana|gana)|(?:music|song|gaana|gana)\s*(?:roko|band\s*karo|pause))\b/i.test(lower) ||
+    /(گانا\s*(?:روکو|بند\s*کرو|پاز)|میوزک\s*(?:روکو|بند\s*کرو|پاز)|गाना\s*(?:रोको|बंद\s*करो|पॉज़)|म्यूज़िक\s*(?:रोको|बंद\s*करो)|ਗਾਣਾ\s*(?:ਰੋਕੋ|ਬੰਦ))/i.test(lower)
+  ) {
+    return { action: 'pause', provider: 'system' };
+  }
+  if (
+    /\b(resume\s*(?:music|song|gaana|gana)|(?:music|song|gaana|gana)\s*(?:chalu|dobara\s*chalao))\b/i.test(lower) ||
+    /(گانا\s*دوبارہ\s*چلاؤ|میوزک\s*چلاؤ|गाना\s*दोबारा\s*चलाओ|म्यूज़िक\s*दोबारा\s*चलाओ)/i.test(lower)
+  ) {
+    return { action: 'resume', provider: 'system' };
+  }
+
+  const playMatch =
+    trimmed.match(/^(?:zara\s+)?(?:please\s+)?(?:play|bajao|chalao|lagao|sunao)\s+(.+)$/i) ||
+    trimmed.match(/^(.+?)\s+(?:song|gaana|gana|music|naat|qawwali|track)\s*(?:play|bajao|chalao|lagao|sunao|چلاؤ|بجاؤ|لگاؤ|سناؤ|चलाओ|बजाओ|लगाओ|सुनाओ|ਚਲਾਓ|ਵਜਾਓ)$/i) ||
+    trimmed.match(/(?:چلاؤ|بجاؤ|لگاؤ|سناؤ|चलाओ|बजाओ|लगाओ|सुनाओ|ਚਲਾਓ|ਵਜਾਓ)\s+(.+)$/i);
+
+  const hasMusicCue =
+    /\b(song|songs|music|gaana|gana|naat|qawwali|ghazal|spotify|youtube\s*music|track|playlist|bajao|play)\b/i.test(lower) ||
+    /(گانا|گانے|میوزک|نعت|قوالی|غزل|गाना|गाने|म्यूज़िक|सॉन्ग|नाअत|ग़ज़ल|ਗਾਣਾ|ਗੀਤ|ਮਿਊਜ਼ਿਕ)/i.test(trimmed);
+
+  if (hasMusicCue && playMatch && playMatch[1]) {
+    const query = playMatch[1]
+      .replace(/\b(on\s+youtube\s+music|on\s+spotify|on\s+youtube|please|song|gaana|gana|music|play|bajao|chalao|lagao)\b/gi, '')
+      .trim();
+    if (query.length >= 2) {
+      const provider: MusicControlCommand['provider'] = /spotify/i.test(lower)
+        ? 'spotify'
+        : 'yt_music';
+      return { action: 'play', query, provider };
+    }
+  }
+
+  return null;
+}
+
+export function executeMusicControlCommand(cmd: MusicControlCommand): {
+  ok: boolean;
+  message: string;
+  channel: 'native_bridge' | 'browser_media' | 'deep_link' | 'unavailable';
+  fallbackUrl?: string;
+} {
+  const nativeBridge = typeof window !== 'undefined' ? window.ZaraAndroidBridge : undefined;
+
+  if (cmd.action === 'play' && cmd.query) {
+    const encoded = encodeURIComponent(cmd.query);
+    const ytMusicUrl = `https://music.youtube.com/search?q=${encoded}`;
+    const spotifyUrl = `https://open.spotify.com/search/${encoded}`;
+    const chosenUrl = cmd.provider === 'spotify' ? spotifyUrl : ytMusicUrl;
+
+    if (detectMobilePlatform() === 'android') {
+      const pkg = cmd.provider === 'spotify' ? 'com.spotify.music' : 'com.google.android.apps.youtube.music';
+      const intentUri =
+        cmd.provider === 'spotify'
+          ? `intent://open.spotify.com/search/${encoded}#Intent;scheme=https;package=${pkg};S.browser_fallback_url=${encodeURIComponent(spotifyUrl)};end`
+          : `intent://music.youtube.com/search?q=${encoded}#Intent;scheme=https;package=${pkg};S.browser_fallback_url=${encodeURIComponent(ytMusicUrl)};end`;
+
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = intentUri;
+        anchor.target = '_top';
+        anchor.rel = 'noopener noreferrer';
+        anchor.className = 'hidden';
+        document.body.appendChild(anchor);
+        anchor.click();
+        window.setTimeout(() => anchor.parentNode?.removeChild(anchor), 300);
+        return {
+          ok: true,
+          channel: 'deep_link',
+          fallbackUrl: chosenUrl,
+          message: `Opening ${cmd.provider === 'spotify' ? 'Spotify' : 'YouTube Music'} for "${cmd.query}".`,
+        };
+      } catch {
+        // Fallback below
+      }
+    }
+
+    return {
+      ok: true,
+      channel: 'deep_link',
+      fallbackUrl: chosenUrl,
+      message: `Prepared ${cmd.provider === 'spotify' ? 'Spotify' : 'YouTube Music'} link for "${cmd.query}".`,
+    };
+  }
+
+  if (nativeBridge?.controlMedia) {
+    try {
+      const handled = Boolean(nativeBridge.controlMedia(cmd.action));
+      if (handled) {
+        return {
+          ok: true,
+          channel: 'native_bridge',
+          message: `Executed media action "${cmd.action}" via Android AudioManager.`,
+        };
+      }
+    } catch {}
+  }
+
+  if (typeof document !== 'undefined') {
+    const mediaEls = Array.from(document.querySelectorAll('audio,video')) as HTMLMediaElement[];
+    if (mediaEls.length > 0) {
+      for (const el of mediaEls) {
+        if (cmd.action === 'pause') el.pause();
+        if (cmd.action === 'resume') el.play().catch(() => {});
+        if (cmd.action === 'mute') el.muted = !el.muted;
+        if (cmd.action === 'volume_up') el.volume = Math.min(1, el.volume + 0.15);
+        if (cmd.action === 'volume_down') el.volume = Math.max(0, el.volume - 0.15);
+      }
+      return {
+        ok: true,
+        channel: 'browser_media',
+        message: `Applied "${cmd.action}" to active in-app audio.`,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    channel: 'unavailable',
+    message: `Media key "${cmd.action}" requires the installed Zara Android APK (AudioManager bridge) or an active audio stream.`,
+  };
+}
+
+

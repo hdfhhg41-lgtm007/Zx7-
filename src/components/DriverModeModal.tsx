@@ -4,7 +4,7 @@ import {
   Mic,
   MicOff,
   Volume2,
-  VolumeX,
+  SkipForward,
   Bell,
   RotateCcw,
   X,
@@ -26,11 +26,13 @@ interface DriverModeModalProps {
   isSpeaking: boolean;
   isThinking?: boolean;
   interimTranscript: string;
+  voiceError?: string | null;
   latestZaraMessage: string;
   latestNotification?: IncomingNotificationItem | null;
   spokenConfig: SpokenNotificationConfig;
   onUpdateSpokenConfig: (updates: Partial<SpokenNotificationConfig>) => void;
   onToggleMic: () => void;
+  onSkipVoiceTurn?: () => void;
   onSendVoicePrompt?: (prompt: string) => Promise<void>;
   language: Language;
   config: PersonalityConfig;
@@ -44,11 +46,13 @@ export const DriverModeModal: React.FC<DriverModeModalProps> = ({
   isSpeaking,
   isThinking = false,
   interimTranscript,
+  voiceError = null,
   latestZaraMessage,
   latestNotification = null,
   spokenConfig,
   onUpdateSpokenConfig,
   onToggleMic,
+  onSkipVoiceTurn,
   onSendVoicePrompt,
   language,
   config,
@@ -127,6 +131,14 @@ export const DriverModeModal: React.FC<DriverModeModalProps> = ({
 
       {/* High-Contrast Spoken Readout Card */}
       <div className="my-4 flex-1 flex flex-col justify-center gap-4 max-w-2xl w-full mx-auto">
+        {voiceError && (
+          <div
+            role="alert"
+            className="p-4 rounded-2xl bg-rose-950/90 border-2 border-rose-400 text-rose-100 text-sm sm:text-base font-bold"
+          >
+            Voice Error: {voiceError}
+          </div>
+        )}
         {interimTranscript && (
           <div className="p-4 rounded-2xl bg-emerald-950/70 border-2 border-emerald-400/70">
             <div className="text-xs font-bold uppercase tracking-wider text-emerald-300 mb-1">
@@ -221,14 +233,25 @@ export const DriverModeModal: React.FC<DriverModeModalProps> = ({
             <span>Replay Reply</span>
           </button>
 
-          {isSpeaking ? (
+          {isSpeaking || isThinking || isListening ? (
             <button
               type="button"
-              onClick={() => audioService.stopAudio()}
-              className="min-h-[64px] px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 border-2 border-rose-300 text-white font-bold text-base flex items-center justify-center gap-2 cursor-pointer"
+              onClick={() => {
+                audioService.unlock();
+                if (onSkipVoiceTurn) {
+                  onSkipVoiceTurn();
+                } else {
+                  audioService.stopAudio(true);
+                }
+              }}
+              className={`min-h-[64px] px-4 rounded-2xl border-2 text-white font-bold text-base flex items-center justify-center gap-2 cursor-pointer ${
+                isSpeaking || isThinking
+                  ? 'bg-sky-600 hover:bg-sky-500 border-sky-300'
+                  : 'bg-slate-800 hover:bg-slate-700 border-sky-400/50'
+              }`}
             >
-              <VolumeX className="w-5 h-5 shrink-0" />
-              <span>Mute Speech</span>
+              <SkipForward className="w-5 h-5 shrink-0" />
+              <span>Skip</span>
             </button>
           ) : (
             <button

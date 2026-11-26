@@ -6,6 +6,7 @@
 import { audioService } from './audioService';
 import {
   acquireMicrophoneStreamSafe,
+  computePcm16Stats,
   downsampleTo16kInt16,
   encodePcm16ChunksToWavBase64,
   normalizeQuietPcm16,
@@ -142,6 +143,7 @@ export interface AlwaysOnVoiceCallbacks {
   onAudioWavFallback: (audioBase64: string, mimeType?: string) => Promise<void>;
   onVolume?: (vol: number) => void;
   onPermissionError?: (msg: string) => void;
+  onVoiceError?: (msg: string) => void;
   onWakeWordTriggered?: (phrase: string) => void;
 }
 
@@ -179,9 +181,10 @@ export class AlwaysOnVoiceListener {
   private vadProcessor: ScriptProcessorNode | null = null;
   private vadBridgeAudio: HTMLAudioElement | null = null;
   private vadWorkletBlobUrl: string | null = null;
+  private vadWorkletWatchdog: number | null = null;
 
   private vadBusy = false;
-  private noiseFloor = 1.4;
+  private noiseFloor = 0.65;
   private vadPreRoll: Int16Array[] = [];
   private vadChunks: Int16Array[] = [];
   private vadSpeaking = false;
@@ -189,8 +192,14 @@ export class AlwaysOnVoiceListener {
   private vadPeakRms = 0;
   private vadLastVoice = 0;
   private vadStartAt = 0;
+  private startedAt = 0;
   private lastWorkletChunkAt = 0;
   private lastVolEmitAt = 0;
+  private lastEmittedVol = -1;
+  private lastWavDispatchedAt = 0;
+  private lastSilenceWarnAt = 0;
+  private lastDeadMicWarnAt = 0;
+  private rejectedShortCount = 0;
 
   private cb: AlwaysOnVoiceCallbacks;
 
@@ -198,10 +207,11 @@ export class AlwaysOnVoiceListener {
     this.cb = callbacks;
     this.language = language;
 
-    // Immediately clear buffered audio whenever Zara starts or stops speaking (prevents acoustic echo loop!)
-    this.unsubSpeaking = audioService.subscribeSpeaking(() => {
+    // Immediately clear buffered audio whenever Zara starts or stops speaking, and wake mic right after TTS ends!
+    this.unsubSpeaking = audioService.subscribeSpeaking((speaking) => {
       this.pendingInterim = '';
       this.accumulatedFinal = '';
+      this.vadPreRoll = [];
       this.vadChunks = [];
       this.vadSpeaking = false;
       this.vadFrames = 0;
@@ -211,6 +221,15 @@ export class AlwaysOnVoiceListener {
         this.settleTimer = null;
       }
       this.cb.onInterimText('');
+      if (!speaking && this.running && !this.paused) {
+        this.resumeAudioPipelineIfSuspended();
+        const hasLive = this.vadStream
+          ?.getAudioTracks()
+          .some((t) => t.readyState === 'live' && t.enabled);
+        if (!hasLive) {
+          this.ensureWarmVadStream().catch(() => {});
+        }
+      }
     });
 
     if (typeof document !== 'undefined') {
@@ -255,10 +274,10 @@ export class AlwaysOnVoiceListener {
       typeof document !== 'undefined' && document.visibilityState === 'hidden';
     if (isHidden) {
       // On Lock Screen / Screen OFF: AudioContext callbacks can pause; record slices whenever worklet pauses
-      return Date.now() - this.lastWorkletChunkAt > 650;
+      return Date.now() - this.lastWorkletChunkAt > 1100;
     }
     const workletFlowing =
-      this.vadCtx?.state === 'running' && Date.now() - this.lastWorkletChunkAt <= 950;
+      this.vadCtx?.state === 'running' && Date.now() - this.lastWorkletChunkAt <= 2600;
     if (workletFlowing) return false;
     // Only let SpeechRecognition suppress ZeroTouch fallback if it recently produced live speech text
     const speechRecProducing =
@@ -284,12 +303,12 @@ export class AlwaysOnVoiceListener {
       for (let i = 0; i < ch.length; i += stride) {
         const a = Math.abs(ch[i]);
         if (a > peak) peak = a;
-        if (a >= 0.007) activeSamples++;
+        if (a >= 0.015) activeSamples++;
       }
-      return peak >= 0.008 && activeSamples >= 6;
+      return peak >= 0.025 && activeSamples >= 18;
     } catch {
       // If mobile codec cannot be decoded locally, only forward slices larger than typical silence bitrate
-      return blob.size >= 4500;
+      return blob.size >= 4800;
     }
   }
 
@@ -399,17 +418,23 @@ export class AlwaysOnVoiceListener {
           reader.readAsDataURL(blob);
         };
 
+        rec.onerror = () => {
+          this.cb.onVoiceError?.('Voice background recorder hit an error — switching capture...');
+        };
+
         rec.start();
         window.setTimeout(() => {
           try {
             if (rec.state === 'recording') rec.stop();
           } catch {}
-        }, 5000);
-      } catch {}
+        }, 4200);
+      } catch {
+        this.cb.onVoiceError?.('Unable to record microphone audio in this browser.');
+      }
     };
 
     recordOneZeroTouchSlice();
-    this.zeroTouchTimer = window.setInterval(recordOneZeroTouchSlice, 5400);
+    this.zeroTouchTimer = window.setInterval(recordOneZeroTouchSlice, 4400);
   }
 
   private stopZeroTouchRecorder() {
@@ -431,8 +456,38 @@ export class AlwaysOnVoiceListener {
 
   private isInEchoShieldWindow(): boolean {
     if (audioService.getIsSpeaking()) return true;
-    const elapsedSinceSpeak = Date.now() - audioService.getLastSpeakEndTime();
-    return elapsedSinceSpeak < 700;
+    const lastEnd = audioService.getLastSpeakEndTime();
+    if (!lastEnd) return false;
+    return Date.now() - lastEnd < 1400;
+  }
+
+  skipCurrentTurn(): void {
+    this.commandInFlight = false;
+    this.commandInFlightSince = 0;
+    this.vadBusy = false;
+    this.vadSpeaking = false;
+    this.vadFrames = 0;
+    this.vadPeakRms = 0;
+    this.vadChunks = [];
+    this.vadPreRoll = [];
+    this.pendingInterim = '';
+    this.accumulatedFinal = '';
+    this.lastWavDispatchedAt = 0;
+    this.paused = false;
+    if (this.settleTimer) {
+      window.clearTimeout(this.settleTimer);
+      this.settleTimer = null;
+    }
+    this.cb.onInterimText('');
+    if (this.running) {
+      this.resumeAudioPipelineIfSuspended();
+      const hasLive = this.vadStream
+        ?.getAudioTracks()
+        .some((t) => t.readyState === 'live' && t.enabled);
+      if (!hasLive) {
+        this.ensureWarmVadStream().catch(() => {});
+      }
+    }
   }
 
   // Supports short Urdu/Hindi/Punjabi wake words ("زارا", "سنو", "جان", "ہاں", "بات", "جی", "suno", "zara") while filtering hums!
@@ -489,6 +544,15 @@ export class AlwaysOnVoiceListener {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  isUserCurrentlySpeaking(): boolean {
+    return Boolean(
+      this.vadSpeaking ||
+        this.pendingInterim.trim().length > 0 ||
+        this.accumulatedFinal.trim().length > 0 ||
+        this.commandInFlight
+    );
   }
 
   isPipelineHealthy(): boolean {
@@ -560,20 +624,11 @@ export class AlwaysOnVoiceListener {
 
       this.running = true;
       this.paused = false;
+      this.startedAt = Date.now();
+      this.lastWorkletChunkAt = 0;
+      this.rejectedShortCount = 0;
 
-      await screenKeepAlive.enable(() => {
-        this.resumeAudioPipelineIfSuspended();
-        if (
-          this.running &&
-          !this.paused &&
-          !this.recognition &&
-          typeof document !== 'undefined' &&
-          document.visibilityState === 'visible'
-        ) {
-          this.scheduleRecognitionRestart(300);
-        }
-      });
-
+      // Acquire mic & AudioContext FIRST while synchronous user tap gesture is active!
       const ok = await this.startInternal();
       if (!ok) {
         this.running = false;
@@ -585,6 +640,21 @@ export class AlwaysOnVoiceListener {
         this.cb.onStateChange(false);
         return false;
       }
+
+      screenKeepAlive
+        .enable(() => {
+          this.resumeAudioPipelineIfSuspended();
+          if (
+            this.running &&
+            !this.paused &&
+            !this.recognition &&
+            typeof document !== 'undefined' &&
+            document.visibilityState === 'visible'
+          ) {
+            this.scheduleRecognitionRestart(300);
+          }
+        })
+        .catch(() => {});
 
       this.startHealthWatchdog();
       syncForegroundVoiceNotification(true).catch(() => {});
@@ -603,24 +673,30 @@ export class AlwaysOnVoiceListener {
     this.healthTimer = window.setInterval(() => {
       if (!this.running || this.paused) return;
 
-      // Auto-clear stuck command mutex ONLY if Zara is NOT speaking and network hung > 28s
+      const now = Date.now();
+      // Auto-clear stuck command mutex ONLY if Zara is NOT speaking and network hung > 58s
       if (
         this.commandInFlight &&
         this.commandInFlightSince > 0 &&
         !audioService.getIsSpeaking() &&
-        Date.now() - this.commandInFlightSince > 28000
+        now - this.commandInFlightSince > 58000
       ) {
         this.commandInFlight = false;
         this.commandInFlightSince = 0;
         this.vadBusy = false;
+        this.cb.onVoiceError?.('Voice request timed out — ready for your next sentence.');
       }
 
       this.resumeAudioPipelineIfSuspended();
 
       // Re-acquire microphone automatically if OS briefly interrupted the track (e.g. incoming GSM ring)
       const tracks = this.vadStream?.getAudioTracks() || [];
-      const hasLiveTrack = tracks.some((t) => t.readyState === 'live' && t.enabled);
+      const hasLiveTrack = tracks.some((t) => t.readyState === 'live' && t.enabled && !t.muted);
       if (!hasLiveTrack && !this.vadBusy) {
+        if (now - this.lastDeadMicWarnAt > 8000) {
+          this.lastDeadMicWarnAt = now;
+          this.cb.onVoiceError?.('Microphone disconnected or muted — reconnecting mic...');
+        }
         this.ensureWarmVadStream().then((ready) => {
           if (ready) {
             this.cb.onStateChange(true);
@@ -628,9 +704,21 @@ export class AlwaysOnVoiceListener {
           }
         });
       } else {
-        this.ensureZeroTouchRecorderIfNeeded();
+        const refTime = this.lastWorkletChunkAt || this.startedAt;
+        if (refTime > 0 && now - refTime > 3200 && !this.zeroTouchRecorder && !this.speechRecActive) {
+          this.ensureZeroTouchRecorderIfNeeded();
+          if (now - this.lastDeadMicWarnAt > 9000) {
+            this.lastDeadMicWarnAt = now;
+            this.cb.onVoiceError?.(
+              'Microphone audio stream paused by browser — attempting automatic recovery.'
+            );
+            this.ensureWarmVadStream().catch(() => {});
+          }
+        } else {
+          this.ensureZeroTouchRecorderIfNeeded();
+        }
       }
-    }, 3500);
+    }, 1800);
   }
 
   private shouldUseBrowserSpeechRec(): boolean {
@@ -778,6 +866,7 @@ export class AlwaysOnVoiceListener {
         if (liveCombined && liveCombined.length >= 2) {
           this.cb.onInterimText(liveCombined);
 
+          const settleDelayMs = liveCombined.split(/\s+/).length <= 2 ? 2800 : 2400;
           this.settleTimer = window.setTimeout(() => {
             if (!this.running || this.paused || this.commandInFlight || this.isInEchoShieldWindow()) {
               return;
@@ -790,7 +879,7 @@ export class AlwaysOnVoiceListener {
             if (toFire) {
               this.dispatchCommandLocked(toFire);
             }
-          }, 1750);
+          }, settleDelayMs);
         }
       };
 
@@ -894,6 +983,23 @@ export class AlwaysOnVoiceListener {
         stream.getTracks().forEach((t) => t.stop());
         return false;
       }
+      const tracks = stream.getAudioTracks();
+      if (tracks.length === 0 || tracks.every((t) => t.readyState !== 'live')) {
+        stream.getTracks().forEach((t) => t.stop());
+        const noMicMsg = 'No active microphone input detected on this device.';
+        this.cb.onPermissionError?.(noMicMsg);
+        this.cb.onVoiceError?.(noMicMsg);
+        return false;
+      }
+      tracks[0].onended = () => {
+        if (!this.running || this.paused) return;
+        this.cb.onVoiceError?.('Microphone disconnected — attempting to reconnect...');
+        this.ensureWarmVadStream().catch(() => {});
+      };
+      tracks[0].onmute = () => {
+        if (!this.running || this.paused) return;
+        this.cb.onVoiceError?.('Microphone is muted by your device or browser.');
+      };
       this.vadStream = stream;
 
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -905,33 +1011,22 @@ export class AlwaysOnVoiceListener {
 
       const source = ctx.createMediaStreamSource(stream);
 
-      // 1. Cut low-frequency fan/table rumble (< 85Hz)
+      // 1. Vocal bandpass filtering: reject fan/motor rumble (<115Hz) & harsh high-freq hiss (>4400Hz)
       const highpass = ctx.createBiquadFilter();
       highpass.type = 'highpass';
-      highpass.frequency.value = 85;
+      highpass.frequency.value = 115;
 
-      // 2. Gentle vocal presence clarity boost (2.1kHz) without over-amplifying room hiss
-      const presenceBoost = ctx.createBiquadFilter();
-      presenceBoost.type = 'peaking';
-      presenceBoost.frequency.value = 2100;
-      presenceBoost.Q.value = 1.0;
-      presenceBoost.gain.value = 3.0;
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 4400;
 
-      // 3. Balanced pre-amp + gentle limiter so distant & soft voices capture cleanly without inflating noiseFloor
+      // 2. Gentle clean pre-amp without secondary compressor pumping (hardware autoGainControl is already active)
       const preAmp = ctx.createGain();
-      preAmp.gain.value = 1.65;
-
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -20;
-      compressor.knee.value = 16;
-      compressor.ratio.value = 3;
-      compressor.attack.value = 0.005;
-      compressor.release.value = 0.16;
+      preAmp.gain.value = 1.15;
 
       source.connect(highpass);
-      highpass.connect(presenceBoost);
-      presenceBoost.connect(preAmp);
-      preAmp.connect(compressor);
+      highpass.connect(lowpass);
+      lowpass.connect(preAmp);
 
       const inRate = ctx.sampleRate || 48000;
 
@@ -941,10 +1036,15 @@ export class AlwaysOnVoiceListener {
 
         let sumSq = 0;
         for (let i = 0; i < ch.length; i++) sumSq += ch[i] * ch[i];
-        const rms = Math.min(100, Math.round(Math.sqrt(sumSq / ch.length) * 380));
+        const rmsExact = Math.min(100, Math.sqrt(sumSq / ch.length) * 380);
+        const rms = Math.min(100, Math.round(rmsExact));
 
-        if (chunkNow - this.lastVolEmitAt >= 120) {
+        if (
+          chunkNow - this.lastVolEmitAt >= 120 &&
+          (Math.abs(rms - this.lastEmittedVol) >= 3 || (rms === 0 && this.lastEmittedVol !== 0))
+        ) {
           this.lastVolEmitAt = chunkNow;
+          this.lastEmittedVol = rms;
           this.cb.onVolume?.(rms);
         }
 
@@ -955,6 +1055,7 @@ export class AlwaysOnVoiceListener {
           this.commandInFlight ||
           this.isInEchoShieldWindow()
         ) {
+          this.vadPreRoll = [];
           this.vadChunks = [];
           this.vadSpeaking = false;
           this.vadFrames = 0;
@@ -962,17 +1063,17 @@ export class AlwaysOnVoiceListener {
           return;
         }
 
-        // Smoothly track quiet room noise floor (strictly clamped 0.7..2.8 so soft & normal human speech always triggers!)
-        if (!this.vadSpeaking && rms < this.noiseFloor + 2) {
-          this.noiseFloor = Math.max(0.7, Math.min(2.8, this.noiseFloor * 0.94 + rms * 0.06));
+        // Smoothly track quiet room noise floor using float precision (0.35..2.4)
+        if (!this.vadSpeaking && rmsExact < this.noiseFloor + 1.8) {
+          this.noiseFloor = Math.max(0.35, Math.min(2.4, this.noiseFloor * 0.94 + rmsExact * 0.06));
         }
 
         // Box-averaged 16kHz Int16 downsampling (prevents aliasing & preserves phonetic clarity for Urdu/Hindi/English STT)
         const pcm16 = downsampleTo16kInt16(ch, inRate);
 
         const now = Date.now();
-        const startThreshold = Math.max(2.0, Number((this.noiseFloor * 1.4).toFixed(1)));
-        const sustainThreshold = Math.max(1.3, Number((this.noiseFloor * 1.05).toFixed(1)));
+        const startThreshold = Math.max(1.85, this.noiseFloor * 1.9);
+        const sustainThreshold = Math.max(1.05, this.noiseFloor * 1.3);
         const activeThreshold = this.vadSpeaking ? sustainThreshold : startThreshold;
         const isScreenHidden =
           typeof document !== 'undefined' &&
@@ -980,52 +1081,64 @@ export class AlwaysOnVoiceListener {
 
         if (!this.vadSpeaking) {
           this.vadPreRoll.push(pcm16);
-          if (this.vadPreRoll.length > 20) this.vadPreRoll.shift();
+          if (this.vadPreRoll.length > 26) this.vadPreRoll.shift();
         } else {
           this.vadChunks.push(pcm16);
         }
 
-        if (rms >= activeThreshold) {
+        if (rmsExact >= activeThreshold) {
           this.vadFrames++;
           this.vadLastVoice = now;
-          if (rms > this.vadPeakRms) this.vadPeakRms = rms;
+          if (rmsExact > this.vadPeakRms) this.vadPeakRms = rmsExact;
 
-          // Instant onset on strong voice or 2 frames for gentle voice
-          if (!this.vadSpeaking && (this.vadFrames >= 2 || rms >= startThreshold + 2.5)) {
+          // Require 4 sustained vocal frames or clear speech transient so clicks/fan bumps don't false-trigger
+          if (!this.vadSpeaking && (this.vadFrames >= 4 || rmsExact >= startThreshold + 2.4)) {
             this.vadSpeaking = true;
             this.vadStartAt = now;
             this.vadChunks = [...this.vadPreRoll, pcm16];
             this.vadPreRoll = [];
             if (!isScreenHidden && !this.pendingInterim && !this.accumulatedFinal) {
-              this.cb.onInterimText('🎤 Listening — speak naturally...');
+              this.cb.onInterimText('🎤 Hearing you — speak naturally...');
             }
           }
         } else {
           this.vadFrames = Math.max(0, this.vadFrames - 1);
+          const spokenSoFarMs = now - this.vadStartAt;
+          const settleSilenceMs = spokenSoFarMs < 2500 ? 2400 : 2800;
           if (
             this.vadSpeaking &&
-            (now - this.vadLastVoice >= 1250 || now - this.vadStartAt >= 28000)
+            (now - this.vadLastVoice >= settleSilenceMs || spokenSoFarMs >= 45000)
           ) {
             const recorded = this.vadChunks.slice();
-            const durationMs = now - this.vadStartAt;
-            const peak = this.vadPeakRms;
+            const durationMs = spokenSoFarMs;
 
             this.vadChunks = [];
             this.vadSpeaking = false;
             this.vadFrames = 0;
             this.vadPeakRms = 0;
 
-            if (recorded.length >= 4 && durationMs >= 260 && peak >= 3) {
+            const { peakAbs: rawPeakInt16, rms: overallRms, durationMs: audioDurationMs } =
+              computePcm16Stats(recorded);
+
+            if (
+              recorded.length >= 4 &&
+              durationMs >= 320 &&
+              audioDurationMs >= 320 &&
+              rawPeakInt16 >= 240 &&
+              overallRms >= 55
+            ) {
+              this.rejectedShortCount = 0;
               const dispatchWavIfNeeded = () => {
                 if (!this.running || this.paused || this.vadBusy || this.commandInFlight) return;
                 if (this.isInEchoShieldWindow()) return;
-                if (Date.now() - this.lastFiredAt < 1700) return;
+                if (Date.now() - this.lastWavDispatchedAt < 320) return;
 
                 if (!isScreenHidden) {
                   this.cb.onInterimText('📡 Sending voice to Zara...');
                 }
                 const normalized = normalizeQuietPcm16(recorded);
                 const wav = encodePcm16ChunksToWavBase64(normalized, 16000);
+                this.lastWavDispatchedAt = Date.now();
                 this.vadBusy = true;
                 this.commandInFlight = true;
                 this.commandInFlightSince = Date.now();
@@ -1049,10 +1162,20 @@ export class AlwaysOnVoiceListener {
               ) {
                 dispatchWavIfNeeded();
               } else {
-                window.setTimeout(dispatchWavIfNeeded, 380);
+                window.setTimeout(dispatchWavIfNeeded, 140);
               }
-            } else if (!this.pendingInterim && !this.accumulatedFinal) {
-              this.cb.onInterimText('');
+            } else {
+              this.rejectedShortCount += 1;
+              if (this.rejectedShortCount >= 3 && now - this.lastSilenceWarnAt > 7500) {
+                this.lastSilenceWarnAt = now;
+                this.rejectedShortCount = 0;
+                this.cb.onVoiceError?.(
+                  'Voice input was too soft or too brief — please speak a little louder or closer.'
+                );
+              }
+              if (!this.pendingInterim && !this.accumulatedFinal) {
+                this.cb.onInterimText('');
+              }
             }
           }
         }
@@ -1061,8 +1184,23 @@ export class AlwaysOnVoiceListener {
       const silentSink = ctx.createGain();
       silentSink.gain.value = 0;
 
-      // Prefer real-time AudioWorkletNode (never throttled when app is minimized or screen is locked!)
+      const attachScriptFallback = () => {
+        if (!this.running || this.vadProcessor || this.vadCtx !== ctx) return;
+        try {
+          const proc = ctx.createScriptProcessor(2048, 1, 1);
+          proc.onaudioprocess = (e) => {
+            const ch = e.inputBuffer.getChannelData(0);
+            processFloatChunk(new Float32Array(ch));
+          };
+          preAmp.connect(proc);
+          proc.connect(silentSink);
+          this.vadProcessor = proc;
+        } catch {}
+      };
+
+      // Prefer real-time AudioWorkletNode (with 700ms stalled-worklet ScriptProcessor recovery)
       let workletAttached = false;
+      const attachedAt = Date.now();
       if (ctx.audioWorklet && typeof Blob !== 'undefined') {
         try {
           const blob = new Blob([FAR_FIELD_WORKLET_CODE], { type: 'application/javascript' });
@@ -1074,55 +1212,48 @@ export class AlwaysOnVoiceListener {
               processFloatChunk(evt.data);
             }
           };
-          compressor.connect(wn);
+          preAmp.connect(wn);
           wn.connect(silentSink);
           this.vadWorklet = wn;
           workletAttached = true;
+
+          this.vadWorkletWatchdog = window.setTimeout(() => {
+            if (!this.running || this.vadCtx !== ctx) return;
+            if (this.lastWorkletChunkAt >= attachedAt) return;
+            if (ctx.state === 'suspended') {
+              ctx.resume().catch(() => {});
+            }
+            try {
+              wn.disconnect();
+            } catch {}
+            if (this.vadWorklet === wn) this.vadWorklet = null;
+            attachScriptFallback();
+            this.ensureZeroTouchRecorderIfNeeded();
+          }, 700);
         } catch {
           workletAttached = false;
         }
       }
 
       if (!workletAttached) {
-        const proc = ctx.createScriptProcessor(2048, 1, 1);
-        proc.onaudioprocess = (e) => {
-          const ch = e.inputBuffer.getChannelData(0);
-          processFloatChunk(new Float32Array(ch));
-        };
-        compressor.connect(proc);
-        proc.connect(silentSink);
-        this.vadProcessor = proc;
+        attachScriptFallback();
       }
 
       silentSink.connect(ctx.destination);
 
-      // Anchor vadCtx to a live MediaStreamDestination <audio> element so Android/iOS keeps vadCtx awake on Lock Screen & Home Screen!
-      if (typeof document !== 'undefined' && typeof ctx.createMediaStreamDestination === 'function') {
-        try {
-          const streamDest = ctx.createMediaStreamDestination();
-          const subOsc = ctx.createOscillator();
-          const subGain = ctx.createGain();
-          subOsc.type = 'sine';
-          subOsc.frequency.value = 24;
-          subGain.gain.value = 0.001;
-          subOsc.connect(subGain);
-          subGain.connect(streamDest);
-          silentSink.connect(streamDest);
-          subOsc.start();
-
-          const bridgeEl = document.createElement('audio');
-          bridgeEl.setAttribute('playsinline', 'true');
-          bridgeEl.setAttribute('webkit-playsinline', 'true');
-          bridgeEl.srcObject = streamDest.stream;
-          bridgeEl.volume = 0.02;
-          bridgeEl.play().catch(() => {});
-          this.vadBridgeAudio = bridgeEl;
-        } catch {}
-      }
-
       return true;
-    } catch {
-      this.cb.onPermissionError?.('Please tap Allow Microphone once so Zara hears you anytime.');
+    } catch (err: any) {
+      const errName = String(err?.name || '');
+      const msg =
+        errName === 'NotAllowedError' || errName === 'PermissionDeniedError'
+          ? 'Microphone permission denied. Please allow microphone access to talk with Zara.'
+          : errName === 'NotFoundError' || errName === 'DevicesNotFoundError'
+          ? 'No microphone hardware found. Connect a microphone and try again.'
+          : errName === 'NotReadableError' || errName === 'TrackStartError'
+          ? 'Microphone is busy in another app or blocked by your system.'
+          : 'Please tap Allow Microphone once so Zara hears you continuously.';
+      this.cb.onPermissionError?.(msg);
+      this.cb.onVoiceError?.(msg);
       return false;
     }
   }
@@ -1151,6 +1282,10 @@ export class AlwaysOnVoiceListener {
 
   private stopVadHardware() {
     this.stopZeroTouchRecorder();
+    if (this.vadWorkletWatchdog) {
+      window.clearTimeout(this.vadWorkletWatchdog);
+      this.vadWorkletWatchdog = null;
+    }
     if (this.vadWorkletBlobUrl) {
       try {
         URL.revokeObjectURL(this.vadWorkletBlobUrl);

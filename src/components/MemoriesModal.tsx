@@ -149,12 +149,12 @@ export const MemoriesModal: React.FC<MemoriesModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-1.5 font-cyber truncate">
-                Long-Term Memory Vault
+                {isOwnerVerified ? 'Owner Private Memory Vault' : 'Guest Device Memory Vault'}
               </h2>
               <p className="text-xs text-slate-400 truncate">
                 {isOwnerVerified
-                  ? `${memories.length} saved memories · Explicit confirmation required to delete`
-                  : 'Encrypted & locked to verified App Owner only'}
+                  ? `${memories.length} owner memories · Cloud synced & private`
+                  : `${memories.length} isolated guest memories · Owner private vault is locked`}
               </p>
             </div>
           </div>
@@ -168,9 +168,8 @@ export const MemoriesModal: React.FC<MemoriesModalProps> = ({
           </button>
         </div>
 
-        {/* Search & Filter Bar (Owner verified) */}
-        {isOwnerVerified && (
-          <div className="pt-3 space-y-2">
+        {/* Search & Filter Bar (Available for both Owner Cloud Vault & Isolated Guest Device Vault) */}
+        <div className="pt-3 space-y-2">
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -207,42 +206,36 @@ export const MemoriesModal: React.FC<MemoriesModalProps> = ({
               ))}
             </div>
           </div>
-        )}
 
         {/* Content list */}
         <div className="flex-1 overflow-y-auto py-3 space-y-3">
-          {!isOwnerVerified ? (
-            <div className="p-5 rounded-2xl bg-slate-900/90 border border-amber-500/40 text-center space-y-3">
-              <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-300">
-                <Lock className="w-6 h-6" />
+          {!isOwnerVerified && (
+            <div className="p-3 rounded-2xl bg-slate-900/90 border border-amber-500/40 flex items-center justify-between gap-2.5">
+              <div className="flex items-start gap-2 min-w-0">
+                <Lock className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-slate-300 leading-snug">
+                  <span className="font-bold text-amber-200 block">
+                    Owner Private Vault Hidden (Guest Isolation Active)
+                  </span>
+                  Managing only your local device memories below. Sign in as Owner to sync Owner Cloud memories.
+                </div>
               </div>
-              <div className="text-sm font-bold text-white">
-                Guest-Safe Lock Active — Private Vault Hidden
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                The App Owner&apos;s private memories and personal preferences are strictly
-                protected and inaccessible to other users.
-              </p>
               <button
                 type="button"
                 disabled={isVerifying}
                 onClick={handleVerifyOwner}
-                className="min-h-[44px] w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
+                className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-[10px] font-bold shrink-0 cursor-pointer"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>
-                  {isVerifying ? 'Verifying Owner...' : 'Verify Owner with Google to Unlock Vault'}
-                </span>
+                {isVerifying ? 'Checking...' : 'Owner Login'}
               </button>
-              {authError && (
-                <div className="text-[11px] text-amber-300 bg-slate-950/80 border border-amber-500/30 rounded-xl p-2">
-                  {authError}
-                </div>
-              )}
             </div>
-          ) : (
-            <>
-              {confirmDeleteItem && (
+          )}
+          {authError && !isOwnerVerified && (
+            <div className="text-[11px] text-amber-300 bg-slate-950/80 border border-amber-500/30 rounded-xl p-2">
+              {authError}
+            </div>
+          )}
+          {confirmDeleteItem && (
                 <div className="p-3.5 rounded-2xl bg-rose-950/90 border border-rose-400/70 space-y-2.5">
                   <div className="flex items-start gap-2 text-rose-100">
                     <AlertTriangle className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" />
@@ -449,18 +442,16 @@ export const MemoriesModal: React.FC<MemoriesModalProps> = ({
                   <span>Save New Long-Term Memory</span>
                 </button>
               )}
-            </>
-          )}
         </div>
 
         {/* Footer status */}
         <div className="pt-3 border-t border-purple-900/50 flex items-center justify-between text-xs text-slate-400">
           <span className="flex items-center gap-1.5 text-emerald-400">
             <ShieldCheck className="w-3.5 h-3.5" />
-            {isOwnerVerified ? '365-Day Owner Vault Active' : 'Guest-Safe Isolation Active'}
+            {isOwnerVerified ? '365-Day ZX Vault Active' : 'Guest-Safe Isolation Active'}
           </span>
-          <span className="text-[11px] text-pink-400/80 font-mono">
-            {isOwnerVerified ? 'OWNER VERIFIED' : 'LOCKED'}
+          <span className="text-[11px] text-emerald-300 font-black tracking-wider">
+            {isOwnerVerified ? 'ZX' : 'LOCKED'}
           </span>
         </div>
       </div>

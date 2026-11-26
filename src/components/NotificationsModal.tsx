@@ -30,6 +30,7 @@ import {
   maskSensitiveNotificationText,
   NATIVE_ANDROID_COMPANION_GUIDE_TEXT,
   openAndroidSystemPermissionScreen,
+  requestWhatsAppGroupDigest,
 } from '../services/androidAssistantBridgeService';
 import { compressImageToJpeg } from '../services/selfHealAndMacroService';
 import {
@@ -81,6 +82,12 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedKotlin, setCopiedKotlin] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [digestLoading, setDigestLoading] = useState(false);
+  const [digestResult, setDigestResult] = useState<{
+    digestText: string;
+    totalCount: number;
+    groupCount: number;
+  } | null>(null);
   const bgUploadRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -92,6 +99,31 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
+
+  const handleGenerateWhatsAppDigest = async () => {
+    audioService.unlock();
+    setDigestLoading(true);
+    try {
+      const res = await requestWhatsAppGroupDigest(notifications, language, voiceName, true);
+      setDigestResult({
+        digestText: res.digestText,
+        totalCount: res.totalCount,
+        groupCount: res.groupCount,
+      });
+      if (res.audio) {
+        await audioService.playAudioBase64(res.audio, 1.0, undefined, undefined, 'WhatsApp Digest');
+      } else if (res.digestText) {
+        await audioService.speakText(res.digestText, {
+          language: language === 'auto' ? 'urdu' : language,
+          voiceName,
+        });
+      }
+    } catch {
+      setStatusNote('Could not generate WhatsApp group digest right now.');
+    } finally {
+      setDigestLoading(false);
+    }
+  };
 
   const handleUploadCustomBackground = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -318,6 +350,16 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
 
                   <button
                     type="button"
+                    onClick={handleGenerateWhatsAppDigest}
+                    disabled={digestLoading}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                    <span>{digestLoading ? 'Summarizing...' : '30s WhatsApp Group Digest'}</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => {
                       const msg = openAndroidSystemPermissionScreen('notification_listener');
                       setStatusNote(msg);
@@ -328,6 +370,33 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                     <span>Android Notification Access</span>
                   </button>
                 </div>
+
+                {digestResult && (
+                  <div className="mt-2 p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-emerald-200">
+                        30s Briefing ({digestResult.totalCount} alerts · {digestResult.groupCount} groups)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          audioService.unlock();
+                          audioService.speakText(digestResult.digestText, {
+                            language: language === 'auto' ? 'urdu' : language,
+                            voiceName,
+                          });
+                        }}
+                        className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Volume2 className="w-3 h-3" />
+                        <span>Read Digest Aloud</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-100 leading-relaxed">
+                      {digestResult.digestText}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Live Test Simulator for Call, WhatsApp & Private OTP */}
@@ -424,7 +493,13 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                     >
                       <div className="flex items-center justify-between gap-2 text-xs">
                         <span className="font-semibold text-white truncate">
-                          {n.appName} · {n.sender}
+                          {n.appName}
+                          {n.conversationTitle ? ` [${n.conversationTitle}]` : ''} · {n.sender}
+                          {(n.isGroup || n.conversationTitle) && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold uppercase">
+                              Group
+                            </span>
+                          )}
                         </span>
                         <span className="text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
                           {n.timestamp}

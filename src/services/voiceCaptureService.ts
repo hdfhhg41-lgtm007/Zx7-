@@ -85,16 +85,34 @@ export function downsampleTo16kInt16(float32: Float32Array, inputSampleRate: num
   return result;
 }
 
-export function normalizeQuietPcm16(chunks: Int16Array[]): Int16Array[] {
-  let maxAbs = 0;
+export function computePcm16Stats(chunks: Int16Array[]): {
+  peakAbs: number;
+  rms: number;
+  totalSamples: number;
+  durationMs: number;
+} {
+  let peakAbs = 0;
+  let sumSq = 0;
+  let totalSamples = 0;
   for (const chunk of chunks) {
+    totalSamples += chunk.length;
     for (let i = 0; i < chunk.length; i++) {
-      const a = Math.abs(chunk[i]);
-      if (a > maxAbs) maxAbs = a;
+      const v = chunk[i];
+      const a = v < 0 ? -v : v;
+      if (a > peakAbs) peakAbs = a;
+      sumSq += v * v;
     }
   }
-  if (maxAbs < 120 || maxAbs >= 22000) return chunks;
-  const gain = Math.min(7.5, 24000 / maxAbs);
+  const rms = totalSamples > 0 ? Math.sqrt(sumSq / totalSamples) : 0;
+  const durationMs = Math.round((totalSamples / 16000) * 1000);
+  return { peakAbs, rms, totalSamples, durationMs };
+}
+
+export function normalizeQuietPcm16(chunks: Int16Array[]): Int16Array[] {
+  const { peakAbs, rms } = computePcm16Stats(chunks);
+  // Require both sufficient peak and RMS speech energy before normalizing so faint room static is NEVER amplified 7.5x into fake words
+  if (peakAbs < 280 || rms < 75 || peakAbs >= 16000) return chunks;
+  const gain = Math.min(3.5, 18000 / peakAbs);
   return chunks.map((chunk) => {
     const out = new Int16Array(chunk.length);
     for (let i = 0; i < chunk.length; i++) {
@@ -105,15 +123,19 @@ export function normalizeQuietPcm16(chunks: Int16Array[]): Int16Array[] {
   });
 }
 
+function bytesToBase64Fast(bytes: Uint8Array): string {
+  const parts: string[] = [];
+  const step = 0x2000;
+  for (let i = 0; i < bytes.length; i += step) {
+    const sub = bytes.subarray(i, i + step);
+    parts.push(String.fromCharCode(...sub));
+  }
+  return window.btoa(parts.join(''));
+}
+
 function int16ToBase64(pcm16: Int16Array): string {
   const bytes = new Uint8Array(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const sub = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode.apply(null, Array.from(sub));
-  }
-  return window.btoa(binary);
+  return bytesToBase64Fast(bytes);
 }
 
 export function encodePcm16ChunksToWavBase64(chunks: Int16Array[], sampleRate = 16000): string {
@@ -152,19 +174,13 @@ export function encodePcm16ChunksToWavBase64(chunks: Int16Array[], sampleRate = 
     }
   }
 
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const step = 0x8000;
-  for (let i = 0; i < bytes.length; i += step) {
-    const slice = bytes.subarray(i, i + step);
-    binary += String.fromCharCode.apply(null, Array.from(slice));
-  }
-  return window.btoa(binary);
+  return bytesToBase64Fast(new Uint8Array(buffer));
 }
 
 async function attachSteadyPcmCapture(
   stream: MediaStream,
-  onChunk: (pcm16: Int16Array, rms0to100: number) => void
+  onChunk: (pcm16: Int16Array, rms0to100: number, rmsExact: number) => void,
+  onStall?: (reason: string) => void
 ): Promise<() => void> {
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   const ctx = new AudioCtx();
@@ -173,19 +189,57 @@ async function attachSteadyPcmCapture(
   }
 
   const source = ctx.createMediaStreamSource(stream);
+  // Vocal bandpass filter: strips low-frequency fan/engine rumble (<105Hz) and harsh ultrasonic hiss (>4500Hz)
+  const hpFilter = ctx.createBiquadFilter();
+  hpFilter.type = 'highpass';
+  hpFilter.frequency.value = 105;
+  const lpFilter = ctx.createBiquadFilter();
+  lpFilter.type = 'lowpass';
+  lpFilter.frequency.value = 4500;
+  source.connect(hpFilter);
+  hpFilter.connect(lpFilter);
+
   const sampleRate = ctx.sampleRate || 48000;
   let workletNode: AudioWorkletNode | null = null;
+  let workletMuteGain: GainNode | null = null;
   let scriptNode: ScriptProcessorNode | null = null;
+  let scriptMuteGain: GainNode | null = null;
   let blobUrl: string | null = null;
+  let receivedAnyFrame = false;
+  let receivedWorkletFrame = false;
+  let workletWatchdog: number | null = null;
+  let stallWatchdog: number | null = null;
+  let detached = false;
 
   const handleFloatSamples = (floatSamples: Float32Array) => {
+    if (detached) return;
+    receivedAnyFrame = true;
     let sumSq = 0;
     for (let i = 0; i < floatSamples.length; i++) {
       sumSq += floatSamples[i] * floatSamples[i];
     }
-    const rms = Math.min(100, Math.round(Math.sqrt(sumSq / floatSamples.length) * 380));
+    const rmsExact = Math.min(100, Math.sqrt(sumSq / floatSamples.length) * 380);
+    const rms = Math.min(100, Math.round(rmsExact));
     const pcm16 = downsampleTo16kInt16(floatSamples, sampleRate);
-    onChunk(pcm16, rms);
+    onChunk(pcm16, rms, rmsExact);
+  };
+
+  const attachScriptProcessor = () => {
+    if (detached || scriptNode) return;
+    try {
+      scriptNode = ctx.createScriptProcessor(2048, 1, 1);
+      scriptMuteGain = ctx.createGain();
+      scriptMuteGain.gain.value = 0;
+      scriptNode.onaudioprocess = (evt) => {
+        const ch = evt.inputBuffer.getChannelData(0);
+        handleFloatSamples(new Float32Array(ch));
+      };
+      lpFilter.connect(scriptNode);
+      scriptNode.connect(scriptMuteGain);
+      scriptMuteGain.connect(ctx.destination);
+    } catch {
+      onStall?.('Failed to initialize browser microphone audio processor.');
+    }
   };
 
   if (ctx.audioWorklet && typeof Blob !== 'undefined') {
@@ -194,37 +248,72 @@ async function attachSteadyPcmCapture(
       blobUrl = URL.createObjectURL(blob);
       await ctx.audioWorklet.addModule(blobUrl);
       workletNode = new AudioWorkletNode(ctx, 'zara-pcm-capture');
+      workletMuteGain = ctx.createGain();
+      workletMuteGain.gain.value = 0;
       workletNode.port.onmessage = (evt) => {
         if (evt.data instanceof Float32Array) {
+          receivedWorkletFrame = true;
           handleFloatSamples(evt.data);
         }
       };
-      source.connect(workletNode);
+      lpFilter.connect(workletNode);
+      // Must route workletNode -> 0-gain -> destination so Chromium/WebView never suspends or GC's the worklet
+      workletNode.connect(workletMuteGain);
+      workletMuteGain.connect(ctx.destination);
+
+      // Watchdog: if Android WebView attaches AudioWorklet silently without delivering frames, auto-switch to ScriptProcessor
+      workletWatchdog = window.setTimeout(() => {
+        if (detached || receivedWorkletFrame) return;
+        try {
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => {});
+          }
+          workletNode?.disconnect();
+          workletMuteGain?.disconnect();
+        } catch {}
+        workletNode = null;
+        workletMuteGain = null;
+        attachScriptProcessor();
+      }, 650);
     } catch {
       workletNode = null;
     }
   }
 
   if (!workletNode) {
-    scriptNode = ctx.createScriptProcessor(2048, 1, 1);
-    const muteGain = ctx.createGain();
-    muteGain.gain.value = 0;
-    scriptNode.onaudioprocess = (evt) => {
-      const ch = evt.inputBuffer.getChannelData(0);
-      handleFloatSamples(new Float32Array(ch));
-    };
-    source.connect(scriptNode);
-    scriptNode.connect(muteGain);
-    muteGain.connect(ctx.destination);
+    attachScriptProcessor();
   }
 
+  stallWatchdog = window.setTimeout(() => {
+    if (detached || receivedAnyFrame) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    window.setTimeout(() => {
+      if (!detached && !receivedAnyFrame) {
+        onStall?.('Microphone connected but not sending audio. Check permissions or input device.');
+      }
+    }, 900);
+  }, 1800);
+
   return () => {
+    detached = true;
+    if (workletWatchdog) {
+      window.clearTimeout(workletWatchdog);
+      workletWatchdog = null;
+    }
+    if (stallWatchdog) {
+      window.clearTimeout(stallWatchdog);
+      stallWatchdog = null;
+    }
     if (blobUrl) {
       URL.revokeObjectURL(blobUrl);
     }
     try {
       workletNode?.disconnect();
+      workletMuteGain?.disconnect();
       scriptNode?.disconnect();
+      scriptMuteGain?.disconnect();
       source.disconnect();
     } catch {}
     if (ctx.state !== 'closed') {
@@ -237,12 +326,15 @@ async function attachSteadyPcmCapture(
 export class DirectMicSession {
   private stream: MediaStream | null = null;
   private detachAudio: (() => void) | null = null;
+  private preRoll: Int16Array[] = [];
   private chunks: Int16Array[] = [];
   private active = false;
   private hasSpoken = false;
+  private speechFrames = 0;
   private speechStart = 0;
   private lastVoiceAt = 0;
   private startedAt = 0;
+  private noiseFloor = 0.85;
 
   async start(callbacks: {
     onVolume: (vol: number) => void;
@@ -252,37 +344,102 @@ export class DirectMicSession {
     this.stopAndDiscard();
     try {
       const stream = await acquireMicrophoneStreamSafe();
+      const tracks = stream.getAudioTracks();
+      if (tracks.length === 0 || tracks.every((t) => t.readyState !== 'live')) {
+        stream.getTracks().forEach((t) => t.stop());
+        callbacks.onError('No live microphone track found. Check microphone access.');
+        return false;
+      }
 
       this.stream = stream;
+      this.preRoll = [];
       this.chunks = [];
       this.active = true;
       this.hasSpoken = false;
+      this.speechFrames = 0;
+      this.noiseFloor = 0.85;
       this.startedAt = Date.now();
       this.lastVoiceAt = Date.now();
 
-      this.detachAudio = await attachSteadyPcmCapture(stream, (pcm16, rms) => {
+      tracks[0].onended = () => {
         if (!this.active) return;
-        callbacks.onVolume(rms);
-        this.chunks.push(pcm16);
+        this.stopAndDiscard();
+        callbacks.onError('Microphone disconnected during recording.');
+      };
 
-        const now = Date.now();
-        const activeRmsThreshold = this.hasSpoken ? 1.8 : 2.8;
-        if (rms >= activeRmsThreshold) {
+      this.detachAudio = await attachSteadyPcmCapture(
+        stream,
+        (pcm16, rms, rmsExact) => {
+          if (!this.active) return;
+          callbacks.onVolume(rms);
+
+          const now = Date.now();
+          const lastSpeakEnd = audioService.getLastSpeakEndTime();
+          const inEchoGuard =
+            audioService.getIsSpeaking() || (lastSpeakEnd > 0 && now - lastSpeakEnd < 1300);
+
+          if (inEchoGuard) {
+            this.preRoll = [];
+            this.chunks = [];
+            this.hasSpoken = false;
+            this.speechFrames = 0;
+            this.lastVoiceAt = now;
+            return;
+          }
+
+          if (!this.hasSpoken && rmsExact < this.noiseFloor + 1.8) {
+            this.noiseFloor = Math.max(
+              0.4,
+              Math.min(2.6, this.noiseFloor * 0.93 + rmsExact * 0.07)
+            );
+          }
+
+          const startThreshold = Math.max(2.0, this.noiseFloor * 1.9);
+          const sustainThreshold = Math.max(1.15, this.noiseFloor * 1.3);
+          const activeRmsThreshold = this.hasSpoken ? sustainThreshold : startThreshold;
+
           if (!this.hasSpoken) {
-            this.hasSpoken = true;
-            this.speechStart = now;
+            this.preRoll.push(pcm16);
+            if (this.preRoll.length > 26) this.preRoll.shift();
+          } else {
+            this.chunks.push(pcm16);
           }
-          this.lastVoiceAt = now;
-        } else if (this.hasSpoken) {
-          if (now - this.lastVoiceAt >= 1350 || now - this.speechStart >= 30000) {
-            const wav = this.finishAndGetWav();
-            if (wav) callbacks.onAutoFinish(wav);
+
+          if (rmsExact >= activeRmsThreshold) {
+            this.speechFrames++;
+            this.lastVoiceAt = now;
+            if (
+              !this.hasSpoken &&
+              (this.speechFrames >= 4 || rmsExact >= startThreshold + 2.4)
+            ) {
+              this.hasSpoken = true;
+              this.speechStart = now;
+              this.chunks = [...this.preRoll, pcm16];
+              this.preRoll = [];
+            }
+          } else if (this.hasSpoken) {
+            this.speechFrames = Math.max(0, this.speechFrames - 1);
+            const speechDurationMs = now - this.speechStart;
+            const settleSilenceMs = speechDurationMs < 2500 ? 2400 : 2800;
+            if (now - this.lastVoiceAt >= settleSilenceMs || speechDurationMs >= 45000) {
+              const wav = this.finishAndGetWav();
+              if (wav) {
+                callbacks.onAutoFinish(wav);
+              } else {
+                callbacks.onError('Voice recording was too brief. Please try speaking again.');
+              }
+            }
+          } else if (now - this.startedAt >= 15000) {
+            this.stopAndDiscard();
+            callbacks.onError('No voice detected. Check microphone and speak clearly.');
           }
-        } else if (now - this.startedAt >= 14000) {
-          const wav = this.finishAndGetWav();
-          if (wav) callbacks.onAutoFinish(wav);
+        },
+        (stallMsg) => {
+          if (!this.active) return;
+          this.stopAndDiscard();
+          callbacks.onError(stallMsg);
         }
-      });
+      );
 
       return true;
     } catch {
@@ -295,15 +452,19 @@ export class DirectMicSession {
   finishAndGetWav(): string | null {
     if (!this.active) return null;
     this.active = false;
-    const recorded = this.chunks.slice();
+    const recorded =
+      this.chunks.length >= 4 ? this.chunks.slice() : this.preRoll.slice(-26);
     this.cleanupHardware();
-    if (recorded.length < 3) return null;
+    if (recorded.length < 4) return null;
+    const { peakAbs, rms, durationMs } = computePcm16Stats(recorded);
+    if (durationMs < 320 || peakAbs < 240 || rms < 55) return null;
     const normalized = normalizeQuietPcm16(recorded);
     return encodePcm16ChunksToWavBase64(normalized, 16000);
   }
 
   stopAndDiscard() {
     this.active = false;
+    this.preRoll = [];
     this.chunks = [];
     this.cleanupHardware();
   }
@@ -348,9 +509,12 @@ export class LivePhoneCallController {
   private liveSetupReady = false;
   private useFallbackMode = false;
   private isFallbackBusy = false;
+  private fallbackTurnToken = 0;
+  private fallbackAbortController: AbortController | null = null;
   private lastDispatchedTurnCmd = '';
-  private fallbackNoiseFloor = 2.6;
+  private fallbackNoiseFloor = 1.4;
 
+  private liveBargeInFrames = 0;
   private liveUserTurnText = '';
   private liveZaraTurnText = '';
 
@@ -422,7 +586,7 @@ export class LivePhoneCallController {
 
       this.stream = stream;
 
-      this.detachAudio = await attachSteadyPcmCapture(stream, (pcm16, rms) => {
+      this.detachAudio = await attachSteadyPcmCapture(stream, (pcm16, rms, rmsExact) => {
         if (!this.isRunning) return;
 
         if (this.isMuted) {
@@ -433,7 +597,32 @@ export class LivePhoneCallController {
         this.cb.onMicVolume(rms);
 
         if (!this.useFallbackMode && this.liveSetupReady && this.ws && this.ws.readyState === WebSocket.OPEN) {
-          const speakingNow = rms >= 4.5 && !audioService.getIsSpeaking();
+          const lastSpeakEnd = audioService.getLastSpeakEndTime();
+          const zaraSpeakingOrEcho =
+            audioService.getIsSpeaking() || (lastSpeakEnd > 0 && Date.now() - lastSpeakEnd < 1350);
+
+          if (zaraSpeakingOrEcho) {
+            // Allow intentional loud close-mic barge-in (>= 13.5 RMS sustained 4+ frames), otherwise mute speaker echo
+            if (rmsExact >= 13.5) {
+              this.liveBargeInFrames += 1;
+            } else {
+              this.liveBargeInFrames = 0;
+            }
+
+            if (this.liveBargeInFrames < 4) {
+              this.cb.onUserSpeakingChange(false);
+              // Send silent zeroed PCM frames so Live WebSocket stays synced without hearing Zara's own speaker echo
+              const silentFrame = new Int16Array(pcm16.length);
+              try {
+                this.ws.send(JSON.stringify({ type: 'audio', data: int16ToBase64(silentFrame) }));
+              } catch {}
+              return;
+            }
+          } else {
+            this.liveBargeInFrames = 0;
+          }
+
+          const speakingNow = rmsExact >= 3.2;
           this.cb.onUserSpeakingChange(speakingNow);
           const b64 = int16ToBase64(pcm16);
           try {
@@ -442,8 +631,16 @@ export class LivePhoneCallController {
           return;
         }
 
-        if (this.useFallbackMode && !this.isFallbackBusy && !audioService.getIsSpeaking()) {
-          this.handleFallbackPcmFrame(pcm16, rms);
+        const lastSpeakEnd = audioService.getLastSpeakEndTime();
+        const inEchoGuard =
+          audioService.getIsSpeaking() || (lastSpeakEnd > 0 && Date.now() - lastSpeakEnd < 1350);
+        if (this.useFallbackMode && !this.isFallbackBusy && !inEchoGuard) {
+          this.handleFallbackPcmFrame(pcm16, rmsExact);
+        } else if (this.useFallbackMode && inEchoGuard) {
+          this.preRollChunks = [];
+          this.activeUtteranceChunks = [];
+          this.vadHasSpoken = false;
+          this.vadSpeechFrames = 0;
         }
       });
     } catch {
@@ -538,7 +735,7 @@ export class LivePhoneCallController {
         if (this.isRunning && !this.useFallbackMode && !this.liveSetupReady) {
           this.switchToSteadyFallback(true);
         }
-      }, 4200);
+      }, 3000);
 
       ws.onopen = async () => {
         if (!this.isRunning) {
@@ -676,8 +873,16 @@ export class LivePhoneCallController {
     if (playGreeting && !this.liveZaraTurnText) {
       const greetingText =
         this.language === 'english'
-          ? 'Audio call connected. Speak anytime, I am listening.'
-          : 'السلام علیکم! آڈیو کال کنیکٹ ہو گئی ہے، اب آپ بات کریں میں سن رہی ہوں۔';
+          ? 'Live mode is ON. Speak anytime, I am listening patiently.'
+          : this.language === 'hindi'
+          ? 'लाइव कॉल कनेक्ट हो गई है, आप आराम से बोलें मैं पूरी बात सुन रही हूँ।'
+          : this.language === 'punjabi'
+          ? 'ਲਾਈਵ ਕਾਲ ਕਨੈਕਟ ਹੋ ਗਈ ਏ, ਤੁਸੀਂ ਆਰਾਮ ਨਾਲ ਬੋਲੋ ਮੈਂ ਪੂਰੀ ਗੱਲ ਸੁਣ ਰਹੀ ਹਾਂ।'
+          : this.language === 'roman_urdu'
+          ? 'Live call connect ho gayi hai, aap aaram se bolein main poori baat sun rahi hoon.'
+          : this.language === 'urdu'
+          ? 'السلام علیکم! لائیو کال کنیکٹ ہو گئی ہے، آپ آرام سے بات کریں میں پوری بات سن رہی ہوں۔'
+          : 'Live call connect ho gayi hai, aap apni pasand ki zubaan mein aaram se baat karein, main sun rahi hoon.';
       this.cb.onZaraTranscript(greetingText, true);
       const snap = getOwnerAuthSnapshot();
       audioService.speakText(greetingText, {
@@ -692,19 +897,19 @@ export class LivePhoneCallController {
 
   private handleFallbackPcmFrame(pcm16: Int16Array, rms: number) {
     const now = Date.now();
-    if (!this.vadHasSpoken && rms < this.fallbackNoiseFloor + 3) {
+    if (!this.vadHasSpoken && rms < this.fallbackNoiseFloor + 2) {
       this.fallbackNoiseFloor = Math.max(
-        1.5,
-        Math.min(6.0, this.fallbackNoiseFloor * 0.94 + rms * 0.06)
+        0.7,
+        Math.min(2.8, this.fallbackNoiseFloor * 0.94 + rms * 0.06)
       );
     }
-    const triggerRms = Math.max(3.6, Math.round(this.fallbackNoiseFloor * 1.42));
-    const sustainRms = Math.max(2.1, Math.round(this.fallbackNoiseFloor * 1.1));
+    const triggerRms = Math.max(2.0, Number((this.fallbackNoiseFloor * 1.85).toFixed(1)));
+    const sustainRms = Math.max(1.2, Number((this.fallbackNoiseFloor * 1.25).toFixed(1)));
     const activeRms = this.vadHasSpoken ? sustainRms : triggerRms;
 
     if (!this.vadHasSpoken) {
       this.preRollChunks.push(pcm16);
-      if (this.preRollChunks.length > 14) {
+      if (this.preRollChunks.length > 26) {
         this.preRollChunks.shift();
       }
     } else {
@@ -714,7 +919,7 @@ export class LivePhoneCallController {
     if (rms >= activeRms) {
       this.vadSpeechFrames += 1;
       this.vadLastVoiceTime = now;
-      if (!this.vadHasSpoken && this.vadSpeechFrames >= 2) {
+      if (!this.vadHasSpoken && (this.vadSpeechFrames >= 4 || rms >= triggerRms + 2.4)) {
         this.vadHasSpoken = true;
         this.vadSpeechStart = now;
         this.activeUtteranceChunks = [...this.preRollChunks, pcm16];
@@ -724,21 +929,42 @@ export class LivePhoneCallController {
     } else {
       this.vadSpeechFrames = Math.max(0, this.vadSpeechFrames - 1);
       if (this.vadHasSpoken) {
-        if (now - this.vadLastVoiceTime >= 1650 || now - this.vadSpeechStart >= 28000) {
+        const spokenSoFarMs = now - this.vadSpeechStart;
+        const settleSilenceMs = spokenSoFarMs < 2500 ? 2400 : 2800;
+        if (now - this.vadLastVoiceTime >= settleSilenceMs || spokenSoFarMs >= 45000) {
           const utterance = this.activeUtteranceChunks.slice();
           this.activeUtteranceChunks = [];
           this.vadHasSpoken = false;
           this.vadSpeechFrames = 0;
           this.cb.onUserSpeakingChange(false);
 
-          if (utterance.length >= 3) {
-            const boosted = normalizeQuietPcm16(utterance);
-            const wavB64 = encodePcm16ChunksToWavBase64(boosted, 16000);
-            this.sendFallbackTurn({ audioBase64: wavB64, mimeType: 'audio/wav' });
+          if (utterance.length >= 4) {
+            const { peakAbs, rms: uttRms, durationMs } = computePcm16Stats(utterance);
+            if (durationMs >= 320 && peakAbs >= 240 && uttRms >= 55) {
+              const boosted = normalizeQuietPcm16(utterance);
+              const wavB64 = encodePcm16ChunksToWavBase64(boosted, 16000);
+              this.sendFallbackTurn({ audioBase64: wavB64, mimeType: 'audio/wav' });
+            }
           }
         }
       }
     }
+  }
+
+  skipCurrentReply() {
+    this.fallbackTurnToken += 1;
+    try {
+      this.fallbackAbortController?.abort();
+    } catch {}
+    this.fallbackAbortController = null;
+    audioService.stopAudio(true);
+    this.isFallbackBusy = false;
+    this.liveZaraTurnText = '';
+    this.vadHasSpoken = false;
+    this.vadSpeechFrames = 0;
+    this.activeUtteranceChunks = [];
+    this.preRollChunks = [];
+    this.cb.onUserSpeakingChange(false);
   }
 
   async sendTextInCall(text: string) {
@@ -768,6 +994,12 @@ export class LivePhoneCallController {
   private async sendFallbackTurn(payload: { audioBase64?: string; mimeType?: string; spokenText?: string }) {
     if (!this.isRunning || this.isFallbackBusy) return;
     this.isFallbackBusy = true;
+    const myToken = ++this.fallbackTurnToken;
+    try {
+      this.fallbackAbortController?.abort();
+    } catch {}
+    const abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    this.fallbackAbortController = abortCtrl;
 
     const snap = getOwnerAuthSnapshot();
     const isOwnerVerified = snap.isOwnerVerified;
@@ -777,18 +1009,20 @@ export class LivePhoneCallController {
         throw new Error('offline_local_mode');
       }
 
-      const historyPayload = this.history.slice(-22).map((m) => ({
+      const historyPayload = this.history.slice(-14).map((m) => ({
         role: m.sender === 'user' ? 'user' : 'model',
         parts: [{ text: m.text }],
       }));
 
       const frame = this.audioOnly ? null : zaraVision.captureFrameBase64();
       const authHeaders = await getOwnerAuthHeaders();
+      if (!this.isRunning || this.fallbackTurnToken !== myToken) return;
 
       const res = await fetchWithContainerWakeup(
         '/api/voice-chat',
         {
           method: 'POST',
+          signal: abortCtrl ? abortCtrl.signal : undefined,
           headers: {
             'Content-Type': 'application/json',
             ...authHeaders,
@@ -819,10 +1053,15 @@ export class LivePhoneCallController {
         { maxWakeRetries: 2 }
       );
 
-      if (!this.isRunning) return;
+      if (!this.isRunning || this.fallbackTurnToken !== myToken) return;
 
       if (res.ok) {
         const data = await res.json();
+        if (!this.isRunning || this.fallbackTurnToken !== myToken) return;
+        if (data.silence && (data.sttUnavailable || data.orchestration?.sttModelUsed === 'unavailable')) {
+          this.cb.onError('Voice recognition momentarily busy — please speak again.');
+          return;
+        }
         if (!data.silence && data.zaraReply) {
           if (data.userTranscription) {
             this.cb.onUserTranscript(data.userTranscription);
@@ -845,6 +1084,7 @@ export class LivePhoneCallController {
           if (data.userTranscription) {
             this.cb.onTurnPairComplete(data.userTranscription, data.zaraReply);
           }
+          if (!this.isRunning || this.fallbackTurnToken !== myToken) return;
           await audioService.speakText(data.zaraReply, {
             language: this.language,
             rate: this.config.voiceSpeed,
@@ -858,8 +1098,8 @@ export class LivePhoneCallController {
       } else {
         throw new Error(`HTTP ${res.status}`);
       }
-    } catch (_err) {
-      if (!this.isRunning) return;
+    } catch (err: any) {
+      if (!this.isRunning || this.fallbackTurnToken !== myToken || err?.name === 'AbortError') return;
       const fallbackUserText = payload.spokenText || 'Zara offline voice command';
       const offlineRes = await runOfflineZaraBrain({
         userText: fallbackUserText,
@@ -871,6 +1111,7 @@ export class LivePhoneCallController {
         workTasks: [],
         memories: [],
       });
+      if (!this.isRunning || this.fallbackTurnToken !== myToken) return;
       this.cb.onZaraTranscript(offlineRes.replyText, true);
       if (payload.spokenText) {
         this.cb.onTurnPairComplete(payload.spokenText, offlineRes.replyText);
@@ -884,12 +1125,20 @@ export class LivePhoneCallController {
         emotionMode: isOwnerVerified ? (this.config.emotionMode || 'apnapan') : 'calm',
       });
     } finally {
+      if (this.fallbackAbortController === abortCtrl) {
+        this.fallbackAbortController = null;
+      }
       this.isFallbackBusy = false;
     }
   }
 
   stop() {
     this.isRunning = false;
+    this.fallbackTurnToken += 1;
+    try {
+      this.fallbackAbortController?.abort();
+    } catch {}
+    this.fallbackAbortController = null;
     audioService.stopAudio();
 
     if (this.visionTimer) {

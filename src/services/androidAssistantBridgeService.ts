@@ -42,6 +42,12 @@ declare global {
       requestAllAndroidPermissions?: () => boolean;
       openAppPermissionsSettings?: () => void;
       openBatteryOptimizationSettings?: () => void;
+      openOverlaySettings?: () => void;
+      openDeviceSetting?: (settingId: string) => boolean;
+      openAppByName?: (appName: string) => boolean;
+      readScreenContentJson?: () => string;
+      inputTextInScreen?: (text: string) => boolean;
+      getRecentNotificationsJson?: () => string;
       authenticateWithBiometrics?: () => void;
       performGlobalAction?: (action: string) => boolean;
       scrollScreen?: (direction: string) => boolean;
@@ -55,12 +61,24 @@ declare global {
       queryPlayBillingProducts?: () => string;
       launchPlayBillingPurchase?: (productId: string) => boolean;
       queryPlayPurchases?: () => string;
+      setCustomServerUrl?: (url: string) => boolean;
+      getServerUrl?: () => string;
+      setAssistantLanguage?: (lang: string) => boolean;
+      controlMedia?: (action: string) => boolean;
     };
     onZaraIncomingNotification?: (payload: {
       type?: 'incoming_call' | 'message';
+      packageName?: string;
       appName?: string;
       sender?: string;
       body?: string;
+      conversationTitle?: string;
+      isGroup?: boolean;
+    }) => void;
+    onZaraBatteryStatus?: (payload: {
+      batteryPct?: number;
+      batteryTempC?: number;
+      isCharging?: boolean;
     }) => void;
     onZaraBiometricResult?: (verified: boolean) => void;
     onZaraWakeWordDetected?: (payload: {
@@ -69,6 +87,7 @@ declare global {
       source?: string;
     }) => void;
     onZaraAccessibilityState?: (connected: boolean) => void;
+    onZaraForegroundVoiceStateChange?: (running: boolean) => void;
     onZaraAndroidPermissionsResult?: (results: Record<string, boolean>) => void;
     onZaraPlayBillingUpdate?: (payload: {
       status?: string;
@@ -119,6 +138,25 @@ if (typeof window !== 'undefined') {
       );
     };
   }
+  if (!window.onZaraForegroundVoiceStateChange) {
+    window.onZaraForegroundVoiceStateChange = (running: boolean) => {
+      window.dispatchEvent(
+        new CustomEvent('zara-foreground-voice-state', {
+          detail: { running: Boolean(running) },
+        })
+      );
+    };
+  }
+  if (!window.onZaraBatteryStatus) {
+    window.onZaraBatteryStatus = (payload) => {
+      if (!payload) return;
+      window.dispatchEvent(
+        new CustomEvent('zara-android-battery', {
+          detail: payload,
+        })
+      );
+    };
+  }
 }
 
 export function hasNativeAndroidCompanionBridge(): boolean {
@@ -127,18 +165,34 @@ export function hasNativeAndroidCompanionBridge(): boolean {
 
 export const ZARA_LIVE_APK_CONFIG = {
   packageId: 'com.zara.ai.assistant',
-  versionName: '10.2.0',
-  versionCode: 102,
+  versionName: '10.3.0',
+  versionCode: 103,
   liveUrl: 'https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app',
-  apkCommand: './gradlew assembleRelease',
+  apkCommand: './build-release-apk.sh',
   aabCommand: './gradlew bundleRelease',
 } as const;
 
 export interface NativeAndroidAutomationStatus {
   hasNativeBridge: boolean;
   accessibilityConnected: boolean;
+  notificationAccessGranted: boolean;
+  foregroundVoiceRunning: boolean;
   wakeWordServiceRunning: boolean;
   wakePhrase: string;
+  deviceModel: string;
+  micGranted?: boolean;
+  cameraGranted?: boolean;
+  locationGranted?: boolean;
+  callGranted?: boolean;
+  contactsGranted?: boolean;
+  smsGranted?: boolean;
+  mediaGranted?: boolean;
+  overlayGranted?: boolean;
+  batteryOptimizationIgnored?: boolean;
+  notificationsGranted?: boolean;
+  batteryPct?: number;
+  batteryTempC?: number;
+  batteryCharging?: boolean;
 }
 
 export function getNativeAndroidAutomationStatus(): NativeAndroidAutomationStatus {
@@ -146,13 +200,32 @@ export function getNativeAndroidAutomationStatus(): NativeAndroidAutomationStatu
     return {
       hasNativeBridge: false,
       accessibilityConnected: false,
+      notificationAccessGranted: false,
+      foregroundVoiceRunning: false,
       wakeWordServiceRunning: false,
       wakePhrase: 'hey zara',
+      deviceModel: '',
     };
   }
   let wakeEnabled = false;
   let wakePhrase = 'hey zara';
   let accConnected = Boolean(window.ZaraAndroidBridge.isAccessibilityGranted?.());
+  let notifGranted = Boolean(window.ZaraAndroidBridge.isNotificationAccessGranted?.());
+  let fgRunning = Boolean(window.ZaraAndroidBridge.isForegroundVoiceRunning?.());
+  let deviceModel = '';
+  let micGranted: boolean | undefined;
+  let cameraGranted: boolean | undefined;
+  let locationGranted: boolean | undefined;
+  let callGranted: boolean | undefined;
+  let contactsGranted: boolean | undefined;
+  let smsGranted: boolean | undefined;
+  let mediaGranted: boolean | undefined;
+  let overlayGranted: boolean | undefined;
+  let batteryOptimizationIgnored: boolean | undefined;
+  let notificationsGranted: boolean | undefined;
+  let batteryPct: number | undefined;
+  let batteryTempC: number | undefined;
+  let batteryCharging: boolean | undefined;
   try {
     const raw = window.ZaraAndroidBridge.getWakeWordStatus?.();
     if (raw) {
@@ -162,14 +235,166 @@ export function getNativeAndroidAutomationStatus(): NativeAndroidAutomationStatu
       if (typeof parsed.accessibilityConnected === 'boolean') {
         accConnected = parsed.accessibilityConnected;
       }
+      if (typeof parsed.notificationAccessGranted === 'boolean') {
+        notifGranted = parsed.notificationAccessGranted;
+      }
+      if (typeof parsed.foregroundVoiceRunning === 'boolean') {
+        fgRunning = parsed.foregroundVoiceRunning;
+      }
+    }
+  } catch {}
+  try {
+    const devRaw = window.ZaraAndroidBridge.getDeviceStatusJson?.();
+    if (devRaw) {
+      const dev = JSON.parse(devRaw);
+      const mfg = String(dev.manufacturer || '').trim();
+      const mdl = String(dev.model || '').trim();
+      deviceModel = [mfg, mdl].filter(Boolean).join(' ');
+      if (typeof dev.micGranted === 'boolean') micGranted = dev.micGranted;
+      if (typeof dev.cameraGranted === 'boolean') cameraGranted = dev.cameraGranted;
+      if (typeof dev.locationGranted === 'boolean') locationGranted = dev.locationGranted;
+      if (typeof dev.callGranted === 'boolean') callGranted = dev.callGranted;
+      if (typeof dev.contactsGranted === 'boolean') contactsGranted = dev.contactsGranted;
+      if (typeof dev.smsGranted === 'boolean') smsGranted = dev.smsGranted;
+      if (typeof dev.mediaGranted === 'boolean') mediaGranted = dev.mediaGranted;
+      if (typeof dev.overlayGranted === 'boolean') overlayGranted = dev.overlayGranted;
+      if (typeof dev.batteryOptimizationIgnored === 'boolean') batteryOptimizationIgnored = dev.batteryOptimizationIgnored;
+      if (typeof dev.notificationsGranted === 'boolean') notificationsGranted = dev.notificationsGranted;
+      if (typeof dev.batteryPct === 'number') batteryPct = dev.batteryPct;
+      if (typeof dev.batteryTempC === 'number') batteryTempC = dev.batteryTempC;
+      if (typeof dev.batteryCharging === 'boolean') batteryCharging = dev.batteryCharging;
     }
   } catch {}
   return {
     hasNativeBridge: true,
     accessibilityConnected: accConnected,
+    notificationAccessGranted: notifGranted,
+    foregroundVoiceRunning: fgRunning,
     wakeWordServiceRunning: wakeEnabled,
     wakePhrase,
+    deviceModel,
+    micGranted,
+    cameraGranted,
+    locationGranted,
+    callGranted,
+    contactsGranted,
+    smsGranted,
+    mediaGranted,
+    overlayGranted,
+    batteryOptimizationIgnored,
+    notificationsGranted,
+    batteryPct,
+    batteryTempC,
+    batteryCharging,
   };
+}
+
+export interface NativeScreenSnapshot {
+  ok: boolean;
+  packageName?: string;
+  visibleTexts: string[];
+  clickableButtons: Array<{ label: string; checked?: boolean; enabled?: boolean; bounds?: string }>;
+  editableFields: Array<{ label: string; focused?: boolean; value?: string }>;
+  screenSummary: string;
+  accessibilityRequired?: boolean;
+  error?: string;
+}
+
+export function readNativeAndroidScreen(): NativeScreenSnapshot {
+  if (typeof window === 'undefined' || !window.ZaraAndroidBridge?.readScreenContentJson) {
+    return {
+      ok: false,
+      visibleTexts: [],
+      clickableButtons: [],
+      editableFields: [],
+      screenSummary: '',
+      error: 'Native Android APK bridge is required to read other apps screens via Accessibility.',
+    };
+  }
+  try {
+    const raw = window.ZaraAndroidBridge.readScreenContentJson();
+    const parsed = JSON.parse(raw);
+    return {
+      ok: Boolean(parsed.ok),
+      packageName: parsed.packageName ? String(parsed.packageName) : undefined,
+      visibleTexts: Array.isArray(parsed.visibleTexts) ? parsed.visibleTexts.map(String) : [],
+      clickableButtons: Array.isArray(parsed.clickableButtons) ? parsed.clickableButtons : [],
+      editableFields: Array.isArray(parsed.editableFields) ? parsed.editableFields : [],
+      screenSummary: String(parsed.screenSummary || ''),
+      accessibilityRequired: Boolean(parsed.accessibilityRequired),
+      error: parsed.error ? String(parsed.error) : undefined,
+    };
+  } catch {
+    return {
+      ok: false,
+      visibleTexts: [],
+      clickableButtons: [],
+      editableFields: [],
+      screenSummary: '',
+      error: 'Could not read active Android window.',
+    };
+  }
+}
+
+export function fetchNativeRecentNotifications(): Array<{
+  id: string;
+  packageName: string;
+  appName: string;
+  sender: string;
+  body: string;
+  conversationTitle?: string;
+  isGroup?: boolean;
+  type: 'incoming_call' | 'message';
+  timestampMs: number;
+}> {
+  if (typeof window === 'undefined' || !window.ZaraAndroidBridge?.getRecentNotificationsJson) {
+    return [];
+  }
+  try {
+    const raw = window.ZaraAndroidBridge.getRecentNotificationsJson();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.map((x: any) => ({
+      id: String(x.id || `${x.packageName || 'android'}-${x.timestampMs || Date.now()}`),
+      packageName: String(x.packageName || ''),
+      appName: String(x.appName || 'Android'),
+      sender: String(x.sender || x.appName || 'Notification'),
+      body: String(x.body || ''),
+      conversationTitle: x.conversationTitle ? String(x.conversationTitle) : undefined,
+      isGroup: Boolean(x.isGroup || x.conversationTitle),
+      type: x.type === 'incoming_call' ? 'incoming_call' : 'message',
+      timestampMs: Number(x.timestampMs || Date.now()),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export function inputTextViaAccessibility(text: string): boolean {
+  if (typeof window === 'undefined' || !window.ZaraAndroidBridge?.inputTextInScreen) return false;
+  try {
+    return Boolean(window.ZaraAndroidBridge.inputTextInScreen(text));
+  } catch {
+    return false;
+  }
+}
+
+export function openDeviceSettingViaNativeBridge(settingId: string): boolean {
+  if (typeof window === 'undefined' || !window.ZaraAndroidBridge?.openDeviceSetting) return false;
+  try {
+    return Boolean(window.ZaraAndroidBridge.openDeviceSetting(settingId));
+  } catch {
+    return false;
+  }
+}
+
+export function openAppByNameViaNativeBridge(appName: string): boolean {
+  if (typeof window === 'undefined' || !window.ZaraAndroidBridge?.openAppByName) return false;
+  try {
+    return Boolean(window.ZaraAndroidBridge.openAppByName(appName));
+  } catch {
+    return false;
+  }
 }
 
 export function setNativeLowPowerWakeWord(enabled: boolean, phrase?: string): boolean {
@@ -183,6 +408,13 @@ export function setNativeLowPowerWakeWord(enabled: boolean, phrase?: string): bo
     }
   } catch {}
   return false;
+}
+
+export function syncAssistantLanguageToNativeBridge(language: Language): void {
+  if (typeof window === 'undefined' || !window.ZaraAndroidBridge?.setAssistantLanguage) return;
+  try {
+    window.ZaraAndroidBridge.setAssistantLanguage(language || 'auto');
+  } catch {}
 }
 
 export type AndroidAccessibilityAction =
@@ -429,6 +661,10 @@ export function openAndroidSystemPermissionScreen(screen: AndroidSystemPermissio
   }
 
   if (screen === 'display_overlay') {
+    if (window.ZaraAndroidBridge?.openOverlaySettings) {
+      window.ZaraAndroidBridge.openOverlaySettings();
+      return 'Opened "Display Over Other Apps" settings.';
+    }
     triggerAndroidIntentUri(
       'intent:#Intent;action=android.settings.action.MANAGE_OVERLAY_PERMISSION;category=android.intent.category.DEFAULT;end'
     );
@@ -464,10 +700,11 @@ function normalizeDigits(input: string): string {
 function resolveSpokenPromptLanguage(
   selectedLanguage: Language = 'auto',
   sampleText = ''
-): 'english' | 'hindi' | 'punjabi' | 'urdu' {
+): 'english' | 'hindi' | 'punjabi' | 'urdu' | 'roman_urdu' {
   if (selectedLanguage === 'english') return 'english';
   if (selectedLanguage === 'hindi') return 'hindi';
   if (selectedLanguage === 'punjabi') return 'punjabi';
+  if (selectedLanguage === 'roman_urdu') return 'roman_urdu';
   if (selectedLanguage === 'urdu') return 'urdu';
 
   if (/[\u0A00-\u0A7F]/.test(sampleText)) return 'punjabi';
@@ -775,6 +1012,13 @@ export function buildConfirmationPromptSpeech(
       }
       return `ਜੀ ਮੇਰੇ ਮਾਲਕ! ਕੀ ਮੈਂ ${targetLabel} ਨੂੰ ${modePa} ਮਿਲਾ ਦਿਆਂ? ਪੁਸ਼ਟੀ ਲਈ 'ਹਾਂ / Yes' ਬੋਲੋ ਜਾਂ Confirm ਦਬਾਓ!`;
     }
+    if (lang === 'roman_urdu') {
+      const modeRu = isWa ? 'WhatsApp call' : 'phone call';
+      if (!action.phone) {
+        return `Ji! Aap ${action.contactName} ko ${modeRu} karna chahte hain. Pehle upar card mein number chunein ya Pick Contact dabayein, phir confirm karein!`;
+      }
+      return `Ji! Kya main ${targetLabel} ko ${modeRu} mila doon? Tasdeeq ke liye 'Haan / Yes' bolein ya Confirm button dabayein!`;
+    }
     const modeName = isWa ? 'واٹس ایپ کال' : 'فون کال';
     if (!action.phone) {
       return `جی میرے مالک! آپ ${action.contactName} کو ${modeName} کرنا چاہتے ہیں۔ پہلے اوپر کارڈ میں نمبر منتخب کریں یا Pick Contact دبائیں، پھر تصدیق کریں!`;
@@ -799,6 +1043,9 @@ export function buildConfirmationPromptSpeech(
   }
   if (lang === 'punjabi') {
     return `ਜੀ ਮੇਰੇ ਮਾਲਕ! ਮੈਂ ${targetLabel} ਲਈ ${appLabel} ਤੇ ਮੈਸੇਜ ਤਿਆਰ ਕਰ ਲਿਆ ਹੈ: "${action.messageBody}". ਭੇਜਣ ਲਈ 'ਹਾਂ / Yes' ਬੋਲੋ ਜਾਂ Confirm ਦਬਾਓ!`;
+  }
+  if (lang === 'roman_urdu') {
+    return `Ji! Maine ${targetLabel} ke liye ${appLabel} par message tayyar kar liya hai: "${action.messageBody}". Bhejne ki tasdeeq ke liye 'Haan / Yes' bolein ya Confirm dabayein!`;
   }
   return `جی میرے مالک! میں نے ${targetLabel} کے لیے ${appLabel} پر میسج تیار کر لیا ہے: "${action.messageBody}". بھیجنے کی تصدیق کے لیے 'ہاں / Yes' بولیں یا Confirm دبائیں!`;
 }
@@ -833,6 +1080,8 @@ export function executeConfirmedCallOrMessage(
             ? `I don't have a saved phone number for ${action.contactName} yet. Please pick or enter their number in the card and confirm again.`
             : lang === 'hindi'
             ? `मेरे मालिक, ${action.contactName} का नंबर अभी सेव नहीं है — कृपया ऊपर कार्ड में नंबर चुन कर दोबारा कन्फर्म करें!`
+            : lang === 'roman_urdu'
+            ? `${action.contactName} ka number abhi save nahi hai — barah e karam upar card mein number chunein aur dobara confirm karein.`
             : `میرے مالک، ${action.contactName} کا نمبر ابھی محفوظ نہیں ہے — براہ کرم کانٹیکٹ نمبر منتخب کر کے دوبارہ کنفرم کریں!`,
       };
     }
@@ -850,6 +1099,8 @@ export function executeConfirmedCallOrMessage(
               ? `Confirmed! Placing your call to ${action.contactName} now.`
               : lang === 'hindi'
               ? `जी मेरे मालिक! पुष्टि हो गई — मैं ${action.contactName} को कॉल मिला रही हूँ!`
+              : lang === 'roman_urdu'
+              ? `Ji! Tasdeeq ho gayi — main ${action.contactName} ko call mila rahi hoon!`
               : `جی میرے مالک! تصدیق ہو گئی — میں ${action.contactName} کو کال ملا رہی ہوں!`,
         };
       }
@@ -872,6 +1123,8 @@ export function executeConfirmedCallOrMessage(
           ? `Confirmed! I opened the dialer for ${action.contactName}. Tap the call button if Android asks for final dialer confirmation.`
           : lang === 'hindi'
           ? `जी मेरे मालिक! पुष्टि हो गई — मैंने ${action.contactName} के लिए डायलर खोल दिया है!`
+          : lang === 'roman_urdu'
+          ? `Ji! Tasdeeq ho gayi — maine ${action.contactName} ke liye dialer khol diya hai!`
           : `جی میرے مالک! تصدیق ہو گئی — میں نے ${action.contactName} کے لیے ڈائلر کھول دیا ہے!`,
     };
   }
@@ -892,6 +1145,8 @@ export function executeConfirmedCallOrMessage(
           spokenReport:
             lang === 'english'
               ? `Confirmed! Your SMS to ${action.contactName} has been sent.`
+              : lang === 'roman_urdu'
+              ? `Ji! Aapki tasdeeq par ${action.contactName} ko SMS bhej diya gaya hai!`
               : `جی میرے مالک! آپ کی تصدیق پر ایس ایم ایس بھیج دیا گیا ہے!`,
         };
       }
@@ -912,6 +1167,8 @@ export function executeConfirmedCallOrMessage(
           ? `I prepared your SMS in Android Messages. Because Android blocks silent background sending without the Native Companion, please tap Send inside your SMS app.`
           : lang === 'hindi'
           ? `जी मेरे मालिक! मैंने एसएमएस ऐप में आपका संदेश तैयार कर दिया है — एंड्रॉइड सुरक्षा के अनुसार बस Send बटन दबा दें!`
+          : lang === 'roman_urdu'
+          ? `Ji! Maine SMS app mein aapka paigham tayyar kar diya hai — Android security ke mutabiq bas Send button daba dein!`
           : `جی میرے مالک! میں نے ایس ایم ایس ایپ میں آپ کا پیغام بالکل تیار کر دیا ہے — اینڈرائیڈ سیکیورٹی کے مطابق بس سینڈ بٹن دبا دیں!`,
     };
   }
@@ -931,6 +1188,8 @@ export function executeConfirmedCallOrMessage(
       spokenReport:
         lang === 'english'
           ? `Your message is ready inside Telegram. Please tap Send in Telegram to deliver it.`
+          : lang === 'roman_urdu'
+          ? `Ji! Maine Telegram mein aapka message likh kar tayyar kar diya hai, bas Send daba dein!`
           : `جی میرے مالک! میں نے ٹیلی گرام میں آپ کا میسج لکھ کر تیار کر دیا ہے، بس سینڈ دبا دیں!`,
     };
   }
@@ -946,6 +1205,8 @@ export function executeConfirmedCallOrMessage(
       spokenReport:
         lang === 'english'
           ? `Opened Messenger. Because Meta Messenger does not allow automatic background sending, please select the chat and tap Send.`
+          : lang === 'roman_urdu'
+          ? `Ji! Messenger open kar diya hai — Messenger mein khudkar sending ki ijazat nahi hoti, barah-e-karam chat select kar ke Send daba dein!`
           : `جی میرے مالک! میسنجر اوپن کر دیا ہے — میسنجر میں خودکار سینڈنگ کی اجازت نہیں ہوتی، براہ کرم چیٹ منتخب کر کے سینڈ دبا دیں!`,
     };
   }
@@ -967,6 +1228,8 @@ export function executeConfirmedCallOrMessage(
           spokenReport:
             lang === 'english'
               ? `Confirmed! Sending your WhatsApp Business message to ${action.contactName}.`
+              : lang === 'roman_urdu'
+              ? `Ji! WhatsApp Business par ${action.contactName} ko message bheja ja raha hai!`
               : `جی میرے مالک! واٹس ایپ بزنس پر میسج بھیجا جا رہا ہے!`,
         };
       }
@@ -988,6 +1251,8 @@ export function executeConfirmedCallOrMessage(
       spokenReport:
         lang === 'english'
           ? `I prepared your message in WhatsApp Business. Tap Send inside WhatsApp Business to deliver it.`
+          : lang === 'roman_urdu'
+          ? `Ji! WhatsApp Business mein message tayyar kar diya hai, bas Send button daba dein!`
           : `جی میرے مالک! واٹس ایپ بزنس میں میسج تیار کر دیا ہے، بس سینڈ بٹن دبا دیں!`,
     };
   }
@@ -1013,6 +1278,8 @@ export function executeConfirmedCallOrMessage(
         spokenReport:
           lang === 'english'
             ? `Confirmed! Sending your WhatsApp message to ${action.contactName}.`
+            : lang === 'roman_urdu'
+            ? `Ji! Aapki tasdeeq par ${action.contactName} ko WhatsApp message bheja ja raha hai!`
             : `جی میرے مالک! آپ کی تصدیق پر واٹس ایپ میسج بھیجا جا رہا ہے!`,
       };
     }
@@ -1036,6 +1303,8 @@ export function executeConfirmedCallOrMessage(
         ? `I prepared your WhatsApp message for ${action.contactName}. Since Android restricts silent background sending without Accessibility Service, please tap Send inside WhatsApp.`
         : lang === 'hindi'
         ? `जी मेरे मालिक! मैंने व्हाट्सएप में ${action.contactName} के लिए मैसेज तैयार कर दिया है — एंड्रॉइड प्राइवेसी नियम के अनुसार बस Send दबा दें!`
+        : lang === 'roman_urdu'
+        ? `Ji! Maine WhatsApp mein ${action.contactName} ke liye message tayyar kar diya hai — bas Send button daba dein!`
         : `جی میرے مالک! میں نے واٹس ایپ میں ${action.contactName} کے لیے میسج تیار کر دیا ہے — اینڈرائیڈ پرائیویسی رول کے مطابق بس سینڈ دبا دیں!`,
   };
 }
@@ -1137,20 +1406,28 @@ export function buildSpokenNotificationAnnouncement(
     if (lang === 'punjabi') {
       return `ਧਿਆਨ ਦਿਓ ਮੇਰੇ ਮਾਲਕ! ${item.sender} ਵੱਲੋਂ ${item.appName} ਤੇ ਇਨਕਮਿੰਗ ਕਾਲ ਆ ਰਹੀ ਹੈ!`;
     }
+    if (lang === 'roman_urdu') {
+      return `Tawajjo dein! ${item.sender} ki taraf se ${item.appName} par incoming call aa rahi hai!`;
+    }
     return `توجہ فرمائیں میرے مالک! ${item.sender} کی طرف سے ${item.appName} پر انکمنگ کال آ رہی ہے!`;
   }
 
+  const groupPrefix = item.conversationTitle ? ` (${item.conversationTitle})` : '';
+
   if (!cfg.readMessageContent) {
     if (lang === 'english') {
-      return `New message from ${item.sender} on ${item.appName}. Message text is kept private.`;
+      return `New message from ${item.sender}${groupPrefix} on ${item.appName}. Message text is kept private.`;
     }
     if (lang === 'hindi') {
-      return `मेरे मालिक! ${item.appName} पर ${item.sender} का नया मैसेज आया है — प्राइवेसी गार्ड ऑन होने की वजह से संदेश गोपनीय रखा गया है।`;
+      return `मेरे मालिक! ${item.appName} पर ${item.sender}${groupPrefix} का नया मैसेज आया है — प्राइवेसी गार्ड ऑन होने की वजह से संदेश गोपनीय रखा गया है।`;
     }
     if (lang === 'punjabi') {
-      return `ਮੇਰੇ ਮਾਲਕ! ${item.appName} ਤੇ ${item.sender} ਦਾ ਨਵਾਂ ਮੈਸੇਜ ਆਇਆ ਹੈ — ਪ੍ਰਾਈਵੇਸੀ ਗਾਰਡ ਆਨ ਹੋਣ ਕਰਕੇ ਮੈਸੇਜ ਲੁਕਾਇਆ ਗਿਆ ਹੈ।`;
+      return `ਮੇਰੇ ਮਾਲਕ! ${item.appName} ਤੇ ${item.sender}${groupPrefix} ਦਾ ਨਵਾਂ ਮੈਸੇਜ ਆਇਆ ਹੈ — ਪ੍ਰਾਈਵੇਸੀ ਗਾਰਡ ਆਨ ਹੋਣ ਕਰਕੇ ਮੈਸੇਜ ਲੁਕਾਇਆ ਗਿਆ ਹੈ।`;
     }
-    return `میرے مالک! ${item.appName} پر ${item.sender} کا نیا میسج آیا ہے — پرائیویسی گارڈ آن ہونے کی وجہ سے پیغام کا متن چھپایا گیا ہے۔`;
+    if (lang === 'roman_urdu') {
+      return `${item.appName} par ${item.sender}${groupPrefix} ka naya message aaya hai — privacy guard on hone ki wajah se message chhupaya gaya hai.`;
+    }
+    return `میرے مالک! ${item.appName} پر ${item.sender}${groupPrefix} کا نیا میسج آیا ہے — پرائیویسی گارڈ آن ہونے کی وجہ سے پیغام کا متن چھپایا گیا ہے۔`;
   }
 
   const safeBody = cfg.maskSensitiveCodes
@@ -1164,19 +1441,25 @@ export function buildSpokenNotificationAnnouncement(
     if (lang === 'hindi') {
       return `मेरे मालिक! ${item.appName} पर ${item.sender} की ओर से एक प्राइवेट सिक्योरिटी या ओटीपी मैसेज आया है, जिसे आपकी सुरक्षा के लिए छिपाया गया है।`;
     }
+    if (lang === 'roman_urdu') {
+      return `${item.appName} par ${item.sender} ki taraf se ek private security ya OTP message aaya hai, jise aapki hifazat ke liye nahi parha gaya.`;
+    }
     return `میرے مالک! ${item.appName} پر ${item.sender} کی طرف سے ایک پرائیویٹ سیکیورٹی یا او ٹی پی میسج آیا ہے، جسے آپ کی حفاظت کے لیے باآواز نہیں پڑھا گیا۔`;
   }
 
   if (lang === 'english') {
-    return `Message from ${item.sender} on ${item.appName}: "${safeBody.slice(0, 160)}"`;
+    return `Message from ${item.sender}${groupPrefix} on ${item.appName}: "${safeBody.slice(0, 160)}"`;
   }
   if (lang === 'hindi') {
-    return `मेरे मालिक! ${item.appName} पर ${item.sender} का मैसेज आया है: "${safeBody.slice(0, 160)}"`;
+    return `मेरे मालिक! ${item.appName} पर ${item.sender}${groupPrefix} का मैसेज आया है: "${safeBody.slice(0, 160)}"`;
   }
   if (lang === 'punjabi') {
-    return `ਮੇਰੇ ਮਾਲਕ! ${item.appName} ਤੇ ${item.sender} ਦਾ ਮੈਸੇਜ ਆਇਆ ਹੈ: "${safeBody.slice(0, 160)}"`;
+    return `ਮੇਰੇ ਮਾਲਕ! ${item.appName} ਤੇ ${item.sender}${groupPrefix} ਦਾ ਮੈਸੇਜ ਆਇਆ ਹੈ: "${safeBody.slice(0, 160)}"`;
   }
-  return `میرے مالک! ${item.appName} پر ${item.sender} کا میسج آیا ہے: "${safeBody.slice(0, 160)}"`;
+  if (lang === 'roman_urdu') {
+    return `${item.appName} par ${item.sender}${groupPrefix} ka message aaya hai: "${safeBody.slice(0, 160)}"`;
+  }
+  return `میرے مالک! ${item.appName} پر ${item.sender}${groupPrefix} کا میسج آیا ہے: "${safeBody.slice(0, 160)}"`;
 }
 
 export function detectRepeatNotificationCommand(rawText: string): boolean {
@@ -1187,6 +1470,36 @@ export function detectRepeatNotificationCommand(rawText: string): boolean {
       lower
     )
   );
+}
+
+export async function requestWhatsAppGroupDigest(
+  notifications: IncomingNotificationItem[],
+  language: Language = 'auto',
+  voiceName = 'Zephyr',
+  includeAudio = true
+): Promise<{
+  ok: boolean;
+  digestText: string;
+  audio: string | null;
+  totalCount: number;
+  groupCount: number;
+}> {
+  const res = await fetch('/api/notifications/digest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notifications, language, voiceName, includeAudio }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || 'Could not generate WhatsApp group digest.');
+  }
+  return {
+    ok: true,
+    digestText: String(data.digestText || ''),
+    audio: data.audio ? String(data.audio) : null,
+    totalCount: Number(data.totalCount || 0),
+    groupCount: Number(data.groupCount || 0),
+  };
 }
 
 // ======================== 5. READY-TO-COMPILE NATIVE ANDROID KOTLIN COMPANION BUNDLE ========================

@@ -13,6 +13,10 @@ import {
   SwitchCamera,
   Copy,
   Check,
+  BookmarkCheck,
+  ChevronDown,
+  ChevronUp,
+  Radio,
 } from 'lucide-react';
 import {
   AiAssistantId,
@@ -26,6 +30,11 @@ import { audioService } from '../services/audioService';
 import { DirectMicSession } from '../services/voiceCaptureService';
 import { compressImageToJpeg } from '../services/selfHealAndMacroService';
 import { copySelectedOrFullText } from '../services/androidAssistantBridgeService';
+import {
+  MISS_ZS_CHAT_NOTE_ID,
+  MISS_ZS_FULL_CHAT_NOTE_TEXT,
+  MISS_ZS_SPEC_SECTIONS,
+} from '../data/missZsBlueprintNotes';
 import { Bot } from 'lucide-react';
 
 interface ChatDrawerProps {
@@ -43,6 +52,7 @@ interface ChatDrawerProps {
   onSelectAssistant?: (assistantId: AiAssistantId) => void;
   onOpenVoiceCall?: () => void;
   onOpenBuiltAppById?: (id: string) => void;
+  onEnsureMissZsNoteInChat?: () => void;
 }
 
 export const ChatDrawer: React.FC<ChatDrawerProps> = ({
@@ -58,7 +68,9 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
   romanceIntensity = 'passionate',
   activeAssistantId = 'zara',
   onSelectAssistant,
+  onOpenVoiceCall,
   onOpenBuiltAppById,
+  onEnsureMissZsNoteInChat,
 }) => {
   const [inputText, setInputText] = useState('');
   const [pendingPhotoDataUrl, setPendingPhotoDataUrl] = useState<string | null>(null);
@@ -70,6 +82,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
   const [micError, setMicError] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [copyToastNotice, setCopyToastNotice] = useState<string | null>(null);
+  const [showMissZsPanel, setShowMissZsPanel] = useState(false);
 
   const endRef = useRef<HTMLDivElement | null>(null);
   const micRef = useRef<DirectMicSession | null>(null);
@@ -223,6 +236,26 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenVoiceCall && (
+              <button
+                type="button"
+                onClick={() => {
+                  audioService.unlock();
+                  audioService.playChime('activate');
+                  micRef.current?.stopAndDiscard();
+                  setIsRecording(false);
+                  onClose();
+                  onOpenVoiceCall();
+                }}
+                className="min-h-[38px] px-3 py-1.5 rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 hover:brightness-110 border border-fuchsia-300/60 shadow-[0_0_16px_rgba(217,70,239,0.45)] text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95"
+                aria-label="Start Live Voice Mode"
+                title="Switch straight to Live Voice Mode"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-300 animate-pulse" />
+                <Radio className="w-3.5 h-3.5 shrink-0" />
+                <span>Live</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -257,6 +290,110 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
           </div>
         )}
 
+        {/* Pinned MISS ZS Blueprint Notes Strip */}
+        <div className="pt-2 pb-1.5 border-b border-purple-900/40 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setShowMissZsPanel((v) => !v)}
+              className="flex-1 min-h-[34px] px-3 py-1.5 rounded-xl bg-[#1E1735] hover:bg-[#281F45] border border-purple-500/40 text-purple-100 text-[11px] font-semibold flex items-center justify-between gap-2 cursor-pointer transition-colors"
+            >
+              <span className="flex items-center gap-1.5 truncate">
+                <BookmarkCheck className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
+                <span className="truncate">MISS ZS Complete Details Noted (9 Specs)</span>
+              </span>
+              {showMissZsPanel ? (
+                <ChevronUp className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const hasNote = messages.some((m) => m.id === MISS_ZS_CHAT_NOTE_ID);
+                if (!hasNote && onEnsureMissZsNoteInChat) {
+                  onEnsureMissZsNoteInChat();
+                }
+                setShowMissZsPanel(false);
+                window.setTimeout(() => {
+                  const el = document.querySelector(`[data-msg-id="${MISS_ZS_CHAT_NOTE_ID}"]`);
+                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 80);
+              }}
+              className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/50 text-purple-100 text-[10px] font-bold whitespace-nowrap cursor-pointer shrink-0"
+              title="Jump to or re-pin full note inside Chat"
+            >
+              View in Chat
+            </button>
+          </div>
+
+          {showMissZsPanel && (
+            <div className="max-h-60 overflow-y-auto rounded-2xl bg-[#0B0813]/95 border border-purple-500/40 p-3 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between gap-2 pb-2 border-b border-purple-900/50">
+                <span className="text-[11px] font-bold text-purple-200">
+                  All 9 MISS ZS Specs Saved in Chat &amp; Memory
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await copySelectedOrFullText(MISS_ZS_FULL_CHAT_NOTE_TEXT);
+                      if (res.ok) {
+                        setCopyToastNotice('MISS ZS complete details copied ✓');
+                        window.setTimeout(() => setCopyToastNotice(null), 2400);
+                      }
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-purple-500/40 text-[10px] text-purple-100 font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copy All</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioService.unlock();
+                      audioService.speakText(MISS_ZS_FULL_CHAT_NOTE_TEXT, {
+                        language,
+                        voiceName,
+                        loveMode,
+                        romanceIntensity,
+                      });
+                    }}
+                    className="px-2 py-1 rounded-lg bg-pink-600/30 hover:bg-pink-600/50 border border-pink-400/50 text-[10px] text-pink-100 font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Volume2 className="w-3 h-3" />
+                    <span>Speak</span>
+                  </button>
+                </div>
+              </div>
+
+              {MISS_ZS_SPEC_SECTIONS.map((sec) => (
+                <div
+                  key={sec.id}
+                  className="p-2.5 rounded-xl bg-[#161129] border border-purple-800/60 space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-[11px] text-white">
+                      {sec.number}. {sec.title}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-purple-950 border border-purple-600/50 text-[9px] text-purple-200 font-semibold shrink-0">
+                      {sec.badge}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-purple-200/90 leading-snug">{sec.summary}</p>
+                  <ul className="text-[10px] text-slate-300 space-y-0.5 pl-3 list-disc">
+                    {sec.details.map((line, idx) => (
+                      <li key={idx}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {copyToastNotice && (
           <div
             role="status"
@@ -275,6 +412,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
             return (
               <div
                 key={m.id}
+                data-msg-id={m.id}
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
               >
                 <div
@@ -425,7 +563,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
           })}
           {isRecording && (
             <div className="flex items-center justify-between px-3 py-2 rounded-2xl bg-emerald-950/80 border border-emerald-500/60 text-xs text-emerald-200 tabular-nums">
-              <span>Mic ON — speak now, auto-sends on pause ({micVol}%)</span>
+              <span>Mic ON — speak your full message, sends smoothly on pause ({micVol}%)</span>
             </div>
           )}
           {isSending && (

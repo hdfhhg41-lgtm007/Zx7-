@@ -1,18 +1,37 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft,
+  Phone,
   PhoneOff,
   Mic,
   MicOff,
   Send,
-  PhoneCall,
   Camera,
   MonitorUp,
   ExternalLink,
   Copy,
   Check,
+  Minimize2,
+  Maximize2,
+  SkipForward,
+  MoreVertical,
+  Volume2,
+  VolumeX,
+  Grid3X3,
+  UserPlus,
+  Heart,
+  X,
 } from 'lucide-react';
-import { HoloParticleFace3D } from './hud3d/HoloParticleFace3D';
+import {
+  DEFAULT_ZARA_CALL_PORTRAIT_ID,
+  getZaraPortraitById,
+  isBuiltin2DPortraitId,
+} from '../data/zaraPortraits';
+import {
+  ZaraCrownWordmark,
+  ZaraPurpleBackdropDecor,
+  ZaraVerifiedCheckBadge,
+} from './ZaraRoyalDecor';
 import { audioService } from '../services/audioService';
 import { LivePhoneCallController } from '../services/voiceCaptureService';
 import { copySelectedOrFullText } from '../services/androidAssistantBridgeService';
@@ -35,6 +54,8 @@ import {
 
 interface VoiceCallModalProps {
   isOpen: boolean;
+  isMinimized?: boolean;
+  onToggleMinimize?: () => void;
   audioOnly?: boolean;
   onClose: () => void;
   onCloseZaraApp?: () => void;
@@ -51,10 +72,22 @@ interface VoiceCallModalProps {
   onRequestCallOrMessageConfirmation?: (transcript: string) => void;
 }
 
-const LEVEL_HEIGHT_CLASSES = ['h-1.5', 'h-2.5', 'h-3.5', 'h-5', 'h-6', 'h-7'];
+const CALL_WAVE_MULTIPLIERS = [0.45, 0.85, 1.15, 0.7, 1.0, 0.55];
+
+const RING_HEARTS: { className: string; size: string; delay: string }[] = [
+  { className: '-top-1 left-2', size: 'w-6 h-6', delay: '0s' },
+  { className: 'top-10 -left-5', size: 'w-4 h-4', delay: '0.6s' },
+  { className: 'bottom-9 -left-6', size: 'w-6 h-6', delay: '1.1s' },
+  { className: '-bottom-2 left-8', size: 'w-4 h-4', delay: '1.7s' },
+  { className: '-top-1 right-2', size: 'w-5 h-5', delay: '0.3s' },
+  { className: 'top-14 -right-5', size: 'w-4 h-4', delay: '0.9s' },
+  { className: 'bottom-6 -right-3', size: 'w-5 h-5', delay: '1.4s' },
+];
 
 export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
   isOpen,
+  isMinimized = false,
+  onToggleMinimize,
   audioOnly = true,
   onClose,
   onCloseZaraApp,
@@ -77,12 +110,15 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [isZaraSpeaking, setIsZaraSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [micVolume, setMicVolume] = useState(0);
   const [userCaption, setUserCaption] = useState('');
-  const [zaraCaption, setZaraCaption] = useState('Connecting live voice call with Zara...');
+  const [zaraCaption, setZaraCaption] = useState('Calling...');
   const [quickText, setQuickText] = useState('');
   const [callError, setCallError] = useState<string | null>(null);
   const [copiedLiveCaption, setCopiedLiveCaption] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [activeSubPanel, setActiveSubPanel] = useState<'none' | 'keypad' | 'add_call'>('none');
   const [launchedAppBanner, setLaunchedAppBanner] = useState<{
     mode: 'open' | 'close';
     app: MobileAppDefinition | null;
@@ -92,12 +128,36 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
 
   const controllerRef = useRef<LivePhoneCallController | null>(null);
   const screenInputRef = useRef<HTMLInputElement | null>(null);
+  const videoFeedRef = useRef<HTMLVideoElement | null>(null);
+
+  const callPortraitId =
+    !config.portraitId ||
+    config.portraitId === 'royal_home' ||
+    (!isBuiltin2DPortraitId(config.portraitId) && !config.portraitId.startsWith('custom_'))
+      ? DEFAULT_ZARA_CALL_PORTRAIT_ID
+      : config.portraitId;
+  const activePortrait = getZaraPortraitById(callPortraitId);
+
+  const activeAssistant =
+    ZARA_AI_ASSISTANTS.find((a) => a.id === (config.activeAssistantId || 'zara')) ||
+    ZARA_AI_ASSISTANTS[0];
 
   useEffect(() => {
     const unsub = audioService.subscribeSpeaking((speaking) => {
       setIsZaraSpeaking(speaking);
     });
     return unsub;
+  }, []);
+
+  useEffect(() => {
+    return zaraVision.subscribe((_mode, stream) => {
+      if (videoFeedRef.current) {
+        videoFeedRef.current.srcObject = stream || null;
+        if (stream) {
+          videoFeedRef.current.play().catch(() => {});
+        }
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -125,15 +185,17 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
     setCallError(null);
     setLaunchedAppBanner(null);
     setUserCaption('');
+    setShowMoreMenu(false);
+    setActiveSubPanel('none');
+    setIsSpeakerOn(true);
     setZaraCaption(
       audioOnly
-        ? 'Connecting HD Audio Call with Zara...'
+        ? 'Calling...'
         : 'Zara connecting live video call...'
     );
     setIsMuted(false);
     setMicVolume(0);
 
-    // Only activate camera in explicit video call mode (never in Audio Call mode)
     if (!audioOnly && isOwnerVerified && zaraVision.getMode() === 'off') {
       zaraVision.startCamera('user').catch(() => {});
     }
@@ -148,8 +210,8 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
           if (st === 'connected' || st === 'fallback_connected') {
             setZaraCaption(
               audioOnly
-                ? 'Audio Call Connected! Speak freely anytime — Zara is listening.'
-                : 'Call connected! Speak freely — WhatsApp message, Back, Close, or open any app!'
+                ? 'Live ON — Listening patiently, speak freely anytime.'
+                : 'Live Video ON — Listening patiently, speak freely anytime.'
             );
           }
         },
@@ -252,6 +314,27 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
     audioService.playChime(next ? 'tap' : 'activate');
   };
 
+  const handleToggleSpeaker = () => {
+    audioService.unlock();
+    const next = !isSpeakerOn;
+    setIsSpeakerOn(next);
+    if (!next) {
+      audioService.stopAudio();
+      audioService.playChime('tap');
+    } else {
+      audioService.playChime('activate');
+      if (zaraCaption && callStatus !== 'connecting') {
+        audioService.speakText(zaraCaption, {
+          language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+          loveMode: config.loveMode,
+          emotionMode: config.emotionMode || 'apnapan',
+        });
+      }
+    }
+  };
+
   const handleEndCall = () => {
     audioService.playChime('call_end');
     controllerRef.current?.stop();
@@ -338,11 +421,104 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
     controllerRef.current?.sendTextInCall(clean);
   };
 
-  const activeWaveEnergy = isZaraSpeaking ? 68 : micVolume;
+  const activeWaveEnergy = isZaraSpeaking ? 72 : isUserSpeaking ? Math.max(40, micVolume) : Math.max(18, micVolume);
+
+  // Minimized floating call pill (matching royal-violet theme)
+  if (isMinimized) {
+    return (
+      <div
+        role="region"
+        aria-label="Active Zara Audio Call"
+        className="fixed top-2.5 left-1/2 -translate-x-1/2 z-[68] w-[calc(100%-1.5rem)] max-w-md rounded-2xl bg-[#160736]/95 backdrop-blur-xl border border-purple-400/45 shadow-[0_12px_36px_rgba(147,51,234,0.45)] px-3 py-2 flex items-center justify-between gap-2 select-none"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            audioService.unlock();
+            onToggleMinimize?.();
+          }}
+          className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+          title="Tap to open live Audio Call"
+        >
+          <div
+            className={`relative w-10 h-10 rounded-full overflow-hidden border-2 shrink-0 ${
+              isZaraSpeaking
+                ? 'border-fuchsia-400 shadow-[0_0_14px_rgba(232,121,249,0.7)]'
+                : isUserSpeaking
+                ? 'border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.6)]'
+                : 'border-purple-300/70'
+            }`}
+          >
+            <img
+              src={activePortrait.src}
+              alt="Zara Audio Call Active"
+              className="w-full h-full object-cover object-top"
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="text-xs font-extrabold text-white truncate">
+                {activeAssistant.name} Audio Call
+              </span>
+              <span className="text-[11px] font-mono text-emerald-300 tabular-nums shrink-0">
+                {callStatus === 'connecting' ? 'Calling...' : formatDuration(callSeconds)}
+              </span>
+            </div>
+            <p className="text-[11px] text-purple-200 truncate">
+              {isZaraSpeaking
+                ? zaraCaption
+                : isMuted
+                ? 'Mic muted · Tap mic to speak'
+                : isUserSpeaking
+                ? 'Listening...'
+                : 'Call active in background — tap to return'}
+            </p>
+          </div>
+        </button>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleToggleMute}
+            className={`min-h-[38px] min-w-[38px] rounded-xl border flex items-center justify-center cursor-pointer transition-colors ${
+              isMuted
+                ? 'bg-amber-950 border-amber-400 text-amber-300'
+                : 'bg-emerald-950 border-emerald-400 text-emerald-300'
+            }`}
+            aria-label={isMuted ? 'Unmute Mic' : 'Mute Mic'}
+          >
+            {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onToggleMinimize?.()}
+            className="min-h-[38px] min-w-[38px] rounded-xl bg-purple-900/70 hover:bg-purple-800/80 border border-purple-300/25 text-purple-100 flex items-center justify-center cursor-pointer"
+            aria-label="Expand Audio Call"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleEndCall}
+            className="min-h-[38px] min-w-[38px] rounded-xl bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center cursor-pointer"
+            aria-label="End Audio Call"
+          >
+            <PhoneOff className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-3 bg-[#04010c] select-none">
-      <div className="relative w-full max-w-md h-full sm:h-[94vh] sm:max-h-[880px] bg-gradient-to-b from-[#130a2e] via-[#09051d] to-[#04020e] sm:border-2 sm:border-blue-500/50 sm:rounded-[36px] px-4 py-3 shadow-[0_0_60px_rgba(59,130,246,0.35)] flex flex-col justify-between overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-[#070216] select-none">
+      <div className="relative w-full max-w-md h-full sm:h-[94vh] sm:max-h-[880px] bg-gradient-to-b from-[#1d0848] via-[#11042c] to-[#080218] sm:border sm:border-purple-400/35 sm:rounded-[38px] px-5 pt-4 pb-6 shadow-[0_0_70px_rgba(147,51,234,0.45)] flex flex-col justify-between overflow-hidden">
+        {/* Royal-Violet Bokeh, Silk Waves & Bottom Purple Rose Corners */}
+        <ZaraPurpleBackdropDecor showSilkWave={true} waveTopPercent="72%" />
+
         <input
           ref={screenInputRef}
           type="file"
@@ -351,354 +527,521 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
           className="hidden"
         />
 
-        {/* Top Phone Call Header */}
-        <div className="relative z-10 flex items-center justify-between pb-2 border-b border-purple-900/50">
-          <div className="flex items-center gap-2">
+        {/* 1. TOP CALL HEADER: BACK ARROW + CROWN ZARA AUDIO CALL + 3-DOT MENU */}
+        <header className="relative z-20 flex items-start justify-between pt-1">
+          <button
+            type="button"
+            onClick={handleEndCall}
+            className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-purple-200/30 text-white flex items-center justify-center cursor-pointer transition-transform active:scale-95 shrink-0"
+            aria-label="End & Go Back"
+            title="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
+          <ZaraCrownWordmark
+            subtitle={audioOnly ? 'Live Audio' : 'Live Video Call'}
+            compact={false}
+          />
+
+          <div className="relative">
             <button
               type="button"
-              onClick={handleEndCall}
-              className="min-h-[40px] min-w-[40px] rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 flex items-center justify-center cursor-pointer"
-              title="Back"
-              aria-label="Back"
+              onClick={() => setShowMoreMenu((prev) => !prev)}
+              className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-purple-200/30 text-white flex items-center justify-center cursor-pointer transition-transform active:scale-95 shrink-0"
+              aria-label="Call Options"
+              title="Call Options"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <MoreVertical className="w-5 h-5" />
             </button>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <PhoneCall className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-xs font-black text-white tracking-wider">
-                  {audioOnly ? 'ZARA AUDIO CALL' : 'ZARA LIVE VIDEO CALL'}
-                </span>
-              </div>
-              <div className="text-[10px] font-mono text-emerald-300 flex items-center gap-1.5">
-                <span>
-                  {callStatus === 'connecting' ? 'Dialing...' : formatDuration(callSeconds)}
-                </span>
-                <span>·</span>
-                <span>
-                  {audioOnly
-                    ? callStatus === 'fallback_connected'
-                      ? 'STEADY VOICE HD'
-                      : 'HD AUDIO CALL'
-                    : visionMode !== 'off'
-                    ? `VIDEO: ${visionMode.toUpperCase()}`
-                    : 'HD AUDIO + STUDIO'}
-                </span>
-              </div>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-1.5">
-            {!audioOnly && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleToggleCameraInCall}
-                  className={`min-h-[40px] min-w-[40px] rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
-                    visionMode === 'camera'
-                      ? 'bg-cyan-600 border-cyan-300 text-white'
-                      : 'bg-slate-900 border-cyan-500/40 text-cyan-300'
-                  }`}
-                  title="Camera"
-                >
-                  <Camera className="w-4 h-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleToggleScreenInCall}
-                  className={`min-h-[40px] min-w-[40px] rounded-xl border flex items-center justify-center transition-colors cursor-pointer ${
-                    visionMode === 'screen'
-                      ? 'bg-blue-600 border-blue-300 text-white'
-                      : 'bg-slate-900 border-blue-500/40 text-blue-300'
-                  }`}
-                  title="Screen Share"
-                >
-                  <MonitorUp className="w-4 h-4" />
-                </button>
-              </>
-            )}
-
-            <button
-              type="button"
-              onClick={handleSwitchVoice}
-              className="min-h-[40px] px-2.5 rounded-xl bg-slate-900 border border-pink-500/40 text-[10px] font-bold text-pink-200 hover:border-pink-400 transition-colors cursor-pointer"
-              title="Switch Voice (Female / Male)"
-            >
-              {ZARA_VOICE_PROFILES.find((v) => v.id === config.voiceName)?.label || config.voiceName || 'Zephyr'}
-            </button>
-          </div>
-        </div>
-
-        {/* AI-to-AI Call Persona Switcher + Simulated AI Disclosure */}
-        <div className="relative z-10 pt-1.5 space-y-1">
-          <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {ZARA_AI_ASSISTANTS.map((a) => {
-              const active = (config.activeAssistantId || 'zara') === a.id;
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => {
-                    audioService.playChime('call_connect');
-                    onUpdateConfig({ activeAssistantId: a.id as AiAssistantId, voiceName: a.defaultVoice });
-                    setZaraCaption(`Connecting call with ${a.name} (${a.disclosureText})...`);
-                  }}
-                  className={`min-h-[28px] px-2.5 py-0.5 rounded-lg text-[10px] font-bold border whitespace-nowrap shrink-0 cursor-pointer ${
-                    active
-                      ? 'bg-cyan-500 border-cyan-300 text-slate-950'
-                      : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:border-cyan-400/50'
-                  }`}
-                >
-                  {a.shortLabel}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex items-center justify-between gap-2 px-2.5 py-1 rounded-lg bg-slate-950/90 border border-cyan-500/25 text-[10px]">
-            <span className="text-cyan-200 truncate">
-              {ZARA_AI_ASSISTANTS.find((a) => a.id === (config.activeAssistantId || 'zara'))?.disclosureText}
-            </span>
-            {(config.activeAssistantId || 'zara') !== 'zara' && (
-              <button
-                type="button"
-                onClick={() => {
-                  audioService.playChime('tap');
-                  onUpdateConfig({ activeAssistantId: 'zara', voiceName: 'Zephyr' });
-                }}
-                className="px-2 py-0.5 rounded bg-rose-600/80 hover:bg-rose-500 text-white font-bold shrink-0 cursor-pointer"
-              >
-                Back to Zara
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* 3D Cybernetic Robot Audio Call Visualizer Stage (Zero girl portraits) */}
-        <div className="relative z-10 flex-1 min-h-[210px] my-2 rounded-2xl bg-[#02050e] border border-sky-500/25 overflow-hidden flex flex-col items-center justify-end pb-3">
-          <div className="absolute inset-0">
-            <HoloParticleFace3D
-              isSpeaking={isZaraSpeaking}
-              isListening={!isMuted && (isUserSpeaking || callStatus !== 'error')}
-              micVolume={isMuted ? 0 : micVolume}
-              emotionMode={isOwnerVerified ? config.emotionMode || 'apnapan' : 'calm'}
-              onTapOrb={handleTapCircle}
-              className="w-full h-full"
-            />
-          </div>
-          <div className="relative z-10 flex items-end gap-1 h-7 px-3 py-1 rounded-xl bg-slate-950/85 border border-white/15 pointer-events-none">
-            {[0.4, 0.75, 1.0, 1.25, 1.0, 0.75, 0.4].map((mult, idx) => {
-              const scaled = Math.min(5, Math.max(0, Math.floor((activeWaveEnergy * mult) / 14)));
-              const hClass = LEVEL_HEIGHT_CLASSES[scaled] || 'h-1.5';
-              return (
-                <div
-                  key={idx}
-                  className={`w-1.5 rounded-full transition-all duration-75 ${hClass} ${
-                    isUserSpeaking
-                      ? 'bg-emerald-400'
-                      : isZaraSpeaking
-                      ? 'bg-sky-400'
-                      : 'bg-sky-300/60'
-                  }`}
-                />
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Captions & Voice App Launch Confirmation */}
-        <div className="relative z-10 space-y-1.5">
-          {launchedAppBanner && (
-            <div
-              className={`px-3 py-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
-                launchedAppBanner.mode === 'close'
-                  ? 'bg-rose-950/90 border-rose-400 text-rose-100'
-                  : 'bg-emerald-950/90 border-emerald-400 text-emerald-200'
-              }`}
-            >
-              <span className="truncate">
-                {launchedAppBanner.app?.iconEmoji || '📲'}{' '}
-                <strong>{launchedAppBanner.label}</strong>
-              </span>
-              {launchedAppBanner.mode === 'open' && launchedAppBanner.app ? (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {launchedAppBanner.href.startsWith('#') ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenMobileSettings?.(launchedAppBanner.app!.id);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-500 text-black font-bold text-[11px] flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>Open</span>
-                    </button>
-                  ) : (
-                    <a
-                      href={launchedAppBanner.href}
-                      target={(() => {
-                        try {
-                          return window.self !== window.top ? '_top' : '_self';
-                        } catch {
-                          return '_top';
-                        }
-                      })()}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-500 text-black font-bold text-[11px] flex items-center gap-1 no-underline"
-                    >
-                      <span>Open</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+            {showMoreMenu && (
+              <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-[#19083c]/95 backdrop-blur-xl border border-purple-300/35 shadow-2xl p-1.5 space-y-1 z-40">
+                {onToggleMinimize && (
                   <button
                     type="button"
                     onClick={() => {
-                      const closed = closeMobileAppNow(launchedAppBanner.app!);
-                      setLaunchedAppBanner({
-                        mode: 'close',
-                        app: closed.app,
-                        href: '',
-                        label: `Closed ${launchedAppBanner.app!.name} ✓`,
-                      });
+                      setShowMoreMenu(false);
+                      audioService.playChime('tap');
+                      onToggleMinimize();
                     }}
-                    className="px-2 py-1 rounded-lg bg-rose-600 text-white font-bold text-[11px] cursor-pointer"
+                    className="w-full min-h-[40px] px-3 py-2 rounded-xl hover:bg-purple-500/20 text-left text-xs font-semibold text-white flex items-center gap-2 cursor-pointer"
                   >
-                    Close
+                    <Minimize2 className="w-4 h-4 text-purple-300 shrink-0" />
+                    <span>Keep Call in Background</span>
                   </button>
-                </div>
-              ) : (
+                )}
+
                 <button
                   type="button"
-                  onClick={() => setLaunchedAppBanner(null)}
-                  className="text-xs px-1.5 text-rose-200 cursor-pointer"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    handleSwitchVoice();
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 rounded-xl hover:bg-purple-500/20 text-left text-xs font-semibold text-white flex items-center justify-between gap-2 cursor-pointer"
                 >
-                  ✕
+                  <span>Voice Profile</span>
+                  <span className="text-[10px] text-fuchsia-300 font-bold">
+                    {config.voiceName || 'Zephyr'}
+                  </span>
                 </button>
-              )}
-            </div>
-          )}
 
-          {callError && (
-            <div className="px-3 py-1.5 rounded-xl bg-rose-950 border border-rose-500 text-xs text-rose-200 text-center">
-              {callError}
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    audioService.unlock();
+                    controllerRef.current?.skipCurrentReply();
+                    setIsZaraSpeaking(false);
+                    setZaraCaption('Listening continuously — speak anytime.');
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 rounded-xl hover:bg-purple-500/20 text-left text-xs font-semibold text-white flex items-center gap-2 cursor-pointer"
+                >
+                  <SkipForward className="w-4 h-4 text-purple-300 shrink-0" />
+                  <span>Skip Current Speech</span>
+                </button>
 
-          {userCaption && (
-            <div className="px-3 py-1.5 rounded-2xl bg-purple-950/70 border border-purple-500/40 text-xs text-cyan-200 text-center truncate">
-              <span className="text-[10px] text-purple-300 mr-1.5">You:</span>
-              {userCaption}
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setShowMoreMenu(false);
+                    const res = await copySelectedOrFullText(zaraCaption);
+                    if (res.ok) {
+                      setCopiedLiveCaption(true);
+                      window.setTimeout(() => setCopiedLiveCaption(false), 2000);
+                    }
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 rounded-xl hover:bg-purple-500/20 text-left text-xs font-semibold text-white flex items-center gap-2 cursor-pointer"
+                >
+                  {copiedLiveCaption ? (
+                    <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-purple-300 shrink-0" />
+                  )}
+                  <span>{copiedLiveCaption ? 'Caption Copied ✓' : 'Copy Reply Caption'}</span>
+                </button>
 
-          <div className="px-3.5 py-2 rounded-2xl bg-slate-900/95 border border-blue-500/40 flex items-center justify-between gap-2">
-            <p className="text-xs sm:text-sm text-blue-100 leading-relaxed line-clamp-3 flex-1">
-              {zaraCaption}
-            </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    handleToggleCameraInCall();
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 rounded-xl hover:bg-purple-500/20 text-left text-xs font-semibold text-white flex items-center gap-2 cursor-pointer"
+                >
+                  <Camera className="w-4 h-4 text-purple-300 shrink-0" />
+                  <span>{visionMode === 'camera' ? 'Turn Camera OFF' : 'Turn Camera ON'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    handleToggleScreenInCall();
+                  }}
+                  className="w-full min-h-[40px] px-3 py-2 rounded-xl hover:bg-purple-500/20 text-left text-xs font-semibold text-white flex items-center gap-2 cursor-pointer"
+                >
+                  <MonitorUp className="w-4 h-4 text-purple-300 shrink-0" />
+                  <span>{visionMode === 'screen' ? 'Stop Screen Share' : 'Share Screen'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* 2. CENTER HALO PORTRAIT + ORBITING GLOWING HEARTS + CALLER IDENTITY */}
+        <div className="relative z-10 flex-1 flex flex-col items-center justify-center my-1 min-h-0">
+          {/* Halo Ring Stage */}
+          <div className="relative flex items-center justify-center">
+            {/* Orbiting Floating Hearts around Ring */}
+            {RING_HEARTS.map((h, i) => (
+              <Heart
+                key={i}
+                style={{ animationDelay: h.delay }}
+                className={`absolute ${h.className} ${h.size} text-fuchsia-300 fill-fuchsia-400/55 drop-shadow-[0_0_12px_rgba(232,121,249,0.9)] animate-zara-heart pointer-events-none z-20`}
+              />
+            ))}
+
+            {/* Soft Royal-Violet Outer Halo Glow */}
+            <div
+              className={`absolute w-[212px] h-[212px] sm:w-[232px] sm:h-[232px] rounded-full blur-md transition-all duration-300 pointer-events-none ${
+                isZaraSpeaking
+                  ? 'bg-fuchsia-400/45 scale-105'
+                  : isUserSpeaking
+                  ? 'bg-emerald-400/40 scale-105'
+                  : 'bg-purple-400/30 animate-zara-halo'
+              }`}
+            />
+
+            {/* Main Circular Portrait Frame */}
             <button
               type="button"
-              onClick={async () => {
-                const res = await copySelectedOrFullText(zaraCaption);
-                if (res.ok) {
-                  setCopiedLiveCaption(true);
-                  window.setTimeout(() => setCopiedLiveCaption(false), 2200);
-                }
-              }}
-              className={`min-h-[36px] px-2.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 shrink-0 cursor-pointer transition-colors ${
-                copiedLiveCaption
-                  ? 'bg-emerald-600 border-emerald-300 text-white'
-                  : 'bg-slate-800/90 border-white/15 text-slate-200 hover:text-white'
+              onClick={handleTapCircle}
+              aria-label="Zara Call Portrait"
+              className={`relative z-10 w-[188px] h-[188px] sm:w-[206px] sm:h-[206px] rounded-full overflow-hidden border-[3.5px] transition-all duration-200 cursor-pointer ${
+                isZaraSpeaking
+                  ? 'border-fuchsia-300 shadow-[0_0_42px_rgba(232,121,249,0.85)] scale-[1.03]'
+                  : isUserSpeaking
+                  ? 'border-emerald-300 shadow-[0_0_38px_rgba(52,211,153,0.7)] scale-[1.02]'
+                  : 'border-purple-200/85 shadow-[0_0_35px_rgba(192,132,252,0.75)]'
               }`}
-              title="Copy AI reply"
-              aria-label="Copy AI reply"
             >
-              {copiedLiveCaption ? (
-                <>
-                  <Check className="w-3.5 h-3.5 shrink-0" />
-                  <span>Copied</span>
-                </>
+              {!audioOnly && visionMode === 'camera' ? (
+                <video
+                  ref={videoFeedRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className={`w-full h-full object-cover ${
+                    zaraVision.getFacingMode() === 'user' ? '-scale-x-100' : ''
+                  }`}
+                />
               ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5 shrink-0" />
-                  <span>Copy</span>
-                </>
+                <img
+                  src={activePortrait.src}
+                  alt={activeAssistant.name}
+                  referrerPolicy="no-referrer"
+                  style={{ objectPosition: activePortrait.objectPosition || '50% 22%' }}
+                  className="w-full h-full object-cover"
+                />
               )}
             </button>
           </div>
 
-          {/* Quick One-Tap Commands (WhatsApp Message + Back + Close) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar">
-            {[
-              'Zara WhatsApp open karke message karo Assalam o Alaikum',
-              'Zara WhatsApp band kar do',
-              'Zara back karo',
-              'Zara open YouTube',
-            ].map((promptText, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => controllerRef.current?.sendTextInCall(promptText)}
-                className="min-h-[36px] px-2.5 py-1 rounded-xl bg-slate-900 border border-blue-500/35 hover:border-cyan-400 text-[11px] text-blue-100 whitespace-nowrap shrink-0 active:scale-95 transition-all cursor-pointer"
+          {/* Caller Identity: Zara + Blue Verified Checkmark */}
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <h2 className="text-[28px] sm:text-[32px] font-bold text-white tracking-tight leading-none">
+              {activeAssistant.id === 'zara' ? 'Zara' : activeAssistant.name}
+            </h2>
+            <ZaraVerifiedCheckBadge className="w-6 h-6 shrink-0" />
+          </div>
+
+          {/* Purple Waveform + Calling... / Live Duration */}
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <div className="flex items-center gap-[3px] h-5">
+              {CALL_WAVE_MULTIPLIERS.map((mult, idx) => {
+                const pct = Math.min(100, Math.max(25, Math.round(activeWaveEnergy * mult)));
+                return (
+                  <span
+                    key={idx}
+                    style={{ height: `${Math.max(5, Math.round((pct / 100) * 18))}px` }}
+                    className={`w-[3px] rounded-full transition-all duration-100 ${
+                      isUserSpeaking
+                        ? 'bg-emerald-400'
+                        : isZaraSpeaking
+                        ? 'bg-fuchsia-400'
+                        : 'bg-purple-400'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+            <span className="text-sm font-medium text-purple-100/90 tabular-nums">
+              {callStatus === 'connecting'
+                ? 'Calling...'
+                : `${formatDuration(callSeconds)} · ${
+                    isZaraSpeaking
+                      ? 'Speaking...'
+                      : isMuted
+                      ? 'Muted'
+                      : isUserSpeaking
+                      ? 'Listening...'
+                      : 'Live · Listening'
+                  }`}
+            </span>
+          </div>
+
+          {/* Dynamic Notification / Launched App / Live Reply Caption Pill */}
+          <div className="mt-2.5 w-full max-w-[340px] space-y-1.5">
+            {launchedAppBanner && (
+              <div
+                className={`px-3 py-1.5 rounded-2xl border flex items-center justify-between gap-2 text-xs ${
+                  launchedAppBanner.mode === 'close'
+                    ? 'bg-rose-950/90 border-rose-400 text-rose-100'
+                    : 'bg-emerald-950/90 border-emerald-400 text-emerald-200'
+                }`}
               >
-                {promptText}
-              </button>
-            ))}
+                <span className="truncate">
+                  {launchedAppBanner.app?.iconEmoji || '📲'}{' '}
+                  <strong>{launchedAppBanner.label}</strong>
+                </span>
+                {launchedAppBanner.mode === 'open' && launchedAppBanner.app ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {launchedAppBanner.href.startsWith('#') ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenMobileSettings?.(launchedAppBanner.app!.id);
+                        }}
+                        className="px-2 py-0.5 rounded-lg bg-emerald-500 text-black font-bold text-[11px] cursor-pointer"
+                      >
+                        Open
+                      </button>
+                    ) : (
+                      <a
+                        href={launchedAppBanner.href}
+                        target={(() => {
+                          try {
+                            return window.self !== window.top ? '_top' : '_self';
+                          } catch {
+                            return '_top';
+                          }
+                        })()}
+                        className="px-2 py-0.5 rounded-lg bg-emerald-500 text-black font-bold text-[11px] flex items-center gap-1 no-underline"
+                      >
+                        <span>Open</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const closed = closeMobileAppNow(launchedAppBanner.app!);
+                        setLaunchedAppBanner({
+                          mode: 'close',
+                          app: closed.app,
+                          href: '',
+                          label: `Closed ${launchedAppBanner.app!.name} ✓`,
+                        });
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-rose-600 text-white font-bold text-[11px] cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLaunchedAppBanner(null)}
+                    className="text-xs px-1 text-rose-200 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
+
+            {callError && (
+              <div className="px-3 py-1.5 rounded-2xl bg-rose-950/90 border border-rose-400/70 text-[11px] text-rose-200 text-center">
+                {callError}
+              </div>
+            )}
+
+            {(userCaption || (zaraCaption && zaraCaption !== 'Calling...')) && (
+              <div className="px-3.5 py-2 rounded-2xl bg-[#1e0b46]/70 backdrop-blur-md border border-purple-300/25 text-center space-y-0.5">
+                {userCaption && (
+                  <p className="text-[11px] text-purple-300 truncate">You: {userCaption}</p>
+                )}
+                <p className="text-xs text-purple-50 line-clamp-2 leading-snug">{zaraCaption}</p>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Bottom Call Controls */}
-        <div className="relative z-10 pt-2 mt-1.5 border-t border-purple-900/50 space-y-2">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Type or speak WhatsApp message, Back, Close..."
-              value={quickText}
-              onChange={(e) => setQuickText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSendTextInCall();
-              }}
-              className="flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-purple-500/30 text-white text-xs focus:outline-none focus:border-cyan-500"
-            />
+        {/* Optional In-Call Sub-Panels (Keypad / Add Call Conference) */}
+        {activeSubPanel === 'keypad' && (
+          <div className="relative z-30 mb-3 p-3 rounded-3xl bg-[#1a093c]/95 backdrop-blur-xl border border-purple-300/35 shadow-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-100">
+                In-Call Keypad &amp; Quick Commands
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveSubPanel('none')}
+                className="w-7 h-7 rounded-full bg-white/10 text-purple-200 flex items-center justify-center cursor-pointer"
+                aria-label="Close keypad"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              {[
+                'Zara WhatsApp open karke message karo Assalam o Alaikum',
+                'Zara open YouTube',
+                'Zara back karo',
+              ].map((promptText, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    controllerRef.current?.sendTextInCall(promptText);
+                    setActiveSubPanel('none');
+                  }}
+                  className="min-h-[34px] px-2.5 py-1 rounded-xl bg-purple-950/80 border border-purple-300/30 text-[11px] text-purple-100 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  {promptText}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Type message or command in call..."
+                value={quickText}
+                onChange={(e) => setQuickText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSendTextInCall();
+                }}
+                className="flex-1 min-h-[42px] px-3 rounded-xl bg-[#11042b] border border-purple-300/35 text-white text-xs placeholder:text-purple-300/50 focus:outline-none focus:border-fuchsia-400"
+              />
+              <button
+                type="button"
+                onClick={handleSendTextInCall}
+                className="min-h-[42px] min-w-[42px] flex items-center justify-center rounded-xl bg-gradient-to-b from-fuchsia-500 to-purple-600 text-white cursor-pointer"
+                aria-label="Send message in call"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeSubPanel === 'add_call' && (
+          <div className="relative z-30 mb-3 p-3 rounded-3xl bg-[#1a093c]/95 backdrop-blur-xl border border-purple-300/35 shadow-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-100">
+                Add / Switch AI Companion in Call
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveSubPanel('none')}
+                className="w-7 h-7 rounded-full bg-white/10 text-purple-200 flex items-center justify-center cursor-pointer"
+                aria-label="Close assistant picker"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {ZARA_AI_ASSISTANTS.map((a) => {
+                const active = (config.activeAssistantId || 'zara') === a.id;
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      audioService.playChime('call_connect');
+                      onUpdateConfig({
+                        activeAssistantId: a.id as AiAssistantId,
+                        voiceName: a.defaultVoice,
+                      });
+                      setZaraCaption(`Connected with ${a.name} (${a.disclosureText})`);
+                      setActiveSubPanel('none');
+                    }}
+                    className={`min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-bold border text-left cursor-pointer ${
+                      active
+                        ? 'bg-fuchsia-600 border-fuchsia-300 text-white'
+                        : 'bg-[#11042b] border-purple-300/25 text-purple-100 hover:border-purple-300/60'
+                    }`}
+                  >
+                    <div className="truncate">{a.shortLabel}</div>
+                    <div className="text-[10px] font-normal opacity-75 truncate">{a.defaultVoice}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 3. BOTTOM GLASS 4-ACTION CONTROL BAR + RED END CALL BUTTON */}
+        <div className="relative z-20 flex flex-col items-center gap-5 pt-2">
+          <div className="w-full rounded-[28px] bg-[#24104e]/55 backdrop-blur-xl border border-purple-200/25 shadow-[0_12px_36px_rgba(0,0,0,0.45)] px-3 py-3.5 grid grid-cols-4 gap-2">
+            {/* Speaker */}
             <button
               type="button"
-              onClick={handleSendTextInCall}
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-500 text-white active:scale-95 transition-all cursor-pointer"
-              aria-label="Send message in call"
+              onClick={handleToggleSpeaker}
+              className="flex flex-col items-center justify-center gap-1.5 cursor-pointer group"
+              aria-label={isSpeakerOn ? 'Turn Speaker Off' : 'Turn Speaker On'}
             >
-              <Send className="w-4 h-4" />
+              <span
+                className={`w-13 h-13 rounded-full border flex items-center justify-center transition-all group-active:scale-95 ${
+                  isSpeakerOn
+                    ? 'bg-purple-500/30 border-purple-200/60 text-white shadow-[0_0_16px_rgba(192,132,252,0.45)]'
+                    : 'bg-white/5 border-purple-300/25 text-purple-300/75'
+                }`}
+              >
+                {isSpeakerOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              </span>
+              <span className="text-[11px] font-medium text-purple-100">Speaker</span>
             </button>
-          </div>
 
-          <div className="flex items-center justify-around py-1">
+            {/* Mute */}
             <button
               type="button"
               onClick={handleToggleMute}
-              className={`min-h-[50px] px-5 rounded-2xl border font-bold text-xs flex items-center gap-2 transition-all active:scale-95 whitespace-nowrap cursor-pointer ${
-                isMuted
-                  ? 'bg-amber-950/90 border-amber-500 text-amber-200'
-                  : 'bg-emerald-950/80 border-emerald-500 text-emerald-200 shadow-[0_0_16px_rgba(16,185,129,0.3)]'
-              }`}
+              className="flex flex-col items-center justify-center gap-1.5 cursor-pointer group"
+              aria-label={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
             >
-              {isMuted ? (
-                <>
-                  <MicOff className="w-5 h-5 text-amber-400" />
-                  <span>Unmute Mic</span>
-                </>
-              ) : (
-                <>
-                  <Mic className="w-5 h-5 text-emerald-400" />
-                  <span>Mic Active</span>
-                </>
-              )}
+              <span
+                className={`w-13 h-13 rounded-full border flex items-center justify-center transition-all group-active:scale-95 ${
+                  isMuted
+                    ? 'bg-amber-500/35 border-amber-300 text-amber-100 shadow-[0_0_16px_rgba(245,158,11,0.45)]'
+                    : 'bg-white/10 border-purple-200/35 text-white hover:bg-white/15'
+                }`}
+              >
+                {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </span>
+              <span className="text-[11px] font-medium text-purple-100">
+                {isMuted ? 'Unmute' : 'Mute'}
+              </span>
             </button>
 
+            {/* Keypad */}
+            <button
+              type="button"
+              onClick={() => {
+                audioService.playChime('tap');
+                setActiveSubPanel((prev) => (prev === 'keypad' ? 'none' : 'keypad'));
+              }}
+              className="flex flex-col items-center justify-center gap-1.5 cursor-pointer group"
+              aria-label="Open Call Keypad"
+            >
+              <span
+                className={`w-13 h-13 rounded-full border flex items-center justify-center transition-all group-active:scale-95 ${
+                  activeSubPanel === 'keypad'
+                    ? 'bg-purple-500/35 border-purple-200/70 text-white'
+                    : 'bg-white/10 border-purple-200/35 text-white hover:bg-white/15'
+                }`}
+              >
+                <Grid3X3 className="w-5 h-5" />
+              </span>
+              <span className="text-[11px] font-medium text-purple-100">Keypad</span>
+            </button>
+
+            {/* Add Call */}
+            <button
+              type="button"
+              onClick={() => {
+                audioService.playChime('tap');
+                setActiveSubPanel((prev) => (prev === 'add_call' ? 'none' : 'add_call'));
+              }}
+              className="flex flex-col items-center justify-center gap-1.5 cursor-pointer group"
+              aria-label="Add AI Companion to Call"
+            >
+              <span
+                className={`w-13 h-13 rounded-full border flex items-center justify-center transition-all group-active:scale-95 ${
+                  activeSubPanel === 'add_call'
+                    ? 'bg-purple-500/35 border-purple-200/70 text-white'
+                    : 'bg-white/10 border-purple-200/35 text-white hover:bg-white/15'
+                }`}
+              >
+                <UserPlus className="w-5 h-5" />
+              </span>
+              <span className="text-[11px] font-medium text-purple-100">Add Call</span>
+            </button>
+          </div>
+
+          {/* Red End Call Circle + Label */}
+          <div className="flex flex-col items-center gap-2 pb-1">
             <button
               type="button"
               onClick={handleEndCall}
-              className="min-h-[50px] px-7 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-xs flex items-center gap-2 shadow-[0_0_24px_rgba(225,29,72,0.7)] active:scale-95 transition-all whitespace-nowrap cursor-pointer"
+              aria-label="End Call"
+              className="w-[68px] h-[68px] rounded-full bg-gradient-to-b from-[#ff4b4b] to-[#dc2626] hover:from-[#ff6464] hover:to-[#ef4444] text-white flex items-center justify-center shadow-[0_0_32px_rgba(239,68,68,0.85)] border border-rose-300/45 active:scale-95 transition-transform cursor-pointer"
             >
-              <PhoneOff className="w-5 h-5" />
-              <span>End Call</span>
+              <Phone className="w-7 h-7 rotate-[135deg] fill-white" />
             </button>
+            <span className="text-sm font-semibold text-white tracking-wide">End Call</span>
           </div>
         </div>
       </div>

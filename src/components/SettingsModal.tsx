@@ -61,10 +61,15 @@ import {
   Crown,
   Globe,
   Palette,
+  MicOff,
+  VolumeX,
+  Sliders,
 } from 'lucide-react';
 import {
   AiBrainEngineId,
   AlarmScheduleItem,
+  AzanCityId,
+  AzanRamadanConfig,
   BuiltAppItem,
   CameraFacing,
   DiagnosticCheckItem,
@@ -76,6 +81,7 @@ import {
   ProTierEntitlement,
   SecurityAndControlConfig,
   SettingsTabId,
+  SpokenNotificationConfig,
   TtsEngineId,
   VisionMode,
   WhatsAppContactItem,
@@ -96,6 +102,7 @@ import {
   fetchProTierStatus,
   getCachedTierEntitlement,
   getTierPlanBadgeLabel,
+  getTierRequestHeaders,
   launchNativePlayProPurchase,
 } from '../services/proTierService';
 import { audioService } from '../services/audioService';
@@ -104,15 +111,18 @@ import {
   TTS_ENGINE_OPTIONS,
   updateAiOrchestratorConfig,
 } from '../services/aiOrchestratorService';
-import { DirectMicSession } from '../services/voiceCaptureService';
+import { DirectMicSession, acquireMicrophoneStreamSafe } from '../services/voiceCaptureService';
+import { fetchWithContainerWakeup } from '../services/chatVaultPersistence';
 import { compressImageToJpeg } from '../services/selfHealAndMacroService';
 import {
   NativeAndroidAutomationStatus,
   ZARA_LIVE_APK_CONFIG,
   copySelectedOrFullText,
+  fetchNativeRecentNotifications,
   getNativeAndroidAutomationStatus,
   openAndroidSystemPermissionScreen,
   performAndroidAccessibilityAction,
+  readNativeAndroidScreen,
   setNativeLowPowerWakeWord,
 } from '../services/androidAssistantBridgeService';
 import {
@@ -134,7 +144,9 @@ import {
   zaraVision,
 } from '../services/visionAndControlService';
 import {
+  AZAN_CITY_PRESETS,
   ZARA_COMPLETE_PROFILE,
+  computeDailyPrayerTimes,
   format24To12Hour,
   formatMemoryAgeBadge,
   formatZaraProfileShareText,
@@ -160,6 +172,7 @@ import {
 import {
   OwnerAuthSnapshot,
   engageGuestSafeLock,
+  getOwnerAuthHeaders,
   getOwnerAuthSnapshot,
   signInOwnerWithGoogle,
   subscribeOwnerAuth,
@@ -214,6 +227,9 @@ interface SettingsModalProps {
   isFloatingPiP?: boolean;
   autoGestureWatch?: boolean;
   spokenAlertsEnabled?: boolean;
+  spokenNotifConfig?: SpokenNotificationConfig;
+  onUpdateSpokenNotifConfig?: (updates: Partial<SpokenNotificationConfig>) => void;
+  onTestSpokenNotification?: () => void;
   latestZaraMessage?: string;
   onToggleAlwaysOnVoice?: () => void;
   onToggleDirectMic?: () => void;
@@ -236,6 +252,35 @@ interface SettingsModalProps {
   onOpenDriverMode?: () => void;
   onOpenFileManager?: () => void;
   onEnableAllFunctions?: () => Promise<void>;
+  azanConfig?: AzanRamadanConfig;
+  onUpdateAzanConfig?: (updates: Partial<AzanRamadanConfig>) => void;
+  onTestAzanAlert?: () => void;
+}
+
+const VALID_SETTINGS_TABS: SettingsTabId[] = [
+  'controls',
+  'apps',
+  'security',
+  'builder',
+  'diagnostics',
+  'schedule',
+  'profile',
+  'romance',
+  'memory',
+];
+
+function coerceSettingsTab(value?: SettingsTabId): SettingsTabId {
+  return value && VALID_SETTINGS_TABS.includes(value) ? value : 'controls';
+}
+
+function pickSettingsSpeech(
+  lang: Language,
+  copy: { english: string; hindi: string; punjabi: string; urdu: string }
+): string {
+  if (lang === 'english') return copy.english;
+  if (lang === 'hindi') return copy.hindi;
+  if (lang === 'punjabi') return copy.punjabi;
+  return copy.urdu;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -276,14 +321,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDeleteBuiltApp,
   alwaysOnVoiceEnabled = true,
   isAlwaysOnRunning = false,
+  isDirectMicActive = false,
   isSelfHealing = false,
   visionMode = 'off',
   cameraFacing = 'user',
   isFloatingPiP = false,
   autoGestureWatch = false,
   spokenAlertsEnabled = false,
+  spokenNotifConfig,
+  onUpdateSpokenNotifConfig,
+  onTestSpokenNotification,
   latestZaraMessage = '',
   onToggleAlwaysOnVoice,
+  onToggleDirectMic,
   onToggleFloatPiP,
   onOpenChat,
   onSendInlineChat,
@@ -303,9 +353,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenDriverMode,
   onOpenFileManager,
   onEnableAllFunctions,
+  azanConfig,
+  onUpdateAzanConfig,
+  onTestAzanAlert,
 }) => {
   const [ownerAuth, setOwnerAuth] = useState<OwnerAuthSnapshot>(() => getOwnerAuthSnapshot());
-  const [tab, setTab] = useState<SettingsTabId>(() => initialTab);
+  const [tab, setTab] = useState<SettingsTabId>(() => coerceSettingsTab(initialTab));
+  const activeTab: SettingsTabId = coerceSettingsTab(tab);
+  const safeVoiceSpeed =
+    typeof config.voiceSpeed === 'number' && Number.isFinite(config.voiceSpeed)
+      ? config.voiceSpeed
+      : 0.98;
+  const safeVoicePitch =
+    typeof config.voicePitch === 'number' && Number.isFinite(config.voicePitch)
+      ? config.voicePitch
+      : 1.05;
   const [ownerAuthNotice, setOwnerAuthNotice] = useState<string | null>(null);
   const [isVerifyingOwner, setIsVerifyingOwner] = useState(false);
   const [enablingAllBusy, setEnablingAllBusy] = useState(false);
@@ -322,6 +384,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       : config.userNickname;
   const [nickname, setNickname] = useState(initialNick);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
+  const [isTestingMicStt, setIsTestingMicStt] = useState(false);
+  const [isProcessingSttTest, setIsProcessingSttTest] = useState(false);
+  const [micTestVol, setMicTestVol] = useState(0);
+  const [micTestResult, setMicTestResult] = useState<string | null>(null);
+  const [micTestError, setMicTestError] = useState<string | null>(null);
+  const [permBusyKey, setPermBusyKey] = useState<string | null>(null);
+  const micTestSessionRef = useRef<DirectMicSession | null>(null);
 
   // Apps, WhatsApp Number Dialer & Play Store state
   const [allApps, setAllApps] = useState<MobileAppDefinition[]>([]);
@@ -411,7 +480,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setTab(initialTab);
+      setTab(coerceSettingsTab(initialTab));
       setAllApps(getAllMobileApps());
       setIntruderLogs(loadIntruderLogs());
       setWaContacts(loadWhatsAppContacts());
@@ -419,20 +488,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setWakePhraseDraft(securityConfig.customWakeWord || 'hey zara');
       setNativeAuto(getNativeAndroidAutomationStatus());
       setAppToast(null);
+      setMicTestError(null);
       queryMobilePermissions().then(setMobilePerms).catch(() => {});
       isPlatformBiometricSupported().then(setBioHardwareSupported).catch(() => {});
     } else {
       stopEnrollCamera();
       builderMicRef.current?.stopAndDiscard();
       setIsBuilderMicOn(false);
+      micTestSessionRef.current?.stopAndDiscard();
+      micTestSessionRef.current = null;
+      setIsTestingMicStt(false);
+      setIsProcessingSttTest(false);
+      setMicTestVol(0);
     }
   }, [isOpen, initialTab]);
 
   useEffect(() => {
-    if (isOpen && tab === 'diagnostics' && diagChecks.length === 0 && !isRunningDiag) {
+    return () => {
+      micTestSessionRef.current?.stopAndDiscard();
+      micTestSessionRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'diagnostics' && diagChecks.length === 0 && !isRunningDiag) {
       handleRunHealthDoctor(false);
     }
-  }, [isOpen, tab]);
+  }, [isOpen, activeTab]);
 
   useEffect(() => {
     return subscribeRunningApps(setRunningAppIds);
@@ -480,13 +562,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (res.cleanPhone) {
       setAppToast(`Opening WhatsApp message to +${res.cleanPhone} ✓`);
       audioService.speakText(
-        `جی میرے مالک! میں نے واٹس ایپ کھول کر نمبر ${waPhone} پر میسج تیار کر دیا ہے!`,
+        pickSettingsSpeech(language, {
+          english: `Opening WhatsApp message for ${waPhone}.`,
+          hindi: `जी! मैंने व्हाट्सऐप खोलकर नंबर ${waPhone} पर मैसेज तैयार कर दिया है।`,
+          punjabi: `جی! میں واٹس ایپ کھول کے نمبر ${waPhone} تے میسج تیار کر دتا اے۔`,
+          urdu: `جی! میں نے واٹس ایپ کھول کر نمبر ${waPhone} پر میسج تیار کر دیا ہے!`,
+        }),
         { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
       );
     } else {
       setAppToast('Opening WhatsApp chat chooser with your message ready ✓');
       audioService.speakText(
-        'جی میرے مالک! میں نے واٹس ایپ اوپن کر کے آپ کا میسج لکھ دیا ہے!',
+        pickSettingsSpeech(language, {
+          english: 'Opening WhatsApp with your message ready.',
+          hindi: 'जी! मैंने व्हाट्सऐप ओपन करके आपका मैसेज लिख दिया है।',
+          punjabi: 'جی! میں واٹس ایپ کھول کے تہاڈا میسج لکھ دتا اے۔',
+          urdu: 'جی! میں نے واٹس ایپ اوپن کر کے آپ کا میسج لکھ دیا ہے!',
+        }),
         { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
       );
     }
@@ -536,7 +628,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       `${mode === 'whatsapp' ? 'WhatsApp Call' : 'Phone Call'} dialing +${res.cleanPhone} ✓`
     );
     audioService.speakText(
-      `جی میرے مالک! نمبر ${waPhone} کو کال ملا رہی ہوں!`,
+      pickSettingsSpeech(language, {
+        english: `Dialing ${waPhone} now.`,
+        hindi: `जी! नंबर ${waPhone} को कॉल लगा रही हूँ।`,
+        punjabi: `جی! نمبر ${waPhone} نوں کال ملا رہی آں۔`,
+        urdu: `جی! نمبر ${waPhone} کو کال ملا رہی ہوں!`,
+      }),
       { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
     );
   };
@@ -547,11 +644,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const ended = endExternalCallNow();
     closeMobileAppNow('whatsapp');
     setAppToast(`Call ended / cut ${ended ? `(${ended})` : ''} ✓`);
-    audioService.speakText('جی میرے مالک! میں نے کال کاٹ اور بند کر دی ہے!', {
-      language,
-      rate: config.voiceSpeed,
-      voiceName: config.voiceName || 'Zephyr',
-    });
+    audioService.speakText(
+      pickSettingsSpeech(language, {
+        english: 'Call ended cleanly.',
+        hindi: 'जी! मैंने कॉल बंद कर दी है।',
+        punjabi: 'جی! میں کال بند کر دتی اے۔',
+        urdu: 'جی! میں نے کال بند کر دی ہے!',
+      }),
+      {
+        language,
+        rate: config.voiceSpeed,
+        voiceName: config.voiceName || 'Zephyr',
+      }
+    );
   };
 
   // Owner Face Enrollment
@@ -589,7 +694,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
     stopEnrollCamera();
     audioService.speakText(
-      'مبارک ہو میرے مالک ملیشیا والا بادشاہ! آپ کا فیس لاک سیو ہو گیا ہے — اب جب بھی زارا اوپن ہو گی میں کیمرہ کھول کر صرف آپ کا چہرہ اسکین کروں گی اور ٹیکسٹ بھیجوں گی!',
+      pickSettingsSpeech(language, {
+        english: 'Your face lock has been saved securely.',
+        hindi: 'आपका फेस लॉक सुरक्षित रूप से सेव हो गया है।',
+        punjabi: 'تہاڈا فیس لاک محفوظ طریقے نال سیو ہو گیا اے۔',
+        urdu: 'آپ کا فیس لاک محفوظ طریقے سے سیو ہو گیا ہے!',
+      }),
       { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
     );
   };
@@ -607,7 +717,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         } Active!`
       );
       audioService.speakText(
-        'جی میرے مالک! آپ کے موبائل کی ساری پرمیشن اور سیکیورٹی الاؤ ہو گئی ہیں!',
+        pickSettingsSpeech(language, {
+          english: 'Mobile permissions and security controls are now allowed.',
+          hindi: 'जी! आपके मोबाइल की सभी ज़रूरी परमिशन चालू हो गई हैं।',
+          punjabi: 'جی! تہاڈے موبائل دیاں ساریاں ضروری پرمیشناں آن ہو گئیاں نیں۔',
+          urdu: 'جی! آپ کے موبائل کی تمام ضروری پرمیشنز آن ہو گئی ہیں!',
+        }),
         { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
       );
     } else {
@@ -739,11 +854,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       zaraVision.startCamera('user');
     });
     setAppToast(`Opened ${app.name} on your mobile ✓`);
-    audioService.speakText(`جی میری جان، ابھی آپ کے موبائل میں ${app.name} اوپن کر رہی ہوں!`, {
-      language,
-      rate: config.voiceSpeed,
-      voiceName: config.voiceName || 'Zephyr',
-    });
+    audioService.speakText(
+      pickSettingsSpeech(language, {
+        english: `Opening ${app.name} now.`,
+        hindi: `जी, अभी ${app.name} ओपन कर रही हूँ।`,
+        punjabi: `جی، ہنے ${app.name} کھول رہی آں۔`,
+        urdu: `جی، ابھی ${app.name} اوپن کر رہی ہوں!`,
+      }),
+      {
+        language,
+        rate: config.voiceSpeed,
+        voiceName: config.voiceName || 'Zephyr',
+      }
+    );
   };
 
   const handleCloseAppFromSettings = (appOrAll: MobileAppDefinition | 'all') => {
@@ -752,18 +875,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const res = closeMobileAppNow(appOrAll);
     if (res.closedAll) {
       setAppToast('Closed & turned off all running mobile apps ✓');
-      audioService.speakText('جی میری جان، میں نے ساری ایپس کو بند اور کلوز کر دیا ہے!', {
-        language,
-        rate: config.voiceSpeed,
-        voiceName: config.voiceName || 'Zephyr',
-      });
+      audioService.speakText(
+        pickSettingsSpeech(language, {
+          english: 'All active apps have been closed.',
+          hindi: 'जी, मैंने सभी ऐप्स को बंद कर दिया है।',
+          punjabi: 'جی، میں ساریاں ایپس بند کر دتیاں نیں۔',
+          urdu: 'جی، میں نے تمام ایپس کو بند کر دیا ہے!',
+        }),
+        {
+          language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        }
+      );
     } else if (res.app) {
       setAppToast(`Closed & turned off ${res.app.name} ✓`);
-      audioService.speakText(`جی میری جان، میں نے ${res.app.name} کو بند اور آف کر دیا ہے!`, {
-        language,
-        rate: config.voiceSpeed,
-        voiceName: config.voiceName || 'Zephyr',
-      });
+      audioService.speakText(
+        pickSettingsSpeech(language, {
+          english: `Closed ${res.app.name}.`,
+          hindi: `जी, मैंने ${res.app.name} को बंद कर दिया है।`,
+          punjabi: `جی، میں ${res.app.name} نوں بند کر دتا اے۔`,
+          urdu: `جی، میں نے ${res.app.name} کو بند کر دیا ہے!`,
+        }),
+        {
+          language,
+          rate: config.voiceSpeed,
+          voiceName: config.voiceName || 'Zephyr',
+        }
+      );
     }
   };
 
@@ -807,8 +946,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onUpdateConfig({ userNickname: cleanName });
     setAppToast(`Saved nickname: ${cleanName} ✓`);
     audioService.speakText(
-      `Okay ${cleanName}... from now on I will lovingly call you ${cleanName}.`,
+      pickSettingsSpeech(language, {
+        english: `Okay ${cleanName}, from now on I will call you ${cleanName}.`,
+        hindi: `ठीक है ${cleanName}, अब से मैं आपको प्यार से ${cleanName} कहकर बुलाऊँगी।`,
+        punjabi: `ٹھیک اے ${cleanName}، ہن توں میں تہانوں پیار نال ${cleanName} آکھ کے بلاواں گی۔`,
+        urdu: `ٹھیک ہے ${cleanName}، اب سے میں آپ کو پیار سے ${cleanName} کہہ کر بلاؤں گی۔`,
+      }),
       {
+        language,
         pitch: config.voicePitch,
         rate: config.voiceSpeed,
         voiceName: config.voiceName || 'Zephyr',
@@ -830,17 +975,224 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         : language === 'punjabi'
         ? `ست سری اکال ${initialNick}، میں ہمیشہ پورے اپنا پن تے پیار نال تہاڈے نال آں۔`
         : language === 'english'
-        ? `Hello ${initialNick}, this is my selected voice with warm care and attention.`
+        ? `Hello ${initialNick}, this is my selected female voice with warm care and attention.`
         : `السلام علیکم ${initialNick}، میں پورے اپنا پن اور خلوص کے ساتھ آپ کے ساتھ ہوں۔`;
     audioService.speakText(samplePreview, {
       language,
-      rate: config.voiceSpeed,
+      pitch: safeVoicePitch,
+      rate: safeVoiceSpeed,
       voiceName: vName,
       loveMode: config.loveMode,
       romanceIntensity: config.romanceIntensity || 'passionate',
       emotionMode: config.emotionMode || 'apnapan',
       onEnd: () => setIsTestingVoice(false),
     });
+  };
+
+  const handleToggleMicAndSttTest = async () => {
+    audioService.unlock();
+    if (isTestingMicStt) {
+      const wav = micTestSessionRef.current?.finishAndGetWav();
+      micTestSessionRef.current = null;
+      setIsTestingMicStt(false);
+      setMicTestVol(0);
+      if (wav && wav.length >= 180) {
+        await verifyCapturedWavWithStt(wav);
+      } else {
+        setMicTestError('No speech captured. Please speak clearly into your microphone.');
+      }
+      return;
+    }
+
+    setMicTestError(null);
+    setMicTestResult(null);
+    audioService.stopAudio();
+    audioService.playChime('activate');
+
+    const session = new DirectMicSession();
+    micTestSessionRef.current = session;
+    setIsTestingMicStt(true);
+
+    const started = await session.start({
+      onVolume: (v) => setMicTestVol(v),
+      onAutoFinish: async (wav) => {
+        micTestSessionRef.current = null;
+        setIsTestingMicStt(false);
+        setMicTestVol(0);
+        await verifyCapturedWavWithStt(wav);
+      },
+      onError: (msg) => {
+        micTestSessionRef.current = null;
+        setIsTestingMicStt(false);
+        setMicTestVol(0);
+        setMicTestError(msg);
+      },
+    });
+
+    if (!started) {
+      micTestSessionRef.current = null;
+      setIsTestingMicStt(false);
+    } else {
+      queryMobilePermissions().then(setMobilePerms).catch(() => {});
+    }
+  };
+
+  const verifyCapturedWavWithStt = async (wavBase64: string) => {
+    setIsProcessingSttTest(true);
+    setMicTestError(null);
+    try {
+      const authHeaders = await getOwnerAuthHeaders();
+      const res = await fetchWithContainerWakeup(
+        '/api/voice-chat',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders,
+            ...getTierRequestHeaders(),
+          },
+          body: JSON.stringify({
+            audioBase64: wavBase64,
+            mimeType: 'audio/wav',
+            history: [],
+            language,
+            assistantId: config.activeAssistantId || 'zara',
+            preferredReplyLanguage: config.preferredReplyLanguage || '',
+            loveMode: false,
+            affectionLevel: config.affectionLevel,
+            obedienceLevel: config.obedienceLevel,
+            romanceIntensity: config.romanceIntensity || 'passionate',
+            emotionMode: config.emotionMode || 'apnapan',
+            userNickname: config.userNickname || 'Friend',
+            voiceName: config.voiceName || 'Zephyr',
+            ttsEngine: config.ttsEngine || 'hunter_tts_ultra_premium',
+          }),
+        },
+        { maxWakeRetries: 1 }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMicTestError(data?.error || 'Speech recognition server check failed.');
+        return;
+      }
+      const heard = String(data?.userTranscription || data?.transcript || '').trim();
+      const reply = String(data?.zaraReply || data?.reply || '').trim();
+      if (heard && !data?.silence) {
+        setMicTestResult(`Heard: "${heard}"${reply ? ` · Reply: "${reply.slice(0, 60)}"` : ' · Reply OK'}`);
+        setAppToast('Microphone & Speech Recognition verified ✓');
+      } else if (data?.sttUnavailable) {
+        setMicTestError(data?.error || 'Speech recognition service is temporarily busy. Please retry.');
+      } else {
+        setMicTestError(
+          data?.message ||
+            'Microphone recorded audio, but no clear words were recognized. Speak a short sentence closer to the mic.'
+        );
+      }
+    } catch (err: any) {
+      setMicTestError(err?.message || 'Unable to reach speech recognition service.');
+    } finally {
+      setIsProcessingSttTest(false);
+    }
+  };
+
+  const handleRequestSinglePermission = async (
+    permType: 'microphone' | 'camera' | 'notifications' | 'geolocation' | 'storage'
+  ) => {
+    setPermBusyKey(permType);
+    audioService.unlock();
+    try {
+      if (permType === 'microphone') {
+        if (window.ZaraAndroidBridge?.requestAllAndroidPermissions) {
+          try {
+            window.ZaraAndroidBridge.requestAllAndroidPermissions();
+          } catch {}
+        }
+        const stream = await acquireMicrophoneStreamSafe();
+        stream.getTracks().forEach((t) => t.stop());
+        setAppToast('Microphone permission allowed ✓');
+      } else if (permType === 'camera') {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach((t) => t.stop());
+        setAppToast('Camera permission allowed ✓');
+      } else if (permType === 'notifications') {
+        if (typeof Notification === 'undefined') {
+          setAppToast('Browser notifications are not supported on this WebView.');
+        } else {
+          const perm = await Notification.requestPermission();
+          setAppToast(
+            perm === 'granted'
+              ? 'Notifications permission allowed ✓'
+              : 'Notifications blocked in browser/Android settings — tap Android App Info to allow.'
+          );
+        }
+      } else if (permType === 'geolocation') {
+        await new Promise<void>((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error('Location unavailable'));
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(
+            () => resolve(),
+            (err) => reject(err),
+            { timeout: 6000, maximumAge: 30000 }
+          );
+        });
+        setAppToast('GPS Location permission allowed ✓');
+      } else if (permType === 'storage') {
+        if (navigator.storage?.persist) {
+          const persisted = await navigator.storage.persist();
+          setAppToast(
+            persisted
+              ? 'Protected Storage Vault enabled ✓'
+              : 'Storage persistence requested (install PWA for permanent lock).'
+          );
+        }
+      }
+    } catch (err: any) {
+      const msg = err?.message || '';
+      setAppToast(
+        `${permType.charAt(0).toUpperCase() + permType.slice(1)} blocked (${msg || 'Allow in Chrome / Android App Permissions'}).`
+      );
+    } finally {
+      const updated = await queryMobilePermissions().catch(() => null);
+      if (updated) {
+        setMobilePerms(updated);
+        if (updated.microphone === 'granted' && updated.camera === 'granted') {
+          onUpdateSecurity({ allPermissionsGranted: true });
+        }
+      }
+      setNativeAuto(getNativeAndroidAutomationStatus());
+      setPermBusyKey(null);
+    }
+  };
+
+  const handleGrantAllPermissionsInSettings = async () => {
+    setPermBusyKey('all');
+    audioService.unlock();
+    audioService.playChime('activate');
+    try {
+      const res = await requestAllPermissionsMaster();
+      const updated = await queryMobilePermissions().catch(() => null);
+      if (updated) setMobilePerms(updated);
+      setNativeAuto(getNativeAndroidAutomationStatus());
+      const grantedCount = [
+        res.micGranted,
+        res.cameraGranted,
+        res.notifGranted,
+        res.geoGranted,
+        res.storagePersisted,
+      ].filter(Boolean).length;
+      if (res.micGranted) {
+        onUpdateSecurity({ allPermissionsGranted: true, voiceControlEnabled: true });
+      }
+      setAppToast(
+        grantedCount > 0
+          ? `Permissions updated (${grantedCount}/5 active). Check any blocked items below.`
+          : 'Tap Chrome Permissions or Android App Info below to allow blocked permissions.'
+      );
+    } finally {
+      setPermBusyKey(null);
+    }
   };
 
   const handleCreateSchedule = (e: React.FormEvent) => {
@@ -859,7 +1211,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
     const spokenTime = format24To12Hour(schedTime);
     audioService.speakText(
-      `جی! میں نے ${spokenTime} کا الارم سیٹ کر دیا ہے — جب وقت ہو گا تو میں خود آواز دے کر بتاؤں گی کہ ${finalLabel}!`,
+      pickSettingsSpeech(language, {
+        english: `Alarm set for ${spokenTime} for ${finalLabel}.`,
+        hindi: `जी! मैंने ${spokenTime} का अलार्म सेट कर दिया है, समय होने पर मैं खुद याद दिलाऊँगी: ${finalLabel}.`,
+        punjabi: `جی! میں ${spokenTime} دا الارم لا دتا اے، وقت ہوندے ای میں یاد کراواں گی: ${finalLabel}.`,
+        urdu: `جی! میں نے ${spokenTime} کا الارم سیٹ کر دیا ہے — وقت ہوتے ہی میں یاد دلاؤں گی: ${finalLabel}!`,
+      }),
       {
         language,
         rate: config.voiceSpeed,
@@ -939,8 +1296,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const systemSettingsQuickList = allApps.filter((a) => a.category === 'mobile_settings');
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in">
       <div className="w-full max-w-md bg-gradient-to-b from-[#150a2e] via-[#0c061d] to-[#070312] border border-pink-500/40 rounded-3xl p-4 sm:p-5 shadow-[0_0_45px_rgba(236,72,153,0.3)] max-h-[93vh] flex flex-col overflow-hidden">
@@ -998,7 +1353,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 setTab(t.id as SettingsTabId);
               }}
               className={`min-h-[34px] py-1 px-1 rounded-lg text-[10px] sm:text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
-                tab === t.id
+                activeTab === t.id
                   ? 'bg-pink-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white'
               }`}
@@ -1016,8 +1371,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* ================= TAB 0: MASTER FUNCTIONS ON, UI DESIGN STUDIO, VOICE & CONTROLS ================= */}
-          {tab === 'controls' && (
+          {/* ================= TAB 0: MASTER FUNCTIONS ON, LANGUAGE, VOICE, MIC/STT, NOTIFICATIONS & PERMISSIONS ================= */}
+          {activeTab === 'controls' && (
             <div className="space-y-3">
               {/* 0. MASTER "TURN ALL ZARA FUNCTIONS ON" BUTTON */}
               <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-slate-900 to-cyan-950/70 border border-emerald-400/55 space-y-2.5">
@@ -1065,6 +1420,817 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="px-2 py-1 rounded-lg bg-slate-950/80 border border-white/10 truncate">
                     Updates: {config.autoSelfCheckEnabled !== false ? 'ON' : 'OFF'}
                   </div>
+                </div>
+              </div>
+
+              {/* 1. LANGUAGE SELECTION (English, Urdu, Punjabi, Hindi + Auto & World Languages) */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-sky-500/40 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-sky-300 flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span>Language Selection</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-cyan-200 uppercase tracking-wide">
+                    Active: {language}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      { id: 'english', title: 'English', sub: 'Natural English' },
+                      { id: 'urdu', title: 'Urdu (اردو)', sub: 'پاکستانی اردو' },
+                      { id: 'roman_urdu', title: 'Roman Urdu (Style)', sub: 'Roman Script · رومن سٹائل' },
+                      { id: 'punjabi', title: 'Punjabi (ਪੰਜਾਬੀ)', sub: 'پنجابی / ਗੁਰਮੁਖੀ' },
+                      { id: 'hindi', title: 'Hindi (हिंदी)', sub: 'हिन्दी भाषा' },
+                      { id: 'auto', title: 'Auto-Match', sub: 'Smart Language Detect' },
+                    ] as Array<{ id: Language; title: string; sub: string }>
+                  ).map((item) => {
+                    const selected = language === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          audioService.playChime('tap');
+                          onSelectLanguage(item.id);
+                          setAppToast(`Language switched to ${item.title} ✓`);
+                        }}
+                        className={`min-h-[46px] px-3 py-2 rounded-xl border text-left transition-colors cursor-pointer ${
+                          selected
+                            ? 'bg-sky-500 border-sky-300 text-slate-950'
+                            : 'bg-slate-950 border-white/10 text-slate-200 hover:border-sky-400/50'
+                        }`}
+                      >
+                        <div className="text-xs font-extrabold flex items-center justify-between gap-1">
+                          <span className="truncate">{item.title}</span>
+                          {selected && <Check className="w-3.5 h-3.5 shrink-0" />}
+                        </div>
+                        <div
+                          className={`text-[10px] truncate ${
+                            selected ? 'text-slate-900 font-semibold' : 'text-slate-400'
+                          }`}
+                        >
+                          {item.sub}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: 'arabic', label: 'العربية' },
+                      { id: 'malay', label: 'Melayu' },
+                      { id: 'uzbek', label: "O'zbek" },
+                    ] as Array<{ id: Language; label: string }>
+                  ).map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      onClick={() => {
+                        audioService.playChime('tap');
+                        onSelectLanguage(l.id);
+                        setAppToast(`Language switched to ${l.label} ✓`);
+                      }}
+                      className={`min-h-[34px] rounded-xl text-[11px] font-bold border cursor-pointer ${
+                        language === l.id
+                          ? 'bg-sky-500 text-slate-950 border-sky-400'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. FEMALE VOICE SETTINGS & TEXT-TO-SPEECH (TTS) */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-pink-500/40 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-pink-300 flex items-center gap-1.5">
+                    <Volume2 className="w-4 h-4 text-pink-400 shrink-0" />
+                    <span>Female Voice &amp; Text-to-Speech (TTS)</span>
+                  </span>
+                  <div className="flex gap-1">
+                    {(['female', 'male'] as ZaraVoiceGender[]).map((g) => {
+                      const active =
+                        (config.voiceGender || getVoiceGenderFromName(config.voiceName)) === g;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => {
+                            const match = ZARA_VOICE_PROFILES.find((p) => p.gender === g);
+                            if (match) handleSelectNeuralVoice(match.id);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border cursor-pointer capitalize ${
+                            active
+                              ? 'bg-pink-500 text-white border-pink-300'
+                              : 'bg-slate-950 border-white/10 text-slate-300'
+                          }`}
+                        >
+                          {g}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Female / Male Voice Cards */}
+                <div className="space-y-1.5">
+                  {ZARA_VOICE_PROFILES.filter(
+                    (p) =>
+                      p.gender ===
+                      (config.voiceGender || getVoiceGenderFromName(config.voiceName))
+                  ).map((v) => {
+                    const selected = config.voiceName === v.id;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => handleSelectNeuralVoice(v.id)}
+                        className={`w-full min-h-[44px] px-3 py-2 rounded-xl border text-left flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                          selected
+                            ? 'bg-pink-600/25 border-pink-400 text-white'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-pink-400/40'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold truncate">{v.label}</div>
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {v.style} · {v.urduLabel}
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold shrink-0 ${
+                            selected
+                              ? 'bg-pink-500 text-white'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {selected ? (isTestingVoice ? 'Speaking...' : 'Selected ✓') : 'Select'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Text-to-Speech Auto-Speak Toggle & Test Button */}
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioService.unlock();
+                      const next = !config.autoSpeak;
+                      onUpdateConfig({ autoSpeak: next });
+                      setAppToast(
+                        next
+                          ? 'Text-to-Speech Auto-Speak turned ON ✓'
+                          : 'Text-to-Speech Auto-Speak paused (Silent Text Mode)'
+                      );
+                    }}
+                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between gap-1.5 cursor-pointer ${
+                      config.autoSpeak !== false
+                        ? 'bg-emerald-950/80 border-emerald-400/60 text-emerald-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      {config.autoSpeak !== false ? (
+                        <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      ) : (
+                        <VolumeX className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      )}
+                      <span className="truncate">Auto-Speak (TTS)</span>
+                    </span>
+                    <span>{config.autoSpeak !== false ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isTestingVoice) {
+                        audioService.stopAudio(true);
+                        setIsTestingVoice(false);
+                        return;
+                      }
+                      handleSelectNeuralVoice((config.voiceName as ZaraVoiceName) || 'Zephyr');
+                    }}
+                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isTestingVoice ? (
+                      <>
+                        <Square className="w-3.5 h-3.5 shrink-0" />
+                        <span>Stop Voice Test</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 shrink-0" />
+                        <span>Test Female Voice</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Speed & Pitch Sliders */}
+                <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-white/10">
+                  <div>
+                    <div className="flex justify-between text-[10px] font-semibold text-slate-300 mb-1">
+                      <span className="flex items-center gap-1">
+                        <Sliders className="w-3 h-3 text-pink-400" />
+                        <span>Voice Speed</span>
+                      </span>
+                      <span className="font-mono text-pink-300">{safeVoiceSpeed.toFixed(2)}x</span>
+                    </div>
+                    <input
+                      aria-label="Voice Speed"
+                      type="range"
+                      min="0.75"
+                      max="1.25"
+                      step="0.05"
+                      value={safeVoiceSpeed}
+                      onChange={(e) => onUpdateConfig({ voiceSpeed: Number(e.target.value) })}
+                      className="w-full accent-pink-500 cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-[10px] font-semibold text-slate-300 mb-1">
+                      <span>Voice Pitch</span>
+                      <span className="font-mono text-cyan-300">{safeVoicePitch.toFixed(2)}</span>
+                    </div>
+                    <input
+                      aria-label="Voice Pitch"
+                      type="range"
+                      min="0.85"
+                      max="1.25"
+                      step="0.05"
+                      value={safeVoicePitch}
+                      onChange={(e) => onUpdateConfig({ voicePitch: Number(e.target.value) })}
+                      className="w-full accent-cyan-400 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* TTS Engine & AI Brain Selector */}
+                <div className="pt-1.5 border-t border-white/10 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-extrabold text-emerald-300">
+                      AI Brain &amp; Text-to-Speech Engine
+                    </span>
+                    {onOpenAiStudio && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenAiStudio('brains');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/45 text-[10px] font-bold text-sky-200 cursor-pointer"
+                      >
+                        Test All 11 Systems →
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    <select
+                      aria-label="Primary AI Brain"
+                      value={config.brainMode || 'auto'}
+                      onChange={(e) => {
+                        const mode = e.target.value as AiBrainEngineId;
+                        onUpdateConfig({ brainMode: mode });
+                        updateAiOrchestratorConfig({ primaryBrainMode: mode }).catch(() => {});
+                      }}
+                      className="min-h-[36px] px-2.5 rounded-xl bg-slate-950 border border-slate-700 text-[11px] font-semibold text-white"
+                    >
+                      {BRAIN_ENGINE_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          Brain: {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      aria-label="Hunter Voice TTS Engine"
+                      value={config.ttsEngine || 'hunter_tts_ultra_premium'}
+                      onChange={(e) => {
+                        const tts = e.target.value as TtsEngineId;
+                        onUpdateConfig({ ttsEngine: tts });
+                        audioService.setPreferredTtsEngine(tts);
+                        updateAiOrchestratorConfig({ ttsEngine: tts }).catch(() => {});
+                        setAppToast('Text-to-Speech engine updated ✓');
+                      }}
+                      className="min-h-[36px] px-2.5 rounded-xl bg-slate-950 border border-slate-700 text-[11px] font-semibold text-white"
+                    >
+                      {TTS_ENGINE_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          TTS: {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. MICROPHONE & SPEECH RECOGNITION (STT) SETTINGS */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-cyan-500/40 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-cyan-300 flex items-center gap-1.5">
+                    <Mic className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span>Microphone &amp; Speech Recognition (STT)</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-300">
+                    Hunter STT Beta ·{' '}
+                    {mobilePerms?.microphone === 'granted' ? 'Mic Granted ✓' : 'Check Mic'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !securityConfig.voiceControlEnabled;
+                      onUpdateSecurity({ voiceControlEnabled: next });
+                      setAppToast(
+                        next
+                          ? 'Microphone Voice Control enabled ✓'
+                          : 'Microphone Voice Control paused'
+                      );
+                    }}
+                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      securityConfig.voiceControlEnabled
+                        ? 'bg-emerald-950/80 border-emerald-400/60 text-emerald-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      {securityConfig.voiceControlEnabled ? (
+                        <Mic className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      ) : (
+                        <MicOff className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      )}
+                      <span className="truncate">Mic Input</span>
+                    </span>
+                    <span>{securityConfig.voiceControlEnabled ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextGate = !securityConfig.wakeWordOnlyMode;
+                      onUpdateSecurity({ wakeWordOnlyMode: nextGate });
+                      setAppToast(
+                        nextGate
+                          ? `Speech Recognition set to Wake-Word Gate ("${securityConfig.customWakeWord || 'hey zara'}")`
+                          : 'Speech Recognition set to Continuous Hands-Free ✓'
+                      );
+                    }}
+                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      !securityConfig.wakeWordOnlyMode
+                        ? 'bg-cyan-950/80 border-cyan-400/60 text-cyan-100'
+                        : 'bg-indigo-950/80 border-indigo-400/60 text-indigo-100'
+                    }`}
+                  >
+                    <span className="truncate">STT Mode</span>
+                    <span>{securityConfig.wakeWordOnlyMode ? 'WAKE GATE' : 'CONTINUOUS'}</span>
+                  </button>
+                </div>
+
+                {/* Live Microphone & Speech Recognition Test */}
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold text-white">
+                        Live Mic &amp; Speech Recognition Test
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Press Test, speak a sentence, then press Stop (or pause) to verify STT.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isProcessingSttTest}
+                      onClick={handleToggleMicAndSttTest}
+                      className={`min-h-[36px] px-3 py-1.5 rounded-xl text-[11px] font-extrabold shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                        isTestingMicStt
+                          ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                          : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                      }`}
+                    >
+                      {isTestingMicStt ? (
+                        <>
+                          <Square className="w-3 h-3 shrink-0" />
+                          <span>Stop &amp; Transcribe</span>
+                        </>
+                      ) : isProcessingSttTest ? (
+                        <span>Transcribing...</span>
+                      ) : (
+                        <>
+                          <Mic className="w-3.5 h-3.5 shrink-0" />
+                          <span>Test Mic + STT</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {isTestingMicStt && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[10px] text-cyan-300 font-semibold">
+                        <span>Listening live audio level...</span>
+                        <span>{micTestVol}%</span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all duration-75"
+                          style={{ width: `${Math.min(100, Math.max(4, micTestVol))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {micTestResult && (
+                    <div className="px-2.5 py-1.5 rounded-lg bg-emerald-950/75 border border-emerald-500/40 text-[11px] text-emerald-200 font-semibold">
+                      {micTestResult}
+                    </div>
+                  )}
+                  {micTestError && (
+                    <div className="px-2.5 py-1.5 rounded-lg bg-rose-950/75 border border-rose-500/40 text-[11px] text-rose-200 font-semibold">
+                      {micTestError}
+                    </div>
+                  )}
+
+                  {onToggleDirectMic && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onToggleDirectMic();
+                      }}
+                      className="w-full min-h-[34px] px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-cyan-500/35 text-[11px] font-bold text-cyan-200 cursor-pointer"
+                    >
+                      {isDirectMicActive
+                        ? 'Direct Home Mic Active · Tap to Stop'
+                        : 'Start Single-Turn Voice Command on Home Screen'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 4. BACKGROUND VOICE LISTENING & WAKE-WORD */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-emerald-500/40 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
+                    <Power className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Background Voice Listening</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-300">
+                    {alwaysOnVoiceEnabled
+                      ? isAlwaysOnRunning
+                        ? 'Listening Live'
+                        : 'Armed'
+                      : 'Stopped'}
+                  </span>
+                </div>
+
+                {onToggleAlwaysOnVoice && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioService.unlock();
+                      onToggleAlwaysOnVoice();
+                    }}
+                    className={`w-full min-h-[42px] px-3 py-2 rounded-xl border flex items-center justify-between text-xs font-bold cursor-pointer ${
+                      alwaysOnVoiceEnabled
+                        ? 'bg-emerald-950/90 border-emerald-400/70 text-emerald-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Power className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Continuous Background &amp; Screen-Off Voice</span>
+                    </span>
+                    <span>
+                      {alwaysOnVoiceEnabled
+                        ? isAlwaysOnRunning
+                          ? 'ON · Listening'
+                          : 'ON · Ready'
+                        : 'OFF'}
+                    </span>
+                  </button>
+                )}
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !(securityConfig.lowPowerWakeWordEnabled ?? true);
+                      const phrase = wakePhraseDraft.trim().toLowerCase() || 'hey zara';
+                      onUpdateSecurity({
+                        lowPowerWakeWordEnabled: next,
+                        customWakeWord: phrase,
+                      });
+                      onUpdateConfig({ wakeWordEnabled: next });
+                      setNativeLowPowerWakeWord(next, phrase);
+                      setAppToast(
+                        next
+                          ? `Wake-Word "${phrase}" enabled ✓`
+                          : 'Wake-Word paused'
+                      );
+                    }}
+                    className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      securityConfig.lowPowerWakeWordEnabled ?? true
+                        ? 'bg-indigo-950/80 border-indigo-400/60 text-indigo-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span>Wake-Word Listener</span>
+                    <span>{securityConfig.lowPowerWakeWordEnabled ?? true ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppToast(openAndroidSystemPermissionScreen('battery_unrestricted'));
+                    }}
+                    className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/40 text-amber-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <BatteryCharging className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>Android Battery Unrestricted</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    aria-label="Wake-Word Phrase"
+                    value={wakePhraseDraft}
+                    onChange={(e) => setWakePhraseDraft(e.target.value)}
+                    placeholder="Wake phrase (e.g. hey zara)"
+                    className="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-slate-950 border border-white/15 text-xs text-white focus:outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = wakePhraseDraft.trim().toLowerCase() || 'hey zara';
+                      setWakePhraseDraft(clean);
+                      onUpdateSecurity({ customWakeWord: clean, lowPowerWakeWordEnabled: true });
+                      onUpdateConfig({ wakeWordEnabled: true });
+                      setNativeLowPowerWakeWord(true, clean);
+                      setAppToast(`Wake-Word saved: "${clean}" ✓`);
+                    }}
+                    className="min-h-[34px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer shrink-0"
+                  >
+                    Save Phrase
+                  </button>
+                </div>
+              </div>
+
+              {/* 5. NOTIFICATIONS SETTINGS */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-violet-500/40 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-violet-300 flex items-center gap-1.5">
+                    <Bell className="w-4 h-4 text-violet-400 shrink-0" />
+                    <span>Notifications Settings</span>
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-300">
+                    Alerts: {spokenNotifConfig?.enabled ?? spokenAlertsEnabled ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !(spokenNotifConfig?.enabled ?? spokenAlertsEnabled);
+                      onUpdateSpokenNotifConfig?.({ enabled: next });
+                      setAppToast(
+                        next ? 'Spoken Notifications ON ✓' : 'Spoken Notifications OFF'
+                      );
+                    }}
+                    className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      spokenNotifConfig?.enabled ?? spokenAlertsEnabled
+                        ? 'bg-violet-950/85 border-violet-400/60 text-violet-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span>Spoken Alerts</span>
+                    <span>{spokenNotifConfig?.enabled ?? spokenAlertsEnabled ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !(spokenNotifConfig?.announceCalls ?? true);
+                      onUpdateSpokenNotifConfig?.({ announceCalls: next });
+                      setAppToast(
+                        next ? 'Incoming Call Alerts ON ✓' : 'Incoming Call Alerts OFF'
+                      );
+                    }}
+                    className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      spokenNotifConfig?.announceCalls ?? true
+                        ? 'bg-emerald-950/80 border-emerald-400/50 text-emerald-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span>Incoming Calls</span>
+                    <span>{spokenNotifConfig?.announceCalls ?? true ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !(spokenNotifConfig?.announceMessages ?? true);
+                      onUpdateSpokenNotifConfig?.({ announceMessages: next });
+                      setAppToast(
+                        next
+                          ? 'WhatsApp & SMS Alerts ON ✓'
+                          : 'WhatsApp & SMS Alerts OFF'
+                      );
+                    }}
+                    className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      spokenNotifConfig?.announceMessages ?? true
+                        ? 'bg-emerald-950/80 border-emerald-400/50 text-emerald-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span>Messages / WA</span>
+                    <span>{spokenNotifConfig?.announceMessages ?? true ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !(spokenNotifConfig?.maskSensitiveCodes ?? true);
+                      onUpdateSpokenNotifConfig?.({ maskSensitiveCodes: next });
+                      setAppToast(
+                        next ? 'OTP & Bank Code Masking ON ✓' : 'OTP Masking OFF'
+                      );
+                    }}
+                    className={`min-h-[38px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center justify-between cursor-pointer ${
+                      spokenNotifConfig?.maskSensitiveCodes ?? true
+                        ? 'bg-cyan-950/80 border-cyan-400/50 text-cyan-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span>Mask OTP Codes</span>
+                    <span>{spokenNotifConfig?.maskSensitiveCodes ?? true ? 'SAFE' : 'OFF'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={permBusyKey === 'notifications'}
+                    onClick={() => handleRequestSinglePermission('notifications')}
+                    className="min-h-[36px] px-2 py-1 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-extrabold cursor-pointer"
+                  >
+                    {mobilePerms?.notifications === 'granted' ? 'Notif Allowed ✓' : 'Allow Alerts'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioService.unlock();
+                      onTestSpokenNotification?.();
+                    }}
+                    className="min-h-[36px] px-2 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 border border-violet-400/40 text-violet-200 text-[10px] font-bold cursor-pointer"
+                  >
+                    Test Spoken Alert
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppToast(openAndroidSystemPermissionScreen('notification_listener'));
+                    }}
+                    className="min-h-[36px] px-2 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-400/40 text-amber-200 text-[10px] font-bold cursor-pointer"
+                  >
+                    Android Listener
+                  </button>
+                </div>
+              </div>
+
+              {/* 6. APP PERMISSIONS (Live Status & Direct Grant Controls) */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-amber-500/40 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-amber-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>App Permissions</span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={permBusyKey === 'all'}
+                    onClick={handleGrantAllPermissionsInSettings}
+                    className="min-h-[30px] px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[10px] font-extrabold cursor-pointer"
+                  >
+                    {permBusyKey === 'all' ? 'Requesting...' : 'Allow All 1-Tap'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    {
+                      key: 'microphone' as const,
+                      label: 'Microphone',
+                      status: mobilePerms?.microphone || 'prompt',
+                      icon: <Mic className="w-3.5 h-3.5 text-cyan-400 shrink-0" />,
+                    },
+                    {
+                      key: 'camera' as const,
+                      label: 'Camera',
+                      status: mobilePerms?.camera || 'prompt',
+                      icon: <Camera className="w-3.5 h-3.5 text-sky-400 shrink-0" />,
+                    },
+                    {
+                      key: 'notifications' as const,
+                      label: 'Notifications',
+                      status: mobilePerms?.notifications || 'prompt',
+                      icon: <Bell className="w-3.5 h-3.5 text-violet-400 shrink-0" />,
+                    },
+                    {
+                      key: 'geolocation' as const,
+                      label: 'GPS Location',
+                      status: mobilePerms?.geolocation || 'prompt',
+                      icon: <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />,
+                    },
+                    {
+                      key: 'storage' as const,
+                      label: 'Storage Vault',
+                      status: mobilePerms?.persistentStorage || 'prompt',
+                      icon: <HardDrive className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
+                    },
+                  ].map((item) => {
+                    const granted = item.status === 'granted';
+                    const denied = item.status === 'denied';
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        disabled={permBusyKey === item.key}
+                        onClick={() => handleRequestSinglePermission(item.key)}
+                        className={`min-h-[42px] px-2.5 py-1.5 rounded-xl border text-left flex items-center justify-between gap-1.5 cursor-pointer ${
+                          granted
+                            ? 'bg-emerald-950/75 border-emerald-400/50 text-emerald-100'
+                            : denied
+                            ? 'bg-rose-950/75 border-rose-400/50 text-rose-100'
+                            : 'bg-slate-950 border-white/10 text-slate-200 hover:border-amber-400/50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {item.icon}
+                          <span className="text-[11px] font-bold truncate">{item.label}</span>
+                        </span>
+                        <span className="text-[10px] font-extrabold shrink-0">
+                          {permBusyKey === item.key
+                            ? '...'
+                            : granted
+                            ? 'ALLOWED'
+                            : denied
+                            ? 'BLOCKED'
+                            : 'ALLOW'}
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={() => setTab('security')}
+                    className={`min-h-[42px] px-2.5 py-1.5 rounded-xl border text-left flex items-center justify-between gap-1.5 cursor-pointer ${
+                      bioHardwareSupported
+                        ? 'bg-emerald-950/65 border-emerald-400/40 text-emerald-100'
+                        : 'bg-slate-950 border-white/10 text-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <Fingerprint className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                      <span className="text-[11px] font-bold truncate">Biometrics</span>
+                    </span>
+                    <span className="text-[10px] font-extrabold shrink-0">
+                      {bioHardwareSupported ? 'READY' : 'SETUP'}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setAppToast(openAndroidSystemPermissionScreen('chrome_app_permissions'))}
+                    className="min-h-[34px] px-2 py-1 rounded-xl bg-slate-950 border border-white/10 text-[10px] font-bold text-slate-200 hover:border-amber-400/50 cursor-pointer"
+                  >
+                    Chrome Perms
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAppToast(openAndroidSystemPermissionScreen('accessibility'))}
+                    className="min-h-[34px] px-2 py-1 rounded-xl bg-slate-950 border border-cyan-500/35 text-[10px] font-bold text-cyan-200 cursor-pointer"
+                  >
+                    Accessibility
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAppToast(openAndroidSystemPermissionScreen('zara_app_info'))}
+                    className="min-h-[34px] px-2 py-1 rounded-xl bg-slate-950 border border-amber-500/35 text-[10px] font-bold text-amber-200 cursor-pointer"
+                  >
+                    Android App Info
+                  </button>
                 </div>
               </div>
 
@@ -1146,7 +2312,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* 1. Full Authority Status & Optional Cloud Vault Sync */}
+              {/* Full Authority Status & Optional Cloud Vault Sync */}
               <div
                 className={`p-3 rounded-2xl border space-y-2 ${
                   ownerAuth.isOwnerVerified
@@ -1194,263 +2360,125 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
 
-              {/* Public Voice Gender, 6 Pakistani Voices & 4 Languages + AI Creative Studio */}
-              <div className="p-3 rounded-2xl bg-slate-900/90 border border-sky-500/30 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-extrabold text-sky-300">
-                    Pakistani Voices (Female &amp; Male) &amp; 4 Languages
-                  </span>
-                  <div className="flex gap-1">
-                    {(['female', 'male'] as ZaraVoiceGender[]).map((g) => {
-                      const active =
-                        (config.voiceGender || getVoiceGenderFromName(config.voiceName)) === g;
-                      return (
-                        <button
-                          key={g}
-                          type="button"
-                          onClick={() => {
-                            const match = ZARA_VOICE_PROFILES.find((p) => p.gender === g);
-                            if (match) handleSelectNeuralVoice(match.id);
-                          }}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border cursor-pointer capitalize ${
-                            active
-                              ? 'bg-sky-500 text-slate-950 border-sky-400'
-                              : 'bg-slate-950 border-white/10 text-slate-300'
-                          }`}
-                        >
-                          {g}
-                        </button>
-                      );
-                    })}
+              {/* AI Creative Studio Shortcuts */}
+              {onOpenAiStudio && (
+                <div className="p-3 rounded-2xl bg-slate-900/90 border border-sky-500/30 space-y-2">
+                  <div className="text-xs font-extrabold text-sky-300">
+                    AI Studios &amp; Advanced Hubs
                   </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-1.5">
-                  {ZARA_VOICE_PROFILES.filter(
-                    (p) =>
-                      p.gender ===
-                      (config.voiceGender || getVoiceGenderFromName(config.voiceName))
-                  ).map((v) => (
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      key={v.id}
                       type="button"
-                      onClick={() => handleSelectNeuralVoice(v.id)}
-                      className={`min-h-[40px] p-1.5 rounded-xl border text-center cursor-pointer ${
-                        config.voiceName === v.id
-                          ? 'bg-sky-600/35 border-sky-400 text-white'
-                          : 'bg-slate-950 border-slate-800 text-slate-300'
-                      }`}
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('research');
+                      }}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-400/45 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      <div className="text-[11px] font-bold truncate">
-                        {v.label.split(' · ')[0]}
-                      </div>
+                      <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>Live Web &amp; Assistants</span>
                     </button>
-                  ))}
-                </div>
 
-                <div className="grid grid-cols-4 gap-1">
-                  {(
-                    [
-                      { id: 'auto', label: 'Auto' },
-                      { id: 'uzbek', label: "O'zbek" },
-                      { id: 'malay', label: 'Melayu' },
-                      { id: 'arabic', label: 'العربية' },
-                      { id: 'urdu', label: 'اردو' },
-                      { id: 'hindi', label: 'हिंदी' },
-                      { id: 'punjabi', label: 'ਪੰਜਾਬੀ' },
-                      { id: 'english', label: 'EN' },
-                    ] as Array<{ id: Language; label: string }>
-                  ).map((l) => (
                     <button
-                      key={l.id}
                       type="button"
-                      onClick={() => onSelectLanguage(l.id)}
-                      className={`min-h-[34px] rounded-lg text-[11px] font-bold border cursor-pointer ${
-                        language === l.id
-                          ? 'bg-sky-500 text-slate-950 border-sky-400'
-                          : 'bg-slate-950 border-slate-800 text-slate-300'
-                      }`}
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('social');
+                      }}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-pink-400/40 text-pink-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      {l.label}
+                      <Share2 className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                      <span>Social Media Hub</span>
                     </button>
-                  ))}
-                </div>
 
-                {onOpenAiStudio && (
-                  <div className="space-y-1.5 pt-1">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('research');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-400/45 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        <span>Live Web &amp; Assistants</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('social');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-pink-400/40 text-pink-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Share2 className="w-3.5 h-3.5 text-pink-400 shrink-0" />
-                        <span>Social Media Hub</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('devlab');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-400/40 text-emerald-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Code2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Flutter &amp; Code Lab</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('audit');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-400/40 text-amber-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>Self-Audit &amp; Health</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('office');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-500/35 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Briefcase className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        <span>Office Work</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('pctools');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-sky-500/35 text-sky-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Code2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                        <span>PC &amp; Dev Tools</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('security');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/35 text-emerald-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>Security Lab</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('photo');
-                        }}
-                        className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-violet-500/35 text-violet-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <ImageIcon className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                        <span>Photo &amp; Video Studio</span>
-                      </button>
-                    </div>
-
-                    {onOpenMobilePermissions && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenMobilePermissions();
-                        }}
-                        className="w-full min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/35 text-amber-100 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>Permissions (Mic · Camera · GPS · Accessibility · Wake Word)</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Compact AI Brain & Hunter Voice Selector */}
-                <div className="pt-2 border-t border-white/10 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-extrabold text-emerald-300">
-                      AI Brain &amp; Hunter Voice Stack
-                    </span>
-                    {onOpenAiStudio && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('brains');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/45 text-[10px] font-bold text-sky-200 cursor-pointer"
-                      >
-                        Test All 11 Systems →
-                      </button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    <select
-                      aria-label="Primary AI Brain"
-                      value={config.brainMode || 'auto'}
-                      onChange={(e) => {
-                        const mode = e.target.value as AiBrainEngineId;
-                        onUpdateConfig({ brainMode: mode });
-                        updateAiOrchestratorConfig({ primaryBrainMode: mode }).catch(() => {});
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('devlab');
                       }}
-                      className="min-h-[36px] px-2.5 rounded-xl bg-slate-950 border border-slate-700 text-[11px] font-semibold text-white"
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-400/40 text-emerald-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      {BRAIN_ENGINE_OPTIONS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          Brain: {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      aria-label="Hunter Voice TTS Engine"
-                      value={config.ttsEngine || 'hunter_tts_ultra_premium'}
-                      onChange={(e) => {
-                        const tts = e.target.value as TtsEngineId;
-                        onUpdateConfig({ ttsEngine: tts });
-                        audioService.setPreferredTtsEngine(tts);
-                        updateAiOrchestratorConfig({ ttsEngine: tts }).catch(() => {});
+                      <Code2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Flutter &amp; Code Lab</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('audit');
                       }}
-                      className="min-h-[36px] px-2.5 rounded-xl bg-slate-950 border border-slate-700 text-[11px] font-semibold text-white"
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-400/40 text-amber-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      {TTS_ENGINE_OPTIONS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>
-                          Voice: {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                      <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Self-Audit &amp; Health</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('office');
+                      }}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-500/35 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Briefcase className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>Office Work</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('pctools');
+                      }}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-sky-500/35 text-sky-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Code2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span>PC &amp; Dev Tools</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('security');
+                      }}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/35 text-emerald-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Security Lab</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAiStudio('photo');
+                      }}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-violet-500/35 text-violet-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                      <span>Photo &amp; Video Studio</span>
+                    </button>
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    STT: Hunter STT Beta active · Auto-fallback enabled across Dimaag, Maya, Tez Dimaag, Swift, OpenAI &amp; Groq.
-                  </div>
+
+                  {onOpenMobilePermissions && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenMobilePermissions();
+                      }}
+                      className="w-full min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/35 text-amber-100 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Full Mobile Permissions &amp; WebAPK Guide</span>
+                    </button>
+                  )}
                 </div>
-              </div>
+              )}
 
               {/* 2. Quick Chat, Photo Send, Full Chat History, Copy & Replay (Moved from Bottom Bar!) */}
               <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/15 space-y-2">
@@ -1607,7 +2635,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       if (next) {
                         zaraVision.startCamera('user').catch(() => {});
                         setAppToast(
-                          'Ambient Auto-Vision ON — Zara can see you without starting a video call ✓'
+                          'Ambient Auto-Vision ON — Zara can see you when Camera is active ✓'
                         );
                       } else {
                         zaraVision.stop();
@@ -1625,6 +2653,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <span>Ambient Auto-Vision</span>
                     </span>
                     <span>{config.ambientVisionEnabled !== false ? 'ON' : 'OFF'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !config.backgroundCameraAwarenessEnabled;
+                      onUpdateConfig({ backgroundCameraAwarenessEnabled: next });
+                      setAppToast(
+                        next
+                          ? 'Background Camera Awareness Enabled (requires explicit permission & visible Cam ON indicator)'
+                          : 'Background Camera Awareness OFF (camera stops when minimized)'
+                      );
+                    }}
+                    className={`min-h-[42px] px-3 py-2 rounded-xl border flex items-center justify-between text-xs font-bold cursor-pointer ${
+                      config.backgroundCameraAwarenessEnabled
+                        ? 'bg-indigo-950/90 border-indigo-400/70 text-indigo-100'
+                        : 'bg-slate-950 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Camera className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span>Background Camera Awareness</span>
+                    </span>
+                    <span>{config.backgroundCameraAwarenessEnabled ? 'ON (Visible)' : 'OFF'}</span>
                   </button>
 
                   <button
@@ -1919,43 +2971,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* 5. Complete Mobile System Settings Direct Controller */}
-              <div className="p-3 rounded-2xl bg-slate-900/90 border border-emerald-500/35 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
-                    <Smartphone className="w-4 h-4" />
-                    <span>Complete Mobile System Settings Control</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenMobileControl();
-                    }}
-                    className="min-h-[30px] px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold cursor-pointer"
-                  >
-                    Full Hub
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-1.5">
-                  {systemSettingsQuickList.map((sysApp) => (
-                    <button
-                      key={sysApp.id}
-                      type="button"
-                      onClick={() => handleOpenAppFromSettings(sysApp)}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700/80 text-left flex items-center gap-2 cursor-pointer"
-                    >
-                      <span className="text-sm shrink-0">{sysApp.iconEmoji}</span>
-                      <span className="text-[11px] font-bold text-slate-100 truncate">
-                        {sysApp.name.replace(' Settings', '')}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 6. Android Lock-Screen, Background Voice & Battery Optimization Guide */}
+              {/* 5. Android Lock-Screen, Background Voice & Battery Optimization */}
               <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-950 border border-indigo-400/35 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-extrabold text-indigo-300 flex items-center gap-1.5">
@@ -2021,21 +3037,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>Notifications</span>
                   </button>
                 </div>
-
-                {/* Manufacturer Specific Quick Tips */}
-                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-white/10 space-y-1 text-[10px] text-slate-300 leading-normal">
-                  <p className="font-bold text-white text-[11px] mb-1">Manufacturer Quick Steps:</p>
-                  <p><strong className="text-indigo-200">Samsung OneUI:</strong> Settings → Apps → Zara / Chrome → Battery → Select &ldquo;Unrestricted&rdquo;.</p>
-                  <p><strong className="text-amber-200">Xiaomi / Redmi (MIUI):</strong> Settings → Apps → Zara → Autostart: ON → Battery saver: &ldquo;No restrictions&rdquo;.</p>
-                  <p><strong className="text-emerald-200">Oppo / Realme / Vivo:</strong> Settings → Battery → App battery management → Allow foreground &amp; background activity.</p>
-                  <p><strong className="text-cyan-200">Google Pixel / Motorola:</strong> Settings → Apps → Zara → App battery usage → Select &ldquo;Unrestricted&rdquo;.</p>
-                </div>
               </div>
             </div>
           )}
 
           {/* ================= TAB 1: WHATSAPP NUMBER TEXT/CALL, PLAY STORE & ALL APPS ================= */}
-          {tab === 'apps' && (
+          {activeTab === 'apps' && (
             <div className="space-y-3">
               {/* WhatsApp Open, Message (Any Chat / Contact / Number), Call, Back & Close */}
               <form
@@ -2357,7 +3364,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ================= TAB 2: MOBILE PERMISSIONS, BIOMETRICS, FACE LOCK & ANTI-THEFT SECURITY ================= */}
-          {tab === 'security' && (
+          {activeTab === 'security' && (
             <div className="space-y-3">
               {/* All Mobile Permissions Master Card + Live 6-Sensor Status Grid */}
               <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-emerald-500/50 space-y-2.5">
@@ -2525,16 +3532,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* Native Android Accessibility Service + Cross-App Hands-Free Control */}
+              {/* Native Android Accessibility Service + Notification Access + Cross-App Hands-Free Control */}
               <div className="p-3.5 rounded-2xl bg-[#071a1c] border border-cyan-500/45 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-xs font-extrabold text-white flex items-center gap-1.5">
                       <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
-                      <span>Native Android Accessibility Service</span>
+                      <span>
+                        Native Android Accessibility &amp; Screen Control
+                        {nativeAuto.deviceModel ? ` · ${nativeAuto.deviceModel}` : ''}
+                      </span>
                     </div>
                     <div className="text-[10px] text-cyan-200 mt-0.5">
-                      Hands-free navigation inside other apps (Back, Home, Recents, Scroll, Confirmed Send) — ignores passwords for privacy.
+                      Read screen, tap buttons, scroll, navigate apps &amp; read WhatsApp/SMS notifications — ignores passwords for privacy.
                     </div>
                   </div>
                   <span
@@ -2548,13 +3558,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-5 gap-1">
+                <div className="grid grid-cols-6 gap-1">
                   {(
                     [
                       { id: 'back', label: 'Back' },
                       { id: 'home', label: 'Home' },
                       { id: 'recents', label: 'Recents' },
                       { id: 'scroll_down', label: 'Scroll ↓' },
+                      { id: 'notifications', label: 'Notifs' },
                       { id: 'lock_screen', label: 'Lock' },
                     ] as const
                   ).map((act) => (
@@ -2569,22 +3580,77 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             : res.reason || 'Install Zara APK & turn on Accessibility Service.'
                         );
                       }}
-                      className="min-h-[32px] px-1.5 py-1 rounded-lg bg-slate-950 hover:bg-cyan-950 border border-cyan-500/35 text-[10px] font-bold text-cyan-200 cursor-pointer"
+                      className="min-h-[32px] px-1 py-1 rounded-lg bg-slate-950 hover:bg-cyan-950 border border-cyan-500/35 text-[10px] font-bold text-cyan-200 cursor-pointer"
                     >
                       {act.label}
                     </button>
                   ))}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAppToast(openAndroidSystemPermissionScreen('accessibility'));
-                  }}
-                  className="min-h-[36px] w-full py-1.5 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-extrabold cursor-pointer"
-                >
-                  Open Android Accessibility Settings (Zara AI Hands-Free Control)
-                </button>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const snap = readNativeAndroidScreen();
+                      setNativeAuto(getNativeAndroidAutomationStatus());
+                      if (snap.ok) {
+                        setAppToast(
+                          `Screen Read ✓ (${snap.packageName || 'Android'}): ${snap.screenSummary.slice(0, 90)}`
+                        );
+                      } else {
+                        setAppToast(snap.error || 'Enable Zara Accessibility in Android Settings.');
+                      }
+                    }}
+                    className="min-h-[34px] py-1.5 px-2.5 rounded-xl bg-slate-950 hover:bg-cyan-950 border border-cyan-500/40 text-cyan-200 text-[10px] font-bold cursor-pointer"
+                  >
+                    Test Read Screen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const list = fetchNativeRecentNotifications();
+                      const st = getNativeAndroidAutomationStatus();
+                      setNativeAuto(st);
+                      if (list.length > 0) {
+                        setAppToast(
+                          `Latest: ${list[0].appName} · ${list[0].sender}: ${list[0].body.slice(0, 60)}`
+                        );
+                      } else if (st.hasNativeBridge && !st.notificationAccessGranted) {
+                        setAppToast(openAndroidSystemPermissionScreen('notification_listener'));
+                      } else {
+                        setAppToast(
+                          st.notificationAccessGranted
+                            ? 'Notification Access ACTIVE ✓ (No unread alerts yet)'
+                            : 'Install Zara APK to enable Android Notification Access.'
+                        );
+                      }
+                    }}
+                    className="min-h-[34px] py-1.5 px-2.5 rounded-xl bg-slate-950 hover:bg-amber-950 border border-amber-500/40 text-amber-200 text-[10px] font-bold cursor-pointer"
+                  >
+                    Notif Access: {nativeAuto.notificationAccessGranted ? 'ACTIVE ✓' : nativeAuto.hasNativeBridge ? 'ENABLE' : 'APK'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppToast(openAndroidSystemPermissionScreen('accessibility'));
+                    }}
+                    className="min-h-[36px] py-1.5 px-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-extrabold cursor-pointer"
+                  >
+                    Accessibility Settings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppToast(openAndroidSystemPermissionScreen('notification_listener'));
+                    }}
+                    className="min-h-[36px] py-1.5 px-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-extrabold cursor-pointer"
+                  >
+                    Notification Access Settings
+                  </button>
+                </div>
               </div>
 
               {/* Low-Power Custom Wake-Word Foreground Service */}
@@ -2760,6 +3826,89 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 </div>
 
+                {/* Customizable Proactive Conversation Controls */}
+                <div className="p-2.5 rounded-xl bg-slate-950/75 border border-fuchsia-500/25 space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-fuchsia-200">
+                    <span>Proactive Check-In Timing &amp; Busy Wait Settings</span>
+                    <div className="flex items-center gap-1">
+                      {([2, 5, 10, 15] as const).map((mins) => (
+                        <button
+                          key={mins}
+                          type="button"
+                          onClick={() => {
+                            onUpdateConfig({ proactiveIntervalMinutes: mins });
+                            setAppToast(`Proactive Check-In interval set to ${mins} minutes`);
+                          }}
+                          className={`px-2 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                            (config.proactiveIntervalMinutes || 5) === mins
+                              ? 'bg-fuchsia-600 border-fuchsia-300 text-white'
+                              : 'bg-slate-900 border-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {mins}m
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = config.proactiveContinueLastTopic === false;
+                        onUpdateConfig({ proactiveContinueLastTopic: next });
+                        setAppToast(
+                          next ? 'Zara will continue from your last conversation ✓' : 'Fresh check-ins only'
+                        );
+                      }}
+                      className={`min-h-[34px] px-2 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                        config.proactiveContinueLastTopic !== false
+                          ? 'bg-sky-600/30 border-sky-400 text-white'
+                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      Last Topic: {config.proactiveContinueLastTopic !== false ? 'ON' : 'OFF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = config.proactiveAllowInHandsFree === false;
+                        onUpdateConfig({ proactiveAllowInHandsFree: next });
+                        setAppToast(
+                          next
+                            ? 'Proactive check-ins allowed in Hands-Free Mic (never interrupts speech)'
+                            : 'Proactive check-ins paused while Hands-Free Mic is on'
+                        );
+                      }}
+                      className={`min-h-[34px] px-2 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                        config.proactiveAllowInHandsFree !== false
+                          ? 'bg-emerald-600/30 border-emerald-400 text-white'
+                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      Mic Check-In: {config.proactiveAllowInHandsFree !== false ? 'ON' : 'OFF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !config.busyQuietMode;
+                        onUpdateConfig({ busyQuietMode: next });
+                        setAppToast(
+                          next
+                            ? 'Busy Quiet Mode ON — Zara waits quietly until you talk first'
+                            : 'Busy Quiet Mode OFF — Zara checks in warmly'
+                        );
+                      }}
+                      className={`min-h-[34px] px-2 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                        config.busyQuietMode
+                          ? 'bg-amber-600/40 border-amber-300 text-white'
+                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      Busy Wait: {config.busyQuietMode ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -2845,6 +3994,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
+                  <a
+                    href="/api/export/zara-android-project.zip"
+                    download="Zara-AI-Android-Studio-Project.zip"
+                    onClick={() => audioService.playChime('activate')}
+                    className="col-span-2 min-h-[38px] px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center justify-center gap-1.5 no-underline cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 shrink-0" />
+                    <span>Download Android Studio + APK Project (.ZIP)</span>
+                  </a>
                   <button
                     type="button"
                     onClick={async () => {
@@ -2852,7 +4010,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       const res = await copySelectedOrFullText(cmds);
                       if (res.ok) setAppToast('Copied APK & AAB Gradle build commands ✓');
                     }}
-                    className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
                   >
                     <Copy className="w-3 h-3" />
                     <span>Copy APK/AAB Cmd</span>
@@ -2867,7 +4025,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
                     >
                       <Download className="w-3 h-3" />
-                      <span>Export Source</span>
+                      <span>All Source Files</span>
                     </button>
                   )}
                 </div>
@@ -3324,7 +4482,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ================= TAB 3: VOICE & PROMPT AI APP / GAME / STATION BUILDER ================= */}
-          {tab === 'builder' && (
+          {activeTab === 'builder' && (
             <div className="space-y-3">
               <form
                 onSubmit={handleSubmitBuilderForm}
@@ -3495,7 +4653,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ================= TAB 4: ZARA & MOBILE SELF-DIAGNOSTICS DOCTOR ================= */}
-          {tab === 'diagnostics' && (
+          {activeTab === 'diagnostics' && (
             <div className="space-y-3">
               <div className="p-3.5 rounded-2xl bg-[#0c1626] border border-cyan-500/45 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -3593,7 +4751,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ================= TAB 5: MOBILE TIMING, ALARMS & WORK TIME REMINDERS ================= */}
-          {tab === 'schedule' && (
+          {activeTab === 'schedule' && (
             <div className="space-y-3">
               <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#130d2e] via-[#101c30] to-[#190c2e] border border-amber-400/45 text-center space-y-1">
                 <div className="text-[10px] font-bold text-amber-300">Live Mobile Timing</div>
@@ -3717,11 +4875,180 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 ))}
               </div>
+
+              {azanConfig && onUpdateAzanConfig && (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/35 border border-emerald-500/35 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-extrabold text-emerald-200">
+                        Automated Azan &amp; Sehri / Iftar Alerts
+                      </div>
+                      <div className="text-[11px] text-slate-300">
+                        Daily solar calculation · {azanConfig.cityName || 'Lahore'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateAzanConfig({ enabled: !azanConfig.enabled })}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer ${
+                        azanConfig.enabled
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {azanConfig.enabled ? 'ENABLED' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {(['lahore', 'karachi', 'islamabad', 'auto_gps'] as AzanCityId[]).map((cid) => (
+                      <button
+                        key={cid}
+                        type="button"
+                        onClick={() => {
+                          if (cid === 'auto_gps') {
+                            if (navigator.geolocation) {
+                              navigator.geolocation.getCurrentPosition(
+                                (pos) => {
+                                  onUpdateAzanConfig({
+                                    city: 'auto_gps',
+                                    latitude: pos.coords.latitude,
+                                    longitude: pos.coords.longitude,
+                                    cityName: 'GPS Location',
+                                  });
+                                },
+                                () => {
+                                  onUpdateAzanConfig({ city: 'auto_gps', cityName: 'GPS Location' });
+                                }
+                              );
+                            } else {
+                              onUpdateAzanConfig({ city: 'auto_gps', cityName: 'GPS Location' });
+                            }
+                          } else {
+                            const preset = AZAN_CITY_PRESETS[cid];
+                            onUpdateAzanConfig({
+                              city: cid,
+                              latitude: preset.lat,
+                              longitude: preset.lon,
+                              cityName: preset.name,
+                            });
+                          }
+                        }}
+                        className={`px-2 py-1.5 rounded-xl text-[11px] font-bold border cursor-pointer ${
+                          azanConfig.city === cid
+                            ? 'bg-emerald-600 border-emerald-400 text-white'
+                            : 'bg-slate-900 border-white/10 text-slate-300'
+                        }`}
+                      >
+                        {cid === 'auto_gps' ? 'Auto GPS' : AZAN_CITY_PRESETS[cid].name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(() => {
+                    const pt = computeDailyPrayerTimes(
+                      azanConfig.latitude ?? 31.5204,
+                      azanConfig.longitude ?? 74.3587
+                    );
+                    const slots = [
+                      { k: 'Sehri Ends', v: pt.sehriEnds },
+                      { k: 'Fajr', v: pt.fajr },
+                      { k: 'Dhuhr', v: pt.dhuhr },
+                      { k: 'Asr', v: pt.asr },
+                      { k: 'Maghrib / Iftar', v: pt.maghribIftar },
+                      { k: 'Isha', v: pt.isha },
+                    ];
+                    return (
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {slots.map((s) => (
+                          <div
+                            key={s.k}
+                            className="p-2 rounded-xl bg-slate-950/80 border border-white/10 text-center"
+                          >
+                            <div className="text-[10px] text-slate-400">{s.k}</div>
+                            <div className="text-xs font-extrabold text-white font-mono tabular-nums">
+                              {format24To12Hour(s.v)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateAzanConfig({ azanAudioAlert: !azanConfig.azanAudioAlert })
+                      }
+                      className={`p-2 rounded-xl border flex items-center justify-between cursor-pointer ${
+                        azanConfig.azanAudioAlert
+                          ? 'bg-emerald-900/50 border-emerald-400/50 text-white'
+                          : 'bg-slate-900 border-white/10 text-slate-400'
+                      }`}
+                    >
+                      <span>Auto Azan Audio</span>
+                      <span className="font-bold">{azanConfig.azanAudioAlert ? 'ON' : 'OFF'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateAzanConfig({ sehriAlert: !azanConfig.sehriAlert })}
+                      className={`p-2 rounded-xl border flex items-center justify-between cursor-pointer ${
+                        azanConfig.sehriAlert
+                          ? 'bg-emerald-900/50 border-emerald-400/50 text-white'
+                          : 'bg-slate-900 border-white/10 text-slate-400'
+                      }`}
+                    >
+                      <span>Sehri 30m Alert</span>
+                      <span className="font-bold">{azanConfig.sehriAlert ? 'ON' : 'OFF'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateAzanConfig({ iftarAlert: !azanConfig.iftarAlert })}
+                      className={`p-2 rounded-xl border flex items-center justify-between cursor-pointer ${
+                        azanConfig.iftarAlert
+                          ? 'bg-emerald-900/50 border-emerald-400/50 text-white'
+                          : 'bg-slate-900 border-white/10 text-slate-400'
+                      }`}
+                    >
+                      <span>Iftar Sunset Alert</span>
+                      <span className="font-bold">{azanConfig.iftarAlert ? 'ON' : 'OFF'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateAzanConfig({ prayerTimeMute: !azanConfig.prayerTimeMute })
+                      }
+                      className={`p-2 rounded-xl border flex items-center justify-between cursor-pointer ${
+                        azanConfig.prayerTimeMute
+                          ? 'bg-amber-900/50 border-amber-400/50 text-amber-200'
+                          : 'bg-slate-900 border-white/10 text-slate-400'
+                      }`}
+                    >
+                      <span>Prayer-Time Mute</span>
+                      <span className="font-bold">{azanConfig.prayerTimeMute ? 'ON' : 'OFF'}</span>
+                    </button>
+                  </div>
+
+                  {onTestAzanAlert && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audioService.unlock();
+                        onTestAzanAlert();
+                      }}
+                      className="w-full min-h-[36px] py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer"
+                    >
+                      Test Azan / Iftar Voice Alert
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {/* ================= TAB 6: ZARA COMPLETE PROFILE (WITH OWNER MALAYSIA WALA BADSHAH) ================= */}
-          {tab === 'profile' && (
+          {activeTab === 'profile' && (
             <div className="space-y-3">
               <div className="p-3.5 rounded-2xl bg-gradient-to-b from-[#210d3b] to-[#0e0720] border border-pink-500/45 space-y-3">
                 <div className="flex items-center gap-3">
@@ -3795,7 +5122,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ================= TAB 7: EMOTIONS, VOICE PROFILES & COMPANION SETTINGS ================= */}
-          {tab === 'romance' && (
+          {activeTab === 'romance' && (
             <div className="space-y-3">
               {/* Full Open Access Banner (with optional Cloud Sync) */}
               <div className="p-3 rounded-2xl bg-slate-900/90 border border-emerald-500/35 flex items-center justify-between gap-2">
@@ -3924,7 +5251,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         [
                           { id: 'apnapan', label: 'Apna-pan (اپنا پن)' },
                           { id: 'pyar', label: 'Pyar (محبت)' },
-                          { id: 'gussa', label: 'Gussa (लड़की का गुस्सा)' },
+                          { id: 'khushi', label: 'Khushi (خوشی)' },
+                          { id: 'masti', label: 'Masti / Jokes (مستی)' },
+                          { id: 'udaas', label: 'Udaas Empathy (اداسی)' },
+                          { id: 'gussa', label: 'Gussa (لड़की का गुस्सा)' },
                           { id: 'ladai', label: 'Ladai / Jhagda (लड़ाई)' },
                           { id: 'narazgi', label: 'Narazgi (नाराज़गी)' },
                           { id: 'emotional', label: 'Emotional (इमोशनल)' },
@@ -4010,6 +5340,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {(
                     [
                       { id: 'auto', label: 'Auto (Match Me)' },
+                      { id: 'roman_urdu', label: 'Roman Urdu (رومن سٹائل)' },
                       { id: 'uzbek', label: "O'zbekcha (Uzbek)" },
                       { id: 'malay', label: 'Bahasa Melayu' },
                       { id: 'arabic', label: 'العربية (Arabic)' },
@@ -4044,14 +5375,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Volume2 className="w-3.5 h-3.5 text-pink-400" />
                     <span>Voice Speed</span>
                   </span>
-                  <span className="font-mono text-pink-400">{config.voiceSpeed.toFixed(2)}x</span>
+                  <span className="font-mono text-pink-400">{safeVoiceSpeed.toFixed(2)}x</span>
                 </div>
                 <input
                   type="range"
-                  min="0.85"
-                  max="1.15"
+                  min="0.75"
+                  max="1.25"
                   step="0.05"
-                  value={config.voiceSpeed}
+                  value={safeVoiceSpeed}
                   onChange={(e) => onUpdateConfig({ voiceSpeed: Number(e.target.value) })}
                   className="w-full accent-pink-500 cursor-pointer"
                 />
@@ -4076,7 +5407,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ================= TAB 8: 100+ DAYS LONG-TERM MEMORY VAULT ================= */}
-          {tab === 'memory' && (
+          {activeTab === 'memory' && (
             <div className="space-y-3">
               <div className="p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/35 flex items-center justify-between gap-2 text-xs text-emerald-100 leading-relaxed">
                 <div className="min-w-0">
@@ -4127,10 +5458,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onChange={(e) => setMemCategory(e.target.value as MemoryCategory)}
                         className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200"
                       >
-                        <option value="romantic">Romantic Moment</option>
-                        <option value="promise">Promise</option>
+                        <option value="preference">Preference</option>
                         <option value="memory">Memory</option>
                         <option value="routine">Work / Routine</option>
+                        <option value="promise">Promise</option>
+                        <option value="romantic">Personal / Emotional</option>
                         <option value="secret">Secret</option>
                       </select>
                       <button

@@ -48,6 +48,9 @@ const EMOTIONS: {
 }[] = [
   { id: 'apnapan', label: 'Apna-pan (اپنا پن)', desc: 'Heartfelt care & belonging', icon: Heart },
   { id: 'pyar', label: 'Pyar (محبت)', desc: 'Warm loving closeness', icon: Sparkles },
+  { id: 'khushi', label: 'Khushi (خوشی)', desc: 'Bright excitement & warmth', icon: Smile },
+  { id: 'masti', label: 'Masti (مزاح)', desc: 'Playful teasing & laughter', icon: Sparkles },
+  { id: 'udaas', label: 'Udaas (اداسی)', desc: 'Gentle sad empathy & care', icon: CloudRain },
   { id: 'gussa', label: 'Gussa (پیارا غصہ)', desc: 'Playful loving scolding', icon: Flame },
   { id: 'narazgi', label: 'Narazgi (ناراضگی)', desc: 'Cute roothna-manana mood', icon: CloudRain },
   { id: 'calm', label: 'Calm (پرسکون)', desc: 'Peaceful supportive tone', icon: Smile },
@@ -130,7 +133,7 @@ export const SoulModal: React.FC<SoulModalProps> = ({
       ownerOnlyRomance: true,
       heartLockUnlocked: false,
     });
-    setAuthMessage('Signed out of Owner Mode.');
+    setAuthMessage('Signed out of ZX Mode.');
   };
 
   const handlePreviewVoice = (voiceChoice?: ZaraVoiceName) => {
@@ -173,7 +176,7 @@ export const SoulModal: React.FC<SoulModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="w-full max-w-md bg-gradient-to-b from-[#130b26] to-[#080512] border border-pink-500/35 rounded-3xl p-5 shadow-[0_0_40px_rgba(236,72,153,0.25)] max-h-[88vh] flex flex-col">
+      <div className="w-full max-w-md bg-gradient-to-b from-[#1d0945] to-[#0b0422] border border-purple-400/35 rounded-3xl p-5 shadow-[0_0_45px_rgba(168,85,247,0.3)] max-h-[88vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-white/10">
           <div className="flex items-center gap-2.5">
@@ -184,7 +187,7 @@ export const SoulModal: React.FC<SoulModalProps> = ({
               <h2 className="text-base font-bold text-white">Voice &amp; Personality</h2>
               <p className="text-[11px] text-slate-400">
                 {isOwnerVerified
-                  ? 'Owner Mode · Emotions, Heart Lock & Voices'
+                  ? 'ZX · Emotions, Heart Lock & Voices'
                   : 'Public Voice Selector'}
               </p>
             </div>
@@ -270,12 +273,12 @@ export const SoulModal: React.FC<SoulModalProps> = ({
               {isOwnerVerified ? (
                 <>
                   <Unlock className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="text-emerald-300">Owner Verified</span>
+                  <span className="text-emerald-300 font-black tracking-wider text-sm">ZX</span>
                 </>
               ) : (
                 <>
                   <Lock className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="text-slate-200">Owner Account</span>
+                  <span className="text-slate-200 font-bold">ZX Account</span>
                 </>
               )}
             </div>
@@ -339,7 +342,7 @@ export const SoulModal: React.FC<SoulModalProps> = ({
                   >
                     <ShieldCheck className="w-4 h-4" />
                     <span>
-                      {isVerifyingGoogle ? 'Signing In...' : 'Owner Sign-In with Google'}
+                      {isVerifyingGoogle ? 'Signing In...' : 'ZX Sign-In with Google'}
                     </span>
                   </button>
                 )}
@@ -495,7 +498,7 @@ export const SoulModal: React.FC<SoulModalProps> = ({
         {/* Footer */}
         <div className="pt-3 border-t border-white/10 flex items-center justify-between">
           <span className="text-xs text-slate-400">
-            {isOwnerVerified ? 'Owner Mode Active' : 'Privacy Protected'}
+            {isOwnerVerified ? 'ZX Mode Active' : 'Privacy Protected'}
           </span>
           <button
             type="button"

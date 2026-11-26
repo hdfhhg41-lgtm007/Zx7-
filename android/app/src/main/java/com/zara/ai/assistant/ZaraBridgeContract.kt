@@ -9,6 +9,8 @@ object ZaraBridgeContract {
     const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
     const val KEY_WAKE_WORD_PHRASE = "wake_word_phrase"
     const val KEY_FOREGROUND_VOICE_ENABLED = "foreground_voice_enabled"
+    const val KEY_LEGACY_FOREGROUND_VOICE_ENABLED = "fg_voice_enabled"
+    const val KEY_ASSISTANT_LANGUAGE = "assistant_language"
     const val KEY_PRO_TIER_ACTIVE = "pro_tier_active"
     const val KEY_PRO_TIER_SKU = "pro_tier_sku"
     const val KEY_PRO_PURCHASE_TOKEN = "pro_purchase_token"
@@ -22,6 +24,7 @@ object ZaraBridgeContract {
     const val ACTION_WAKE_WORD_DETECTED = "com.zara.ai.assistant.ACTION_WAKE_WORD_DETECTED"
     const val ACTION_INCOMING_NOTIFICATION = "com.zara.ai.assistant.ACTION_INCOMING_NOTIFICATION"
     const val ACTION_ACCESSIBILITY_STATE = "com.zara.ai.assistant.ACTION_ACCESSIBILITY_STATE"
+    const val ACTION_FOREGROUND_VOICE_STATE = "com.zara.ai.assistant.ACTION_FOREGROUND_VOICE_STATE"
     const val ACTION_BILLING_UPDATE = "com.zara.ai.assistant.ACTION_BILLING_UPDATE"
 
     const val EXTRA_PHRASE = "phrase"
@@ -32,6 +35,7 @@ object ZaraBridgeContract {
     const val EXTRA_NOTIF_SENDER = "notif_sender"
     const val EXTRA_NOTIF_BODY = "notif_body"
     const val EXTRA_CONNECTED = "connected"
+    const val EXTRA_RUNNING = "running"
     const val EXTRA_BILLING_JSON = "billing_json"
 
     fun prefs(context: Context): SharedPreferences {
@@ -41,5 +45,21 @@ object ZaraBridgeContract {
     fun getWakePhrase(context: Context): String {
         val raw = prefs(context).getString(KEY_WAKE_WORD_PHRASE, DEFAULT_WAKE_PHRASE)
         return raw?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: DEFAULT_WAKE_PHRASE
+    }
+
+    fun getAssistantLanguage(context: Context): String {
+        return prefs(context).getString(KEY_ASSISTANT_LANGUAGE, "auto")?.trim()?.lowercase() ?: "auto"
+    }
+
+    fun toSpeechLocaleTag(lang: String): String {
+        return when (lang.trim().lowercase()) {
+            "english" -> "en-US"
+            "hindi" -> "hi-IN"
+            "punjabi" -> "pa-IN"
+            "uzbek" -> "uz-UZ"
+            "malay" -> "ms-MY"
+            "arabic" -> "ar-SA"
+            else -> "ur-PK"
+        }
     }
 }

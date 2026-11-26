@@ -47,18 +47,18 @@ function buildSilentKeepAliveWavUri(): string {
   }
 
   const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const step = 0x4000;
+  const parts: string[] = [];
+  const step = 0x2000;
   for (let i = 0; i < bytes.length; i += step) {
-    const sub = bytes.subarray(i, i + step);
-    binary += String.fromCharCode.apply(null, Array.from(sub));
+    parts.push(String.fromCharCode(...bytes.subarray(i, i + step)));
   }
-  return `data:audio/wav;base64,${window.btoa(binary)}`;
+  return `data:audio/wav;base64,${window.btoa(parts.join(''))}`;
 }
 
 class AudioManager {
   private audioCtx: AudioContext | null = null;
   private masterAnalyser: AnalyserNode | null = null;
+  private masterLimiter: DynamicsCompressorNode | null = null;
   private timeDomainData = new Uint8Array(256);
   private freqDomainData = new Uint8Array(128);
 
@@ -73,6 +73,10 @@ class AudioManager {
   private isPlayingReplyOnBgChannel = false;
 
   private liveSources = new Set<AudioBufferSourceNode>();
+  private livePendingChunks: Float32Array[] = [];
+  private livePendingSamples = 0;
+  private liveFlushTimer: number | null = null;
+  private liveStreamStarted = false;
   private nextLiveStartTime = 0;
 
   private safetyTimer: number | null = null;
@@ -82,6 +86,7 @@ class AudioManager {
   private isUnlocked = false;
   private activePlaybackId = 0;
   private preferredTtsEngine: TtsEngineId = 'hunter_tts_ultra_premium';
+  private ttsMemoryCache = new Map<string, string>();
   private listeners = new Set<SpeakingListener>();
 
   setPreferredTtsEngine(engine: TtsEngineId) {
@@ -190,6 +195,7 @@ class AudioManager {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       this.audioCtx = new AudioCtxClass();
       this.masterAnalyser = null;
+      this.masterLimiter = null;
     }
     if (this.audioCtx.state === 'suspended') {
       this.audioCtx.resume().catch(() => {});
@@ -200,15 +206,47 @@ class AudioManager {
   private getAnalyser(): AnalyserNode {
     const ctx = this.getAudioContext();
     if (!this.masterAnalyser) {
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -6;
+      limiter.knee.value = 20;
+      limiter.ratio.value = 2.2;
+      limiter.attack.value = 0.008;
+      limiter.release.value = 0.25;
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.55;
+
+      limiter.connect(analyser);
       analyser.connect(ctx.destination);
+      this.masterLimiter = limiter;
       this.masterAnalyser = analyser;
       this.timeDomainData = new Uint8Array(analyser.fftSize);
       this.freqDomainData = new Uint8Array(analyser.frequencyBinCount);
     }
     return this.masterAnalyser;
+  }
+
+  private getMasterInputNode(): AudioNode {
+    this.getAnalyser();
+    return this.masterLimiter || this.masterAnalyser!;
+  }
+
+  private applySmoothEdgeRamps(buffer: AudioBuffer, fadeSec = 0.005): void {
+    const fadeSamples = Math.min(
+      Math.floor(buffer.sampleRate * fadeSec),
+      Math.floor(buffer.length / 4)
+    );
+    if (fadeSamples <= 1) return;
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      const data = buffer.getChannelData(ch);
+      for (let i = 0; i < fadeSamples; i++) {
+        const ramp = 0.5 - 0.5 * Math.cos((Math.PI * i) / fadeSamples);
+        data[i] *= ramp;
+        const tailIdx = data.length - 1 - i;
+        data[tailIdx] *= ramp;
+      }
+    }
   }
 
   private getKeepAliveUri(): string {
@@ -507,6 +545,14 @@ class AudioManager {
   }
 
   clearLiveQueue() {
+    if (this.liveFlushTimer !== null) {
+      window.clearTimeout(this.liveFlushTimer);
+      this.liveFlushTimer = null;
+    }
+    this.livePendingChunks = [];
+    this.livePendingSamples = 0;
+    this.liveStreamStarted = false;
+
     this.liveSources.forEach((src) => {
       try {
         src.onended = null;
@@ -521,11 +567,95 @@ class AudioManager {
     }
   }
 
+  private flushLivePcmBuffer() {
+    if (this.liveFlushTimer !== null) {
+      window.clearTimeout(this.liveFlushTimer);
+      this.liveFlushTimer = null;
+    }
+    if (this.livePendingChunks.length === 0 || this.livePendingSamples <= 0) return;
+
+    try {
+      const ctx = this.getAudioContext();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      const masterIn = this.getMasterInputNode();
+
+      const totalSamples = this.livePendingSamples;
+      const merged = new Float32Array(totalSamples);
+      let offset = 0;
+      for (const chunk of this.livePendingChunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      }
+      this.livePendingChunks = [];
+      this.livePendingSamples = 0;
+
+      const isUnderrun = !this.liveStreamStarted || this.nextLiveStartTime <= ctx.currentTime + 0.012;
+      // Only soften the very opening edge of a burst (never dip interior continuous chunks to 0!)
+      if (isUnderrun && totalSamples > 48) {
+        const rampIn = Math.min(64, Math.floor(totalSamples / 4));
+        for (let i = 0; i < rampIn; i++) {
+          merged[i] *= i / rampIn;
+        }
+      }
+
+      const audioBuffer = ctx.createBuffer(1, totalSamples, 24000);
+      audioBuffer.getChannelData(0).set(merged);
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0.94;
+      source.connect(gain);
+      gain.connect(masterIn);
+
+      // Lead slightly on initial burst / underrun (95ms) then append strictly sample-contiguously
+      const startAt = isUnderrun ? ctx.currentTime + 0.095 : this.nextLiveStartTime;
+      this.liveStreamStarted = true;
+      this.nextLiveStartTime = startAt + audioBuffer.duration;
+
+      this.liveSources.add(source);
+      this.setSpeakingState(true);
+
+      source.onended = () => {
+        this.liveSources.delete(source);
+        if (
+          this.liveSources.size === 0 &&
+          this.livePendingChunks.length === 0 &&
+          !this.currentSource &&
+          !this.currentAudio
+        ) {
+          this.nextLiveStartTime = 0;
+          this.liveStreamStarted = false;
+          this.setSpeakingState(false);
+          if (this.keepAliveHoldEnabled) {
+            this.restoreSilentKeepAliveLoop();
+          }
+        }
+      };
+
+      source.start(startAt);
+    } catch (err) {
+      console.warn('Live PCM flush warning:', err);
+    }
+  }
+
   enqueueLivePcm24k(base64Pcm: string) {
     if (!base64Pcm) return;
     try {
       const ctx = this.getAudioContext();
-      const analyser = this.getAnalyser();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      // Pause silent keep-alive element while streaming live speech so Android audio mixer does not glitch
+      if (this.bgSafeAudio && !this.isPlayingReplyOnBgChannel && !this.bgSafeAudio.paused) {
+        try {
+          this.bgSafeAudio.pause();
+        } catch {}
+      }
 
       const binary = window.atob(base64Pcm);
       const byteLength = binary.length - (binary.length % 2);
@@ -543,37 +673,28 @@ class AudioManager {
         float32[i] = view.getInt16(i * 2, true) / 32768;
       }
 
-      const audioBuffer = ctx.createBuffer(1, numSamples, 24000);
-      audioBuffer.getChannelData(0).set(float32);
-
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-
-      const gain = ctx.createGain();
-      gain.gain.value = 1.08;
-      source.connect(gain);
-      gain.connect(analyser);
-
-      const startAt = Math.max(ctx.currentTime + 0.015, this.nextLiveStartTime);
-      this.nextLiveStartTime = startAt + audioBuffer.duration;
-
-      this.liveSources.add(source);
+      this.livePendingChunks.push(float32);
+      this.livePendingSamples += numSamples;
       this.setSpeakingState(true);
 
-      source.onended = () => {
-        this.liveSources.delete(source);
-        if (this.liveSources.size === 0 && !this.currentSource && !this.currentAudio) {
-          this.setSpeakingState(false);
-        }
-      };
+      const isStreamIdle = !this.liveStreamStarted || this.nextLiveStartTime <= ctx.currentTime + 0.015;
+      // Pre-buffer at least ~120ms (2880 samples @ 24kHz) on stream start/underrun, or 80ms (1920 samples) mid-stream
+      const targetBatchSamples = isStreamIdle ? 2880 : 1920;
 
-      source.start(startAt);
+      if (this.livePendingSamples >= targetBatchSamples) {
+        this.flushLivePcmBuffer();
+      } else if (this.liveFlushTimer === null) {
+        this.liveFlushTimer = window.setTimeout(() => {
+          this.liveFlushTimer = null;
+          this.flushLivePcmBuffer();
+        }, 65);
+      }
     } catch (err) {
       console.warn('Live PCM playback warning:', err);
     }
   }
 
-  stopAudio() {
+  stopAudio(clearEchoTail = false) {
     this.activePlaybackId += 1;
     this.clearLiveQueue();
 
@@ -619,6 +740,9 @@ class AudioManager {
     }
 
     this.setSpeakingState(false);
+    if (clearEchoTail) {
+      this.lastSpeakEndTime = 0;
+    }
   }
 
   private base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -646,10 +770,17 @@ class AudioManager {
 
       const audio = this.ensureBgSafeAudioElement() || new Audio();
       this.isPlayingReplyOnBgChannel = true;
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {}
       audio.loop = false;
       audio.src = blobUrl;
       audio.volume = 1.0;
       audio.playbackRate = rate;
+      if ('preservesPitch' in audio) {
+        (audio as any).preservesPitch = true;
+      }
       this.currentAudio = audio;
       this.setSpeakingState(true);
       if (spokenLabel) {
@@ -685,9 +816,9 @@ class AudioManager {
 
         audio.onended = () => complete(true);
         audio.onerror = () => complete(false);
-        // 24kHz 16-bit mono WAV = 48,000 bytes/sec; compute dynamic timeout so long romantic replies never cut off!
+        // 24kHz 16-bit mono WAV = 48,000 bytes/sec; compute generous timeout so long replies never cut off!
         const estDurationMs = Math.ceil((Math.max(0, rawBuffer.byteLength - 44) / 48000 / rate) * 1000);
-        const safeTimeoutMs = Math.min(180000, Math.max(28000, estDurationMs + 5000));
+        const safeTimeoutMs = Math.min(240000, Math.max(30000, estDurationMs + 8000));
         this.safetyTimer = window.setTimeout(() => complete(true), safeTimeoutMs);
         audio.play().catch(() => complete(false));
       });
@@ -702,7 +833,7 @@ class AudioManager {
     }
   }
 
-  // Play Gemini Neural WAV base64 — uses persistent Lock-Screen Media Channel whenever Screen is Locked or App is Minimized!
+  // Play Gemini Neural WAV base64 — uses clean WebAudio with limiter/de-clicking when foregrounded, or Lock-Screen Media Channel when hidden
   async playAudioBase64(
     base64Wav: string,
     playbackRate = 1.0,
@@ -728,28 +859,44 @@ class AudioManager {
       if (ctx.state === 'suspended') {
         await Promise.race([
           ctx.resume(),
-          new Promise((_, rej) => window.setTimeout(() => rej(new Error('ctx_suspended')), 400)),
+          new Promise((_, rej) => window.setTimeout(() => rej(new Error('ctx_suspended')), 500)),
         ]);
       }
 
+      if (playbackId !== this.activePlaybackId) {
+        onEnd?.();
+        return true;
+      }
+
       if (ctx.state === 'running') {
-        const analyser = this.getAnalyser();
+        // Pause silent keep-alive WAV element during active WebAudio TTS playback so Android audio mixer never crackles/chops
+        if (this.bgSafeAudio && !this.isPlayingReplyOnBgChannel && !this.bgSafeAudio.paused) {
+          try {
+            this.bgSafeAudio.pause();
+          } catch {}
+          await new Promise((resolve) => window.setTimeout(resolve, 35));
+        }
+
+        const masterIn = this.getMasterInputNode();
         const rawBuffer = this.base64ToArrayBuffer(base64Wav);
         const audioBuffer = await ctx.decodeAudioData(rawBuffer.slice(0));
 
         if (playbackId !== this.activePlaybackId) {
+          if (this.keepAliveHoldEnabled) this.restoreSilentKeepAliveLoop();
           onEnd?.();
           return true;
         }
+
+        this.applySmoothEdgeRamps(audioBuffer, 0.004);
 
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.playbackRate.value = rate;
 
         const gainNode = ctx.createGain();
-        gainNode.gain.value = 1.15;
+        gainNode.gain.value = 0.95;
         source.connect(gainNode);
-        gainNode.connect(analyser);
+        gainNode.connect(masterIn);
 
         this.currentSource = source;
         this.setSpeakingState(true);
@@ -757,31 +904,57 @@ class AudioManager {
 
         return await new Promise<boolean>((resolve) => {
           let finished = false;
+          let progressGuardId: number | null = null;
           const finishOnce = () => {
             if (finished) return;
             finished = true;
+            if (progressGuardId !== null) {
+              window.clearInterval(progressGuardId);
+              progressGuardId = null;
+            }
             if (this.safetyTimer !== null) {
               window.clearTimeout(this.safetyTimer);
               this.safetyTimer = null;
             }
             if (this.currentSource === source) {
+              try {
+                source.onended = null;
+                source.disconnect();
+                gainNode.disconnect();
+              } catch {}
               this.currentSource = null;
               this.setSpeakingState(false);
+            }
+            if (this.keepAliveHoldEnabled && playbackId === this.activePlaybackId) {
+              this.restoreSilentKeepAliveLoop();
             }
             onEnd?.();
             resolve(true);
           };
 
           source.onended = finishOnce;
-          const durationMs = Math.ceil((audioBuffer.duration / rate) * 1000) + 600;
+          const actualDurSec = audioBuffer.duration / rate;
+          const startCtxTime = ctx.currentTime + 0.025;
+          // Generous fallback timeout + AudioContext clock verification so Bluetooth/hardware latency never truncates speech
+          const durationMs = Math.ceil(actualDurSec * 1000) + 7500;
           this.safetyTimer = window.setTimeout(finishOnce, durationMs);
-          source.start(0);
+          progressGuardId = window.setInterval(() => {
+            if (ctx.state === 'running' && ctx.currentTime - startCtxTime > actualDurSec + 3.8) {
+              finishOnce();
+            }
+          }, 500);
+
+          source.start(startCtxTime);
         });
       }
     } catch (webAudioErr) {
       console.warn('WebAudio decode fallback to HTMLAudio:', webAudioErr);
     }
 
+    if (playbackId !== this.activePlaybackId) {
+      onEnd?.();
+      return true;
+    }
     const rawBuffer = this.base64ToArrayBuffer(base64Wav);
     return this.playViaHtmlAudioElement(rawBuffer, rate, spokenLabel, onStart, onEnd);
   }
@@ -895,7 +1068,20 @@ class AudioManager {
         options.onEnd,
         text
       );
-      if (played) return;
+      if (played || myPlaybackId !== this.activePlaybackId) return;
+    }
+
+    const cacheKey = `${voiceName}:${options?.language || 'auto'}:${options?.emotionMode || 'calm'}:${options?.loveMode ? '1' : '0'}:${text.trim()}`;
+    if (text.length <= 220 && this.ttsMemoryCache.has(cacheKey)) {
+      const cachedAudio = this.ttsMemoryCache.get(cacheKey)!;
+      const played = await this.playAudioBase64(
+        cachedAudio,
+        rate,
+        options?.onStart,
+        options?.onEnd,
+        text
+      );
+      if (played || myPlaybackId !== this.activePlaybackId) return;
     }
 
     try {
@@ -931,6 +1117,13 @@ class AudioManager {
       if (res.ok) {
         const data = await res.json();
         if (data.audio && !data.fallback) {
+          if (text.length <= 220) {
+            if (this.ttsMemoryCache.size >= 24) {
+              const firstKey = this.ttsMemoryCache.keys().next().value;
+              if (firstKey) this.ttsMemoryCache.delete(firstKey);
+            }
+            this.ttsMemoryCache.set(cacheKey, data.audio);
+          }
           const played = await this.playAudioBase64(
             data.audio,
             rate,
@@ -938,7 +1131,7 @@ class AudioManager {
             options?.onEnd,
             text
           );
-          if (played) return;
+          if (played || myPlaybackId !== this.activePlaybackId) return;
         }
       }
     } catch {
@@ -985,7 +1178,23 @@ class AudioManager {
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(cleanText);
+      // Split long replies at sentence boundaries so browser SpeechSynthesis never cuts off after ~15s
+      const rawSentences = cleanText.match(/[^.!?।\n۔]+[.!?।\n۔]*/g) || [cleanText];
+      const chunks: string[] = [];
+      let current = '';
+      for (const s of rawSentences) {
+        const piece = s.trim();
+        if (!piece) continue;
+        if (current && current.length + piece.length + 1 > 165) {
+          chunks.push(current);
+          current = piece;
+        } else {
+          current = current ? `${current} ${piece}` : piece;
+        }
+      }
+      if (current) chunks.push(current);
+      if (chunks.length === 0) chunks.push(cleanText);
+
       const voices = window.speechSynthesis.getVoices();
       const lang = options?.language || 'urdu';
       const targetGender = getVoiceGenderFromName(options?.voiceName);
@@ -1036,10 +1245,7 @@ class AudioManager {
           ? findForLang('en-pk') || findForLang('en-in') || findForLang('en')
           : findForLang('ur-pk') || findForLang('ur') || findForLang('hi')) || null;
 
-      if (chosenVoice) {
-        utterance.voice = chosenVoice;
-        utterance.lang = chosenVoice.lang;
-      } else {
+      if (!chosenVoice) {
         if (voices.length > 0) {
           this.notifyVoiceNotice({
             available: false,
@@ -1053,25 +1259,22 @@ class AudioManager {
             lang,
           });
         }
-        utterance.lang =
-          lang === 'punjabi' || isGurmukhi
-            ? 'pa-IN'
-            : lang === 'hindi' || isDevanagari
-            ? 'hi-IN'
-            : lang === 'uzbek'
-            ? 'uz-UZ'
-            : lang === 'malay'
-            ? 'ms-MY'
-            : lang === 'arabic' || isArabicScript
-            ? 'ar-SA'
-            : lang === 'urdu'
-            ? 'ur-PK'
-            : 'en-US';
       }
 
-      utterance.pitch =
-        options?.pitch ?? (targetGender === 'male' ? 0.88 : 1.08);
-      utterance.rate = options?.rate ?? 0.96;
+      const fallbackLangCode =
+        lang === 'punjabi' || isGurmukhi
+          ? 'pa-IN'
+          : lang === 'hindi' || isDevanagari
+          ? 'hi-IN'
+          : lang === 'uzbek'
+          ? 'uz-UZ'
+          : lang === 'malay'
+          ? 'ms-MY'
+          : lang === 'arabic' || isArabicScript
+          ? 'ar-SA'
+          : lang === 'urdu' || lang === 'roman_urdu'
+          ? 'ur-PK'
+          : 'en-US';
 
       let completed = false;
       let pollId: number | null = null;
@@ -1091,14 +1294,7 @@ class AudioManager {
         resolve();
       };
 
-      utterance.onstart = () => {
-        this.setSpeakingState(true);
-        options?.onStart?.();
-      };
-      utterance.onend = finish;
-      utterance.onerror = finish;
-
-      const estMs = Math.min(28000, Math.max(3500, cleanText.length * 85));
+      const estMs = Math.min(90000, Math.max(4500, cleanText.length * 95));
       this.safetyTimer = window.setTimeout(finish, estMs);
 
       const startedAt = Date.now();
@@ -1111,6 +1307,11 @@ class AudioManager {
           } else if (sawSpeaking && !synth.pending) {
             finish();
           } else if (!sawSpeaking && !synth.pending && Date.now() - startedAt > 2500) {
+            this.notifyVoiceNotice({
+              available: false,
+              message: 'Voice audio output was blocked by browser — tap the screen once to enable sound.',
+              lang: options?.language || 'auto',
+            });
             finish();
           }
         } catch {
@@ -1121,7 +1322,24 @@ class AudioManager {
       try {
         this.setSpeakingState(true);
         options?.onStart?.();
-        window.speechSynthesis.speak(utterance);
+        chunks.forEach((chunkStr, idx) => {
+          const utt = new SpeechSynthesisUtterance(chunkStr);
+          if (chosenVoice) {
+            utt.voice = chosenVoice;
+            utt.lang = chosenVoice.lang;
+          } else {
+            utt.lang = fallbackLangCode;
+          }
+          utt.pitch = options?.pitch ?? (targetGender === 'male' ? 0.88 : 1.08);
+          utt.rate = options?.rate ?? 0.96;
+          if (idx === chunks.length - 1) {
+            utt.onend = finish;
+            utt.onerror = finish;
+          } else {
+            utt.onerror = finish;
+          }
+          window.speechSynthesis.speak(utt);
+        });
       } catch {
         finish();
       }

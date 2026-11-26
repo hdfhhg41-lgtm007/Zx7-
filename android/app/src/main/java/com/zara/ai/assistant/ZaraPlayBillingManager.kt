@@ -1,8 +1,6 @@
 package com.zara.ai.assistant
 
 import android.app.Activity
-import android.content.Context
-import android.content.Intent
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -17,139 +15,122 @@ import com.android.billingclient.api.QueryPurchasesParams
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Google Play Billing Library v7 integration for Zara Pro Tier subscriptions:
- * - SKUs: zara_pro_monthly, zara_pro_yearly
- * - Handles product catalog query, Play Store purchase sheet launch, acknowledgement, and entitlement restoration.
- */
-class ZaraPlayBillingManager(private val context: Context) : PurchasesUpdatedListener {
+class ZaraPlayBillingManager(
+    private val activity: Activity,
+    private val onBillingEvent: (JSONObject) -> Unit
+) : PurchasesUpdatedListener {
+
+    companion object {
+        val SUBSCRIPTION_IDS = listOf(
+            "zara_pro_monthly",
+            "zara_pro_yearly"
+        )
+    }
 
     private var billingClient: BillingClient? = null
-    private val cachedProducts = mutableMapOf<String, ProductDetails>()
-
     @Volatile
-    var isConnected: Boolean = false
-        private set
+    private var connected = false
+    private val cachedProducts = LinkedHashMap<String, ProductDetails>()
+    private val activeTokens = JSONArray()
 
-    fun initialize() {
-        if (billingClient != null) return
-        val client = BillingClient.newBuilder(context.applicationContext)
-            .setListener(this)
-            .enablePendingPurchases(
-                PendingPurchasesParams.newBuilder().enableOneTimeProducts().enablePrepaidPlans().build()
-            )
-            .build()
-        billingClient = client
-        connectAndRefresh()
-    }
-
-    fun connectAndRefresh() {
-        val client = billingClient ?: return
-        if (client.isReady) {
-            querySubscriptionsCatalog()
-            queryActivePurchases()
-            return
-        }
-        client.startConnection(object : BillingClientStateListener {
-            override fun onBillingSetupFinished(result: BillingResult) {
-                isConnected = result.responseCode == BillingClient.BillingResponseCode.OK
-                if (isConnected) {
-                    querySubscriptionsCatalog()
-                    queryActivePurchases()
+    fun startConnection() {
+        if (billingClient != null && connected) return
+        try {
+            val client = BillingClient.newBuilder(activity)
+                .setListener(this)
+                .enablePendingPurchases(
+                    PendingPurchasesParams.newBuilder().enableOneTimeProducts().enablePrepaidPlans().build()
+                )
+                .build()
+            billingClient = client
+            client.startConnection(object : BillingClientStateListener {
+                override fun onBillingSetupFinished(result: BillingResult) {
+                    connected = result.responseCode == BillingClient.BillingResponseCode.OK
+                    if (connected) {
+                        refreshCatalogAndPurchases()
+                    }
                 }
-            }
 
-            override fun onBillingServiceDisconnected() {
-                isConnected = false
-            }
-        })
+                override fun onBillingServiceDisconnected() {
+                    connected = false
+                }
+            })
+        } catch (_: Exception) {
+            connected = false
+        }
     }
 
-    fun querySubscriptionsCatalog() {
-        val client = billingClient ?: return
-        if (!client.isReady) return
+    fun isAvailable(): Boolean = connected
 
-        val productList = listOf(
+    fun refreshCatalogAndPurchases() {
+        val client = billingClient ?: return
+        if (!connected) return
+
+        val subParams = SUBSCRIPTION_IDS.map { id ->
             QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(ZaraBridgeContract.SKU_PRO_MONTHLY)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(ZaraBridgeContract.SKU_PRO_YEARLY)
+                .setProductId(id)
                 .setProductType(BillingClient.ProductType.SUBS)
                 .build()
-        )
-
-        val params = QueryProductDetailsParams.newBuilder()
-            .setProductList(productList)
+        }
+        val queryParams = QueryProductDetailsParams.newBuilder()
+            .setProductList(subParams)
             .build()
 
-        client.queryProductDetailsAsync(params) { billingResult, detailsList ->
-            if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                for (pd in detailsList) {
-                    cachedProducts[pd.productId] = pd
+        client.queryProductDetailsAsync(queryParams) { result, detailsList ->
+            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                synchronized(cachedProducts) {
+                    cachedProducts.clear()
+                    detailsList.forEach { cachedProducts[it.productId] = it }
                 }
             }
         }
+
+        queryActiveSubscriptions()
     }
 
-    fun getProductsJson(): String {
-        val arr = JSONArray()
-        for ((id, pd) in cachedProducts) {
-            val offer = pd.subscriptionOfferDetails?.firstOrNull()
-            val pricePhase = offer?.pricingPhases?.pricingPhaseList?.firstOrNull()
-            arr.put(
-                JSONObject().apply {
-                    put("productId", id)
-                    put("title", pd.title)
-                    put("description", pd.description)
-                    put("formattedPrice", pricePhase?.formattedPrice ?: "")
-                    put("currencyCode", pricePhase?.priceCurrencyCode ?: "USD")
-                }
-            )
-        }
-        return JSONObject().apply {
-            put("ready", isConnected)
-            put("products", arr)
-        }.toString()
-    }
-
-    fun getActiveEntitlementJson(): String {
-        val prefs = ZaraBridgeContract.prefs(context)
-        return JSONObject().apply {
-            put("ready", isConnected)
-            put("proActive", prefs.getBoolean(ZaraBridgeContract.KEY_PRO_TIER_ACTIVE, false))
-            put("sku", prefs.getString(ZaraBridgeContract.KEY_PRO_TIER_SKU, ""))
-            put("purchaseToken", prefs.getString(ZaraBridgeContract.KEY_PRO_PURCHASE_TOKEN, ""))
-        }.toString()
-    }
-
-    fun queryActivePurchases() {
-        val client = billingClient ?: return
-        if (!client.isReady) return
+    fun queryActiveSubscriptions(): String {
+        val client = billingClient ?: return "[]"
+        if (!connected) return activeTokens.toString()
 
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.SUBS)
             .build()
 
-        client.queryPurchasesAsync(params) { billingResult, purchases ->
-            if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-                processPurchaseList(purchases)
+        client.queryPurchasesAsync(params) { result, purchases ->
+            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                handlePurchases(purchases)
             }
         }
+        return activeTokens.toString()
     }
 
-    fun launchPurchaseFlow(activity: Activity, productId: String): Boolean {
+    fun getProductsJson(): String {
+        val arr = JSONArray()
+        synchronized(cachedProducts) {
+            cachedProducts.values.forEach { pd ->
+                arr.put(
+                    JSONObject().apply {
+                        put("productId", pd.productId)
+                        put("title", pd.title)
+                        put("description", pd.description)
+                    }
+                )
+            }
+        }
+        return arr.toString()
+    }
+
+    fun launchPurchase(productId: String): Boolean {
         val client = billingClient ?: return false
-        if (!client.isReady) {
-            connectAndRefresh()
+        if (!connected) {
+            startConnection()
             return false
         }
-        val pd = cachedProducts[productId] ?: return false
-        val offerToken = pd.subscriptionOfferDetails?.firstOrNull()?.offerToken ?: return false
+        val details = synchronized(cachedProducts) { cachedProducts[productId] } ?: return false
+        val offerToken = details.subscriptionOfferDetails?.firstOrNull()?.offerToken ?: return false
 
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
-            .setProductDetails(pd)
+            .setProductDetails(details)
             .setOfferToken(offerToken)
             .build()
 
@@ -157,72 +138,91 @@ class ZaraPlayBillingManager(private val context: Context) : PurchasesUpdatedLis
             .setProductDetailsParamsList(listOf(productParams))
             .build()
 
-        val res = client.launchBillingFlow(activity, flowParams)
-        return res.responseCode == BillingClient.BillingResponseCode.OK
+        val result = client.launchBillingFlow(activity, flowParams)
+        return result.responseCode == BillingClient.BillingResponseCode.OK
     }
 
-    override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
-        if (billingResult.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
-            processPurchaseList(purchases)
-        } else {
-            val payload = JSONObject().apply {
-                put("status", "cancelled_or_error")
-                put("responseCode", billingResult.responseCode)
-                put("message", billingResult.debugMessage)
-            }
-            broadcastBillingUpdate(payload)
-        }
-    }
-
-    private fun processPurchaseList(purchases: List<Purchase>) {
-        var foundActive = false
-        var activeSku = ""
-        var activeToken = ""
-
-        for (purchase in purchases) {
-            if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
-                foundActive = true
-                activeSku = purchase.products.firstOrNull() ?: ZaraBridgeContract.SKU_PRO_MONTHLY
-                activeToken = purchase.purchaseToken
-
-                if (!purchase.isAcknowledged) {
-                    val ackParams = AcknowledgePurchaseParams.newBuilder()
-                        .setPurchaseToken(purchase.purchaseToken)
-                        .build()
-                    billingClient?.acknowledgePurchase(ackParams) { }
+    override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
+        when (result.responseCode) {
+            BillingClient.BillingResponseCode.OK -> {
+                if (!purchases.isNullOrEmpty()) {
+                    handlePurchases(purchases)
                 }
             }
+            BillingClient.BillingResponseCode.USER_CANCELED -> {
+                onBillingEvent(
+                    JSONObject().apply {
+                        put("status", "cancelled")
+                        put("proActive", false)
+                        put("message", "Purchase cancelled.")
+                    }
+                )
+            }
+            else -> {
+                onBillingEvent(
+                    JSONObject().apply {
+                        put("status", "error")
+                        put("proActive", false)
+                        put("message", result.debugMessage)
+                    }
+                )
+            }
         }
-
-        ZaraBridgeContract.prefs(context).edit()
-            .putBoolean(ZaraBridgeContract.KEY_PRO_TIER_ACTIVE, foundActive)
-            .putString(ZaraBridgeContract.KEY_PRO_TIER_SKU, activeSku)
-            .putString(ZaraBridgeContract.KEY_PRO_PURCHASE_TOKEN, activeToken)
-            .apply()
-
-        val payload = JSONObject().apply {
-            put("status", if (foundActive) "purchased" else "inactive")
-            put("proActive", foundActive)
-            put("sku", activeSku)
-            put("purchaseToken", activeToken)
-        }
-        broadcastBillingUpdate(payload)
     }
 
-    private fun broadcastBillingUpdate(payload: JSONObject) {
-        val intent = Intent(ZaraBridgeContract.ACTION_BILLING_UPDATE).apply {
-            setPackage(context.packageName)
-            putExtra(ZaraBridgeContract.EXTRA_BILLING_JSON, payload.toString())
+    private fun handlePurchases(purchases: List<Purchase>) {
+        val client = billingClient ?: return
+        var anyPro = false
+        synchronized(activeTokens) {
+            while (activeTokens.length() > 0) {
+                activeTokens.remove(0)
+            }
         }
-        context.sendBroadcast(intent)
+        for (purchase in purchases) {
+            if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                anyPro = true
+                if (!purchase.isAcknowledged) {
+                    val ack = AcknowledgePurchaseParams.newBuilder()
+                        .setPurchaseToken(purchase.purchaseToken)
+                        .build()
+                    client.acknowledgePurchase(ack) { }
+                }
+                val sku = purchase.products.firstOrNull() ?: "zara_pro_monthly"
+                synchronized(activeTokens) {
+                    activeTokens.put(
+                        JSONObject().apply {
+                            put("sku", sku)
+                            put("purchaseToken", purchase.purchaseToken)
+                            put("acknowledged", purchase.isAcknowledged)
+                        }
+                    )
+                }
+                onBillingEvent(
+                    JSONObject().apply {
+                        put("status", "purchased")
+                        put("proActive", true)
+                        put("sku", sku)
+                        put("purchaseToken", purchase.purchaseToken)
+                        put("message", "Zara Pro subscription active.")
+                    }
+                )
+            }
+        }
+        if (!anyPro && purchases.isEmpty()) {
+            onBillingEvent(
+                JSONObject().apply {
+                    put("status", "none")
+                    put("proActive", false)
+                }
+            )
+        }
     }
 
     fun destroy() {
         try {
             billingClient?.endConnection()
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
         }
-        billingClient = null
-        isConnected = false
+        connected = false
     }
 }

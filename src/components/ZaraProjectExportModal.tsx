@@ -70,6 +70,7 @@ export const ZaraProjectExportModal: React.FC<ZaraProjectExportModalProps> = ({
   const [selectedFileContent, setSelectedFileContent] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
 
   const isInIframe = useMemo(() => {
     try {
@@ -157,6 +158,43 @@ export const ZaraProjectExportModal: React.FC<ZaraProjectExportModalProps> = ({
       }, 2200);
     } catch {
       // ignore clipboard errors on restricted contexts
+    }
+  };
+
+  const handleAuthenticatedDownload = async (
+    url: string,
+    filename: string,
+    key: string,
+    expectZip: boolean
+  ) => {
+    if (downloadingKey) return;
+    audioService.playChime('tap');
+    setDownloadingKey(key);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) {
+        throw new Error(`Download failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      if (expectZip) {
+        const headerBytes = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
+        if (headerBytes[0] !== 0x50 || headerBytes[1] !== 0x4b) {
+          throw new Error('Server did not return a valid ZIP archive. Please refresh and try again.');
+        }
+      }
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to download file right now.');
+    } finally {
+      setDownloadingKey(null);
     }
   };
 
@@ -321,15 +359,26 @@ export const ZaraProjectExportModal: React.FC<ZaraProjectExportModalProps> = ({
                   <FileArchive className="w-6 h-6 text-emerald-400 shrink-0" />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <a
-                    href="/api/export/zara-complete-project.zip"
-                    download="Zara-Complete-Project-A-to-Z.zip"
-                    onClick={() => audioService.playChime('tap')}
-                    className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 no-underline whitespace-nowrap shrink-0 transition-colors"
+                  <button
+                    type="button"
+                    disabled={downloadingKey !== null}
+                    onClick={() =>
+                      handleAuthenticatedDownload(
+                        '/api/export/zara-complete-project.zip',
+                        'Zara-Complete-Project-A-to-Z.zip',
+                        'full_zip',
+                        true
+                      )
+                    }
+                    className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer"
                   >
                     <Download className="w-4 h-4 shrink-0" />
-                    <span>Download Complete Project (.ZIP)</span>
-                  </a>
+                    <span>
+                      {downloadingKey === 'full_zip'
+                        ? 'Packing ZIP...'
+                        : 'Download Complete Project (.ZIP)'}
+                    </span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleCopyText(zipFullUrl, 'zip')}
@@ -348,6 +397,56 @@ export const ZaraProjectExportModal: React.FC<ZaraProjectExportModalProps> = ({
                     )}
                   </button>
                 </div>
+                <button
+                  type="button"
+                  disabled={downloadingKey !== null}
+                  onClick={() =>
+                    handleAuthenticatedDownload(
+                      '/api/export/zara-android-project.zip',
+                      'Zara-AI-Android-Studio-Project.zip',
+                      'android_zip',
+                      true
+                    )
+                  }
+                  className="min-h-[42px] w-full px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer"
+                >
+                  <FileArchive className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    {downloadingKey === 'android_zip'
+                      ? 'Packing Android ZIP...'
+                      : 'Download Android Studio + Termux APK Project (.ZIP)'}
+                  </span>
+                </button>
+                <div className="pt-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300 bg-slate-950/80 border border-white/10 rounded-xl px-3 py-2">
+                  <span className="truncate font-mono text-emerald-300">
+                    unzip ~/storage/downloads/Zara-Complete-Project-A-to-Z.zip
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyText(
+                        'termux-setup-storage && mkdir -p ~/zara-app && cd ~/zara-app && unzip -o ~/storage/downloads/Zara-Complete-Project-A-to-Z.zip && bash android/build-termux-apk.sh release',
+                        'termux'
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-400/40 text-emerald-200 font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    {copiedKey === 'termux' ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Termux Cmd Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copy Termux Build Cmd</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-[11px] text-amber-300/90 leading-snug">
+                  Termux tip: curl se direct download login-cookie ki wajah se fail hota hai — upar button se phone Downloads me ZIP save karein, phir Termux command chalayein.
+                </p>
               </div>
 
               {/* Option 2: Single Master TXT File (Opens directly on any mobile phone without Unzip!) */}
@@ -446,7 +545,7 @@ export const ZaraProjectExportModal: React.FC<ZaraProjectExportModalProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="फाइल खोजें (जैसे server.ts, App.tsx, audioService, ZaraLivingBackground)..."
+                  placeholder="फाइल खोजें (जैसे server.ts, App.tsx, audioService, ChatDrawer)..."
                   className="w-full min-h-[44px] pl-10 pr-3 py-2 rounded-xl bg-slate-900 border border-white/15 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-rose-400"
                 />
               </div>

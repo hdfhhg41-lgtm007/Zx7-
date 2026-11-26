@@ -44,6 +44,7 @@ import {
   Users,
   Send,
 } from 'lucide-react';
+import { UnifiedAppBuilderPanel } from './studio/UnifiedAppBuilderPanel';
 import { audioService } from '../services/audioService';
 import { fetchWithContainerWakeup } from '../services/chatVaultPersistence';
 import { getOwnerAuthHeaders } from '../services/ownerAuthService';
@@ -75,6 +76,7 @@ import {
   SelfImproveAuditReport,
   SocialAccountStatus,
   SocialDraftItem,
+  SocialPlatformId,
   TtsEngineId,
   ZARA_AI_ASSISTANTS,
   ZARA_VOICE_PROFILES,
@@ -296,13 +298,14 @@ export const AdvancedAiStudioModal: React.FC<AdvancedAiStudioModalProps> = ({
   // =================== 8. SOCIAL MEDIA ACCOUNT HUB STATE ===================
   const [socialStatuses, setSocialStatuses] = useState<SocialAccountStatus[]>([]);
   const [socialDrafts, setSocialDrafts] = useState<SocialDraftItem[]>([]);
-  const [socialPlatform, setSocialPlatform] = useState<'tiktok' | 'instagram' | 'facebook' | 'snapchat'>('instagram');
+  const [socialPlatform, setSocialPlatform] = useState<SocialPlatformId>('whatsapp');
   const [socialTopic, setSocialTopic] = useState('');
   const [socialCaption, setSocialCaption] = useState('');
   const [socialBusy, setSocialBusy] = useState(false);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
   const [confirmPublishDraft, setConfirmPublishDraft] = useState<SocialDraftItem | null>(null);
   const [confirmDeleteDraftId, setConfirmDeleteDraftId] = useState<string | null>(null);
+  const [activeDevProjectId, setActiveDevProjectId] = useState<string>('');
 
   // =================== 9. MULTI-STACK DEV LAB & WORKSPACE INSPECTOR STATE ===================
   const [devStack, setDevStack] = useState<'flutter' | 'kotlin' | 'typescript' | 'javascript' | 'python' | 'html_css'>('flutter');
@@ -1430,8 +1433,8 @@ export const AdvancedAiStudioModal: React.FC<AdvancedAiStudioModalProps> = ({
           {[
             { id: 'brains' as AiStudioTab, label: 'AI Brains', icon: Cpu },
             { id: 'research' as AiStudioTab, label: 'Live Web & AIs', icon: Globe },
-            { id: 'social' as AiStudioTab, label: 'Social Hub', icon: Share2 },
-            { id: 'devlab' as AiStudioTab, label: 'Coding Lab', icon: Code2 },
+            { id: 'social' as AiStudioTab, label: 'Social Hub (8)', icon: Share2 },
+            { id: 'devlab' as AiStudioTab, label: 'App Builder & APIs', icon: Code2 },
             { id: 'audit' as AiStudioTab, label: 'Self Audit', icon: Activity },
             { id: 'office' as AiStudioTab, label: 'Office Work', icon: Briefcase },
             { id: 'pctools' as AiStudioTab, label: 'PC & Dev', icon: Terminal },
@@ -1906,18 +1909,29 @@ export const AdvancedAiStudioModal: React.FC<AdvancedAiStudioModalProps> = ({
               {/* Draft Generator */}
               <div className="p-4 rounded-2xl bg-slate-900/85 border border-white/10 space-y-3">
                 <div className="flex flex-wrap gap-1.5">
-                  {(['instagram', 'tiktok', 'facebook', 'snapchat'] as const).map((p) => (
+                  {(
+                    [
+                      { id: 'whatsapp', label: 'WhatsApp' },
+                      { id: 'telegram', label: 'Telegram' },
+                      { id: 'instagram', label: 'Instagram' },
+                      { id: 'facebook', label: 'Facebook' },
+                      { id: 'youtube', label: 'YouTube' },
+                      { id: 'tiktok', label: 'TikTok' },
+                      { id: 'snapchat', label: 'Snapchat' },
+                      { id: 'twitter', label: 'X (Twitter)' },
+                    ] as Array<{ id: SocialPlatformId; label: string }>
+                  ).map((p) => (
                     <button
-                      key={p}
+                      key={p.id}
                       type="button"
-                      onClick={() => setSocialPlatform(p)}
-                      className={`min-h-[34px] px-3 rounded-lg text-xs font-bold capitalize border cursor-pointer ${
-                        socialPlatform === p
+                      onClick={() => setSocialPlatform(p.id)}
+                      className={`min-h-[34px] px-3 rounded-lg text-xs font-bold border cursor-pointer ${
+                        socialPlatform === p.id
                           ? 'bg-pink-500 text-white border-pink-400'
                           : 'bg-slate-950 border-white/10 text-slate-300'
                       }`}
                     >
-                      {p}
+                      {p.label}
                     </button>
                   ))}
                 </div>
@@ -2043,122 +2057,13 @@ export const AdvancedAiStudioModal: React.FC<AdvancedAiStudioModalProps> = ({
             </div>
           )}
 
-          {/* ================= TAB: CODING LAB & WORKSPACE INSPECTOR ================= */}
+          {/* ================= TAB: UNIFIED AI APP BUILDER, API CREATOR, KEY VAULT & TASK ENGINE ================= */}
           {activeTab === 'devlab' && (
-            <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-slate-900/85 border border-emerald-500/35 space-y-3">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Code2 className="w-4 h-4 text-emerald-400" />
-                  <span>Multi-Stack App &amp; Code Generator</span>
-                </h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { id: 'flutter', label: 'Flutter (Dart)' },
-                    { id: 'kotlin', label: 'Android (Kotlin)' },
-                    { id: 'typescript', label: 'React / TypeScript' },
-                    { id: 'javascript', label: 'Node.js / JS' },
-                    { id: 'python', label: 'Python' },
-                    { id: 'html_css', label: 'HTML & CSS' },
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setDevStack(s.id as any)}
-                      className={`min-h-[34px] px-2.5 rounded-lg text-xs font-bold border cursor-pointer ${
-                        devStack === s.id
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                          : 'bg-slate-950 border-white/10 text-slate-300'
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-
-                <textarea
-                  rows={3}
-                  value={devPrompt}
-                  onChange={(e) => setDevPrompt(e.target.value)}
-                  placeholder="Describe the feature, widget, screen, script, or bug fix to generate..."
-                  className="w-full p-3 rounded-xl bg-slate-950 border border-white/15 text-xs text-white"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={isGeneratingDev}
-                    onClick={handleGenerateDevCode}
-                    className="min-h-[40px] px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {isGeneratingDev ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Wand2 className="w-4 h-4" />
-                    )}
-                    <span>Generate Production Code</span>
-                  </button>
-                </div>
-
-                {devOutput && (
-                  <pre className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 text-[11px] font-mono text-emerald-100 whitespace-pre-wrap max-h-80 overflow-y-auto">
-                    {devOutput}
-                  </pre>
-                )}
-              </div>
-
-              {/* Project & Workspace Read-Only File Inspector */}
-              <div className="p-4 rounded-2xl bg-slate-900/85 border border-sky-500/35 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <FolderOpen className="w-4 h-4 text-sky-400" />
-                      <span>Zara Workspace Inspector (Read-Only)</span>
-                    </h3>
-                    {workspaceSummary && (
-                      <div className="text-[11px] text-slate-300">
-                        Total scanned files: {workspaceSummary.totalFiles} · {Object.entries(workspaceSummary.byArea || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <select
-                    value={inspectFilePath}
-                    onChange={(e) => setInspectFilePath(e.target.value)}
-                    className="min-h-[40px] px-3 rounded-xl bg-slate-950 border border-white/15 text-xs font-mono text-white"
-                  >
-                    {(workspaceSummary?.files || [{ path: 'server.ts' }, { path: 'src/App.tsx' }]).map((f) => (
-                      <option key={f.path} value={f.path}>
-                        {f.path}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    value={inspectQuestion}
-                    onChange={(e) => setInspectQuestion(e.target.value)}
-                    placeholder="What should Zara review in this file?"
-                    className="min-h-[40px] px-3 rounded-xl bg-slate-950 border border-white/15 text-xs text-white"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isInspectingWorkspace}
-                  onClick={handleInspectWorkspaceFile}
-                  className="min-h-[40px] px-4 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  {isInspectingWorkspace ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                  <span>Inspect Selected File</span>
-                </button>
-
-                {inspectAnalysis && (
-                  <pre className="p-3 rounded-xl bg-slate-950 border border-white/10 text-[11px] text-slate-200 whitespace-pre-wrap max-h-72 overflow-y-auto">
-                    {inspectAnalysis}
-                  </pre>
-                )}
-              </div>
-            </div>
+            <UnifiedAppBuilderPanel
+              isOwnerVerified={isOwnerVerified}
+              language={msgLang}
+              onSyncExternalProjectId={(pid) => setActiveDevProjectId(pid)}
+            />
           )}
 
           {/* ================= TAB: SELF-IMPROVEMENT SYSTEM AUDIT ================= */}

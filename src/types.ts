@@ -1,5 +1,6 @@
 export type Language =
   | 'urdu'
+  | 'roman_urdu'
   | 'punjabi'
   | 'hindi'
   | 'english'
@@ -234,6 +235,9 @@ export function getVoiceGenderFromName(voiceName?: string): ZaraVoiceGender {
 export type ZaraEmotionMode =
   | 'apnapan'
   | 'pyar'
+  | 'khushi'
+  | 'masti'
+  | 'udaas'
   | 'gussa'
   | 'narazgi'
   | 'ladai'
@@ -361,6 +365,11 @@ export interface PersonalityConfig {
   activeAssistantId?: AiAssistantId;
   preferredReplyLanguage?: Language;
   proactiveSelfTalkEnabled?: boolean;
+  proactiveIntervalMinutes?: 2 | 5 | 10 | 15;
+  proactiveContinueLastTopic?: boolean;
+  proactiveAllowInHandsFree?: boolean;
+  busyQuietMode?: boolean;
+  backgroundCameraAwarenessEnabled?: boolean;
   autoSelfCheckEnabled?: boolean;
   brainMode?: AiBrainEngineId;
   sttEngine?: SttEngineId;
@@ -429,6 +438,8 @@ export interface IncomingNotificationItem {
   timestamp: string;
   createdAtMs: number;
   isSensitiveMasked?: boolean;
+  conversationTitle?: string;
+  isGroup?: boolean;
 }
 
 export interface SpokenNotificationConfig {
@@ -437,6 +448,39 @@ export interface SpokenNotificationConfig {
   announceMessages: boolean;
   readMessageContent: boolean;
   maskSensitiveCodes: boolean;
+}
+
+export type AzanCityId = 'lahore' | 'karachi' | 'islamabad' | 'auto_gps';
+
+export interface AzanRamadanConfig {
+  enabled: boolean;
+  city: AzanCityId;
+  latitude?: number;
+  longitude?: number;
+  cityName?: string;
+  azanAudioAlert: boolean;
+  sehriAlert: boolean;
+  sehriMinutesBefore: number;
+  iftarAlert: boolean;
+  prayerTimeMute: boolean;
+  lastTriggeredKeys: Record<string, string>;
+}
+
+export interface SurroundingsSnapshot {
+  locationLabel: string;
+  tempC: number | null;
+  weatherCondition: string;
+  humidity?: number;
+  batteryPct: number | null;
+  batteryTempC: number | null;
+  isCharging: boolean | null;
+  networkType?: string;
+  online: boolean;
+  cameraSummary?: string;
+  localTimeStr?: string;
+  localDateStr?: string;
+  timezone?: string;
+  capturedAtIso: string;
 }
 
 export type AuthorizedFileFolder = 'Work' | 'Documents' | 'Notes' | 'Code' | 'Media' | 'Other';
@@ -573,13 +617,21 @@ export interface ProTierEntitlement {
   };
 }
 
-export type SocialPlatformId = 'tiktok' | 'instagram' | 'facebook' | 'snapchat';
+export type SocialPlatformId =
+  | 'tiktok'
+  | 'instagram'
+  | 'facebook'
+  | 'snapchat'
+  | 'whatsapp'
+  | 'telegram'
+  | 'youtube'
+  | 'twitter';
 
 export interface SocialAccountStatus {
   platform: SocialPlatformId;
   name: string;
   connected: boolean;
-  connectionSource: 'official_api_token' | 'unconfigured';
+  connectionSource: 'official_api_token' | 'vault_token' | 'deep_link_ready' | 'unconfigured';
   requiredEnvVars: string[];
   capabilities: string[];
   detail: string;
@@ -650,4 +702,158 @@ export interface ZaraUpdateReport {
   spokenReportHi: string;
 }
 
+// ======================== UNIFIED AI DEV PLATFORM, 2D/3D STUDIO & TASK AUTOMATION ========================
 
+export interface DevProjectFileNode {
+  path: string;
+  bytes: number;
+  lines: number;
+  language: string;
+  isBinary?: boolean;
+}
+
+export interface DevProjectSummary {
+  id: string;
+  name: string;
+  template: string;
+  createdAtIso: string;
+  updatedAtIso: string;
+  detectedLanguages: string[];
+  detectedFrameworks: string[];
+  entryPoints: string[];
+  missingConfigs: string[];
+  totalFiles: number;
+  totalBytes: number;
+  toolchainSupport: {
+    localNodeCheck: boolean;
+    localTypeScriptCheck: boolean;
+    localPythonCheck: boolean;
+    localGradleSdk: boolean;
+    localFlutterSdk: boolean;
+  };
+  files: DevProjectFileNode[];
+}
+
+export type DevBuildStageId =
+  | 'upload'
+  | 'analyze'
+  | 'code'
+  | 'api'
+  | 'dependencies'
+  | 'test'
+  | 'fix'
+  | 'build'
+  | 'verify'
+  | 'download';
+
+export type DevPipelineStepStatus = 'pending' | 'running' | 'passed' | 'repaired' | 'blocked' | 'skipped';
+
+export interface DevPipelineStageResult {
+  stage: DevBuildStageId;
+  label: string;
+  status: DevPipelineStepStatus;
+  detail: string;
+  durationMs: number;
+}
+
+export interface DevBackupSnapshot {
+  backupId: string;
+  reason: string;
+  createdAtIso: string;
+  fileCount: number;
+}
+
+export interface DevPipelineRunResult {
+  ok: boolean;
+  projectId: string;
+  startedAtIso: string;
+  finishedAtIso: string;
+  stages: DevPipelineStageResult[];
+  healAttempts: number;
+  repairedFiles: string[];
+  errors: string[];
+  warnings: string[];
+  honestBuildNote: string;
+  downloadZipUrl: string;
+  termuxBuildReady: boolean;
+  githubActionsReady: boolean;
+  backupCreated?: DevBackupSnapshot | null;
+}
+
+export type ApiVaultProviderId =
+  | 'gemini'
+  | 'openai'
+  | 'groq'
+  | 'huggingface'
+  | 'ollama'
+  | 'openrouter'
+  | 'elevenlabs'
+  | 'replicate'
+  | 'github'
+  | 'telegram'
+  | 'youtube'
+  | 'twitter'
+  | 'meta_fb'
+  | 'meta_ig';
+
+export interface ApiVaultProviderStatus {
+  provider: ApiVaultProviderId;
+  name: string;
+  category: 'llm' | 'voice' | 'image_video' | 'social' | 'devtools';
+  configured: boolean;
+  source: 'env' | 'vault' | 'none';
+  maskedPreview: string;
+  pricingTier: 'free_tier' | 'free_local' | 'freemium' | 'paid';
+  freeLimitsNote: string;
+  freeAlternative: string;
+  docsHint: string;
+  lastTestOk?: boolean;
+  lastTestMessage?: string;
+}
+
+export type MusicControlAction =
+  | 'play'
+  | 'pause'
+  | 'resume'
+  | 'next'
+  | 'previous'
+  | 'volume_up'
+  | 'volume_down'
+  | 'mute';
+
+export interface MusicControlCommand {
+  action: MusicControlAction;
+  query?: string;
+  provider?: 'yt_music' | 'spotify' | 'youtube' | 'system';
+}
+
+export interface AutonomousTaskStep {
+  id: string;
+  stepNumber: number;
+  title: string;
+  tool:
+    | 'dev_create'
+    | 'dev_api'
+    | 'dev_heal'
+    | 'social_draft'
+    | 'music_control'
+    | 'phone_control'
+    | 'whatsapp_action'
+    | 'research'
+    | 'chat_answer';
+  status: 'completed' | 'needs_device_or_confirm' | 'blocked' | 'failed';
+  retries: number;
+  detail: string;
+  requiresConfirmation?: boolean;
+  clientAction?: Record<string, any>;
+}
+
+export interface AutonomousTaskPlan {
+  ok: boolean;
+  goal: string;
+  language: string;
+  summary: string;
+  steps: AutonomousTaskStep[];
+  completedCount: number;
+  blockedOrPendingCount: number;
+}
