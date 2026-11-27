@@ -30,6 +30,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -39,18 +40,31 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricPrompt
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
+        private const val NATIVE_ASSET_HOST = "appassets.androidplatform.net"
+        private const val NATIVE_START_URL = "https://$NATIVE_ASSET_HOST/index.html"
         private const val ZARA_WEB_URL =
             "https://ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app"
         private const val KEY_CUSTOM_SERVER_URL = "custom_server_url"
     }
 
+    private val hasBundledWwwAssets: Boolean by lazy {
+        try {
+            assets.open("www/index.html").use { true }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private lateinit var assetLoader: WebViewAssetLoader
     private lateinit var webView: WebView
     private var billingManager: ZaraPlayBillingManager? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -184,6 +198,11 @@ class MainActivity : AppCompatActivity() {
         webView.overScrollMode = View.OVER_SCROLL_NEVER
         setContentView(webView)
 
+        assetLoader = WebViewAssetLoader.Builder()
+            .setDomain(NATIVE_ASSET_HOST)
+            .addPathHandler("/", NativeWwwPathHandler())
+            .build()
+
         configureWebView()
         registerNativeReceivers()
         setupBilling()
@@ -192,11 +211,64 @@ class MainActivity : AppCompatActivity() {
         val savedUrl = getSharedPreferences(ZaraWakeWordService.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_CUSTOM_SERVER_URL, null)
             ?.takeIf { it.startsWith("https://") }
-        val startUrl = intent?.data?.toString()?.takeIf { it.startsWith("https://") }
-            ?: savedUrl
-            ?: ZARA_WEB_URL
+        val startUrl = if (hasBundledWwwAssets) {
+            NATIVE_START_URL
+        } else {
+            intent?.data?.toString()?.takeIf { it.startsWith("https://") }
+                ?: savedUrl
+                ?: ZARA_WEB_URL
+        }
         webView.loadUrl(startUrl)
         handleWakeIntent(intent)
+    }
+
+    private inner class NativeWwwPathHandler : WebViewAssetLoader.PathHandler {
+        override fun handle(path: String): WebResourceResponse? {
+            val clean = path.trimStart('/')
+            if (clean.startsWith("api/")) return null
+            val targetPath = if (clean.isEmpty()) "index.html" else clean
+            val assetRelPath = "www/$targetPath"
+            return try {
+                val stream = assets.open(assetRelPath)
+                WebResourceResponse(guessMimeType(targetPath), "UTF-8", stream).apply {
+                    responseHeaders = mapOf("Access-Control-Allow-Origin" to "*")
+                }
+            } catch (_: IOException) {
+                if (!targetPath.contains('.')) {
+                    try {
+                        WebResourceResponse("text/html", "UTF-8", assets.open("www/index.html")).apply {
+                            responseHeaders = mapOf("Access-Control-Allow-Origin" to "*")
+                        }
+                    } catch (_: IOException) {
+                        null
+                    }
+                } else {
+                    null
+                }
+            }
+        }
+
+        private fun guessMimeType(path: String): String {
+            val lower = path.lowercase(Locale.ROOT)
+            return when {
+                lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html"
+                lower.endsWith(".js") || lower.endsWith(".mjs") -> "application/javascript"
+                lower.endsWith(".css") -> "text/css"
+                lower.endsWith(".json") -> "application/json"
+                lower.endsWith(".webmanifest") -> "application/manifest+json"
+                lower.endsWith(".svg") -> "image/svg+xml"
+                lower.endsWith(".png") -> "image/png"
+                lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+                lower.endsWith(".webp") -> "image/webp"
+                lower.endsWith(".ico") -> "image/x-icon"
+                lower.endsWith(".woff2") -> "font/woff2"
+                lower.endsWith(".woff") -> "font/woff"
+                lower.endsWith(".ttf") -> "font/ttf"
+                lower.endsWith(".mp3") -> "audio/mpeg"
+                lower.endsWith(".wav") -> "audio/wav"
+                else -> "application/octet-stream"
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -300,6 +372,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val url = request?.url ?: return null
+                if (hasBundledWwwAssets &&
+                    url.host == NATIVE_ASSET_HOST &&
+                    !url.path.orEmpty().startsWith("/api/")
+                ) {
+                    return assetLoader.shouldInterceptRequest(url)
+                }
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url?.toString() ?: return false
                 if (url.startsWith("intent:") || url.startsWith("tel:") ||
@@ -309,7 +395,8 @@ class MainActivity : AppCompatActivity() {
                     return openExternalUriSafely(url)
                 }
                 val host = request.url?.host.orEmpty()
-                val stayInWebView = host.endsWith(".run.app") ||
+                val stayInWebView = host == NATIVE_ASSET_HOST ||
+                    host.endsWith(".run.app") ||
                     host.contains("accounts.google.com") ||
                     host.contains("accounts.youtube.com") ||
                     host.contains("gstatic.com") ||
@@ -327,7 +414,8 @@ class MainActivity : AppCompatActivity() {
                 error: WebResourceError?
             ) {
                 if (request?.isForMainFrame != true) return
-                val targetUrl = request.url?.toString() ?: ZARA_WEB_URL
+                if (hasBundledWwwAssets && request.url?.host == NATIVE_ASSET_HOST) return
+                val targetUrl = if (hasBundledWwwAssets) NATIVE_START_URL else (request.url?.toString() ?: ZARA_WEB_URL)
                 val safeTarget = targetUrl.replace("'", "")
                 val html = """
                     <!doctype html>
@@ -950,6 +1038,9 @@ class MainActivity : AppCompatActivity() {
             return getSharedPreferences(ZaraWakeWordService.PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(KEY_CUSTOM_SERVER_URL, ZARA_WEB_URL) ?: ZARA_WEB_URL
         }
+
+        @JavascriptInterface
+        fun isBundledNativeApp(): Boolean = hasBundledWwwAssets
 
         @JavascriptInterface
         fun controlMedia(action: String): Boolean {

@@ -127,12 +127,32 @@ server.listen(activePort, '0.0.0.0', () => {
 // Explicitly allow microphone, camera, screen-share, and autoplay in PWA WebAPK & iframe contexts,
 // and stamp X-Zara-App: ready on ALL routes (including /api/health!) so the PWA Service Worker &
 // Smart Auto-Recovery always distinguish genuine Zara responses from proxy warmup pages.
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.setHeader(
     'Permissions-Policy',
     'microphone=*, camera=*, display-capture=*, geolocation=*, autoplay=*'
   );
   res.setHeader('X-Zara-App', 'ready');
+
+  const origin = String(req.headers.origin || '');
+  if (
+    origin === 'https://appassets.androidplatform.net' ||
+    origin === 'http://localhost' ||
+    origin === 'https://localhost' ||
+    origin === 'capacitor://localhost'
+  ) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Zara-Owner-Token, X-Zara-Device-Id, X-Zara-Tier-Token'
+    );
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+  }
+
   next();
 });
 
@@ -6378,6 +6398,7 @@ app.get('/api/export/zara-all-code-a-to-z.txt', (_req, res) => {
 
     for (const f of files) {
       if (f.isBinary) continue;
+      if (f.path.startsWith('android/app/src/main/assets/www/')) continue;
       const code = f.readBuffer().toString('utf-8');
       sections.push(
         `################################################################################`,

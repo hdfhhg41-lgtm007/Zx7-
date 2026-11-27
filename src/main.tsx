@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App.tsx';
 import './index.css';
+import {
+  installNativeFetchBridge,
+  isBundledNativeAndroidApp,
+} from './services/nativeApiBridge';
 
 declare global {
   interface Window {
@@ -13,8 +17,9 @@ declare global {
   }
 }
 
-// Signal immediately that JavaScript entry executed so slow-network downloads are never interrupted
+// Signal immediately that JavaScript entry executed and route /api/* calls when running from bundled APK assets
 window.__zaraMainLoaded = true;
+installNativeFetchBridge();
 
 function safeSessionGet(key: string): string | null {
   try {
@@ -129,6 +134,10 @@ let swStarted = false;
 function startDeferredSW(): void {
   if (swStarted) return;
   swStarted = true;
+
+  if (isBundledNativeAndroidApp()) {
+    return;
+  }
 
   if (!import.meta.env.PROD) {
     // Never run Vite PWA dev-sw in dev mode — clean up any old dev-sw registrations instead

@@ -80,6 +80,18 @@ if command -v aapt2 >/dev/null 2>&1; then
   echo "Using native ARM64 aapt2: ${AAPT2_BIN}"
 fi
 
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WWW_ASSETS_DIR="${APP_DIR}/src/main/assets/www"
+if [ -f "${ROOT_DIR}/package.json" ] && command -v npm >/dev/null 2>&1; then
+  echo "Building & bundling native web assets into ${WWW_ASSETS_DIR}..."
+  (cd "$ROOT_DIR" && npm run build:android)
+elif [ -d "${ROOT_DIR}/dist" ] && [ -f "${ROOT_DIR}/dist/index.html" ]; then
+  echo "Syncing prebuilt dist/ into ${WWW_ASSETS_DIR}..."
+  rm -rf "$WWW_ASSETS_DIR"
+  mkdir -p "$WWW_ASSETS_DIR"
+  cp -R "${ROOT_DIR}/dist/." "$WWW_ASSETS_DIR/"
+fi
+
 cd "$SCRIPT_DIR"
 GRADLE_BIN="gradle"
 if ! command -v gradle >/dev/null 2>&1 && [ -f "./gradlew" ]; then

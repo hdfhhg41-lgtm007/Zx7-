@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ur">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zara AI — آن ہو رہی ہے...</title>
+    <meta name="theme-color" content="#070313" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: #070512;
+        color: #f8fafc;
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, Roboto, sans-serif;
+        text-align: center;
+        overflow: hidden;
+      }
+      .card {
+        width: 100%;
+        max-width: 360px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .orb {
+        width: 72px;
+        height: 72px;
+        border-radius: 9999px;
+        background: rgba(244, 63, 94, 0.18);
+        border: 2px solid rgba(244, 63, 94, 0.75);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 18px;
+        letter-spacing: 0.04em;
+        color: #fda4af;
+        margin-bottom: 16px;
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      h1 {
+        font-size: 18px;
+        font-weight: 700;
+        color: #ffffff;
+        margin-bottom: 8px;
+      }
+      p {
+        font-size: 13px;
+        line-height: 1.6;
+        color: #94a3b8;
+        max-width: 300px;
+        margin-bottom: 14px;
+      }
+      .status {
+        font-size: 12px;
+        color: #fda4af;
+        min-height: 20px;
+        margin-bottom: 18px;
+      }
+      .btn {
+        min-height: 44px;
+        padding: 10px 24px;
+        border-radius: 14px;
+        border: 1px solid rgba(244, 63, 94, 0.65);
+        background: #e11d48;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+      }
+      @keyframes pulse {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.45);
+        }
+        50% {
+          transform: scale(1.06);
+          box-shadow: 0 0 26px 6px rgba(244, 63, 94, 0.28);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="orb">ZARA</div>
+      <h1>Zara AI آن ہو رہی ہے...</h1>
+      <p>سرور کنکشن قائم ہو رہا ہے — زارا خودکار طور پر چند لمحوں میں کھل جائے گی...</p>
+      <div id="st" class="status">کنکشن چیک ہو رہا ہے...</div>
+      <button class="btn" type="button" onclick="openNow()">Open Zara Now (براہِ راست کھولیں)</button>
+    </div>
+
+    <script>
+      // 1. Instant Cache Hydration: if user visited before, render cached shell immediately!
+      try {
+        if ('caches' in window && window.caches) {
+          window.caches.open('zara-app-shell-v10').then(function(c) {
+            return c.match('/__zara_verified_shell_v10__');
+          }).then(function(res) {
+            if (res) {
+              return res.text().then(function(html) {
+                if (html && html.indexOf('id="root"') !== -1) {
+                  document.open();
+                  document.write(html);
+                  document.close();
+                }
+              });
+            }
+          }).catch(function() {});
+        }
+      } catch (e) {}
+
+      // 2. High-speed 350ms health poller
+      var busy = false;
+      var tries = 0;
+      var st = document.getElementById('st');
+
+      function openNow() {
+        try {
+          var u = new URL(window.location.href);
+          u.searchParams.set('_zwake', String(Date.now()));
+          window.location.replace(u.toString());
+        } catch (e) {
+          window.location.reload();
+        }
+      }
+
+      function ping() {
+        if (busy) return;
+        busy = true;
+        tries++;
+        if (st) st.textContent = 'سرور جاگ رہا ہے... (' + tries + ')';
+
+        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var t = ctrl ? setTimeout(function() { ctrl.abort(); }, 1400) : null;
+
+        fetch('/api/health?_w=' + Date.now(), {
+          cache: 'no-store',
+          credentials: 'include',
+          signal: ctrl ? ctrl.signal : undefined
+        }).then(function(res) {
+          if (t) clearTimeout(t);
+          if (res.status === 200) {
+            if (st) st.textContent = 'سرور تیار ہے — زارا کھل رہی ہے ✓';
+            openNow();
+            return;
+          }
+          busy = false;
+        }).catch(function() {
+          if (t) clearTimeout(t);
+          busy = false;
+        });
+      }
+
+      setInterval(ping, 350);
+      ping();
+    </script>
+  </body>
+</html>

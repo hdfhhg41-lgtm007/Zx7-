@@ -13,6 +13,7 @@ import {
 } from './ownerAuthService';
 import { isAppOnline, runOfflineZaraBrain } from './offlineBrainService';
 import { getTierRequestHeaders } from './proTierService';
+import { resolveNativeWsUrl } from './nativeApiBridge';
 import { ChatMessage, Language, PersonalityConfig } from '../types';
 
 const WORKLET_CODE = `
@@ -724,8 +725,7 @@ export class LivePhoneCallController {
   private connectLiveWebSocket() {
     if (!this.isRunning) return;
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${window.location.host}/api/live-call`;
+    const wsUrl = resolveNativeWsUrl('/api/live-call');
 
     try {
       const ws = new WebSocket(wsUrl);

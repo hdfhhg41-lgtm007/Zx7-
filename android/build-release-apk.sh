@@ -31,6 +31,18 @@ if [ ! -f "$KEYSTORE_FILE" ]; then
     -dname "CN=Zara AI, OU=AI Studio, O=Zara Systems, L=Kuala Lumpur, ST=Federal Territory, C=MY"
 fi
 
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WWW_ASSETS_DIR="${APP_DIR}/src/main/assets/www"
+if [ -f "${ROOT_DIR}/package.json" ] && command -v npm >/dev/null 2>&1; then
+  echo "Building & bundling native web assets into ${WWW_ASSETS_DIR}..."
+  (cd "$ROOT_DIR" && npm run build:android)
+elif [ -d "${ROOT_DIR}/dist" ] && [ -f "${ROOT_DIR}/dist/index.html" ]; then
+  echo "Syncing prebuilt dist/ into ${WWW_ASSETS_DIR}..."
+  rm -rf "$WWW_ASSETS_DIR"
+  mkdir -p "$WWW_ASSETS_DIR"
+  cp -R "${ROOT_DIR}/dist/." "$WWW_ASSETS_DIR/"
+fi
+
 cd "$SCRIPT_DIR"
 if [ -f "./gradlew" ]; then
   chmod +x ./gradlew 2>/dev/null || true

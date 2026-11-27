@@ -4,6 +4,12 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/sync-android-assets.mjs'
+      - 'index.html'
+      - 'package.json'
+      - 'vite.config.ts'
       - 'android/**'
       - '.github/workflows/build-android-apk.yml'
 
@@ -15,6 +21,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Build & Bundle Native Android Web Assets
+        run: |
+          npm install
+          npm run build:android
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5

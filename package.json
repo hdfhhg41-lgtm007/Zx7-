@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "build:android": "vite build && node scripts/sync-android-assets.mjs",
     "preview": "vite preview",
     "start": "node server.ts",
     "clean": "rm -rf dist server.js",

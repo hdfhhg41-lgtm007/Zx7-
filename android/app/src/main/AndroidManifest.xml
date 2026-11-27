@@ -106,17 +106,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Digital Asset Links & App Links Verification -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="https"
-                    android:host="ais-pre-qfebbx4373mpl6gv6xf3bh-147569699588.asia-southeast1.run.app"
-                    android:pathPattern=".*" />
-            </intent-filter>
         </activity>
 
         <!-- Foreground Microphone & Security Service -->

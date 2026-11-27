@@ -63,6 +63,7 @@ declare global {
       queryPlayPurchases?: () => string;
       setCustomServerUrl?: (url: string) => boolean;
       getServerUrl?: () => string;
+      isBundledNativeApp?: () => boolean;
       setAssistantLanguage?: (lang: string) => boolean;
       controlMedia?: (action: string) => boolean;
     };
