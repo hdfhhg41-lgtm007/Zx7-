@@ -57,10 +57,12 @@ declare global {
       setCustomWakeWord?: (phrase: string) => boolean;
       getWakeWordStatus?: () => string;
       setFlashlight?: (enabled: boolean) => boolean;
-      isPlayBillingAvailable?: () => boolean;
-      queryPlayBillingProducts?: () => string;
-      launchPlayBillingPurchase?: (productId: string) => boolean;
-      queryPlayPurchases?: () => string;
+      ensureSpeakerAudioRoute?: () => boolean;
+      speakNativeTts?: (text: string, langTag: string) => boolean;
+      stopNativeTts?: () => boolean;
+      launchYouTubeSong?: (query: string) => boolean;
+      pauseWakeWordTemporarily?: () => boolean;
+      resumeWakeWord?: () => boolean;
       setCustomServerUrl?: (url: string) => boolean;
       getServerUrl?: () => string;
       isBundledNativeApp?: () => boolean;
@@ -90,13 +92,6 @@ declare global {
     onZaraAccessibilityState?: (connected: boolean) => void;
     onZaraForegroundVoiceStateChange?: (running: boolean) => void;
     onZaraAndroidPermissionsResult?: (results: Record<string, boolean>) => void;
-    onZaraPlayBillingUpdate?: (payload: {
-      status?: string;
-      proActive?: boolean;
-      sku?: string;
-      purchaseToken?: string;
-      message?: string;
-    }) => void;
   }
 }
 
@@ -126,15 +121,6 @@ if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('zara-accessibility-state', {
           detail: { connected: Boolean(connected) },
-        })
-      );
-    };
-  }
-  if (!window.onZaraPlayBillingUpdate) {
-    window.onZaraPlayBillingUpdate = (payload) => {
-      window.dispatchEvent(
-        new CustomEvent('zara-play-billing-update', {
-          detail: payload || {},
         })
       );
     };

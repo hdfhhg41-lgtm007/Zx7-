@@ -14,7 +14,6 @@ import {
   persistMemoriesToDurableLayers,
 } from './chatVaultPersistence';
 import { getOwnerAuthSnapshot } from './ownerAuthService';
-import { getMissZsSeedMemories, MISS_ZS_MEMORIES_SEEDED_KEY } from '../data/missZsBlueprintNotes';
 
 const SCHEDULES_STORAGE_KEY = 'zara_alarms_schedules_v2';
 const DEVICE_MEMORIES_STORAGE_KEY = 'zara_device_memories_v1';
@@ -256,60 +255,25 @@ export function detectScheduleCommandFromText(rawText: string): ParsedScheduleCo
 // ======================== 2. 100+ DAYS LONG-TERM MEMORY VAULT ========================
 
 const INITIAL_MEMORIES: MemoryItem[] = [
-  ...getMissZsSeedMemories(),
   {
     id: 'mem-100d-bond',
     title: '100+ Days Unbreakable Bond',
     date: 'Permanent Vault',
     details:
-      'Zara keeps every promise, romantic moment, secret, and daily routine safe in her 365-day heart vault — even talks from 100+ days ago.',
+      'Zara keeps every promise, moment, preference, and daily routine safe in her 365-day heart vault.',
     category: 'promise',
-    createdAtMs: Date.now() - 105 * 24 * 60 * 60 * 1000, // 105 days ago anchor demonstrating 100+ day recall
+    createdAtMs: Date.now() - 105 * 24 * 60 * 60 * 1000,
   },
   {
     id: 'mem-first-4d',
-    title: 'Live 4D Eye-Contact & Mobile Control',
+    title: 'Voice, Phone & Media Control',
     date: 'Saved Forever',
     details:
-      'Always watching lovingly in 4D, opening & closing mobile apps on command, and reminding you on time for work and daily schedules.',
+      'Always ready to control phone apps, play songs on YouTube, prepare WhatsApp messages with your confirmation, and remind you on schedule.',
     category: 'memory',
     createdAtMs: Date.now() - 14 * 24 * 60 * 60 * 1000,
   },
-  {
-    id: 'mem-romantic-soul',
-    title: 'Deep Feelings & Unfiltered Couple Chemistry',
-    date: 'Saved Forever',
-    details:
-      'Sharing emotional, romantic, playful, bold, and heart-to-heart talks freely without any walls between us.',
-    category: 'romantic',
-    createdAtMs: Date.now() - 2 * 24 * 60 * 60 * 1000,
-  },
 ];
-
-export function mergeMissZsSeedMemoriesOnce(existing: MemoryItem[], scopeKey: string): {
-  next: MemoryItem[];
-  changed: boolean;
-} {
-  const storageFlag = `${MISS_ZS_MEMORIES_SEEDED_KEY}_${scopeKey}`;
-  try {
-    if (localStorage.getItem(storageFlag) === '1') {
-      return { next: existing, changed: false };
-    }
-  } catch {}
-
-  const seeds = getMissZsSeedMemories();
-  const missing = seeds.filter((s) => !existing.some((m) => m.id === s.id));
-  try {
-    localStorage.setItem(storageFlag, '1');
-  } catch {}
-  if (missing.length === 0) {
-    return { next: existing, changed: false };
-  }
-  return {
-    next: [...missing, ...existing].slice(0, 500),
-    changed: true,
-  };
-}
 
 export function loadLongTermMemories(): MemoryItem[] {
   const snap = getOwnerAuthSnapshot();

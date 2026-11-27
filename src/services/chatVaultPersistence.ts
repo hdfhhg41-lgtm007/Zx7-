@@ -291,7 +291,6 @@ async function syncVaultToServerNow(
       timestamp: m.timestamp,
       createdAtMs: m.createdAtMs,
       language: m.language,
-      builtApp: m.builtApp,
     }));
 
     await Promise.allSettled([

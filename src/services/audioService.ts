@@ -148,6 +148,21 @@ class AudioManager {
     });
   }
 
+  public ensureSpeakerAudioRoute() {
+    this.ensureNativeSpeakerRoute();
+    try {
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {});
+      }
+    } catch {}
+  }
+
+  private ensureNativeSpeakerRoute() {
+    try {
+      (window as any)?.ZaraAndroidBridge?.ensureSpeakerAudioRoute?.();
+    } catch {}
+  }
+
   private setSpeakingState(val: boolean) {
     if (this.isSpeaking !== val) {
       if (!this.isSpeaking && val) {
@@ -645,6 +660,7 @@ class AudioManager {
   enqueueLivePcm24k(base64Pcm: string) {
     if (!base64Pcm) return;
     try {
+      this.ensureNativeSpeakerRoute();
       const ctx = this.getAudioContext();
       if (ctx.state === 'suspended') {
         ctx.resume().catch(() => {});
@@ -732,6 +748,10 @@ class AudioManager {
       } catch {}
       this.bgSafeBlobUrl = null;
     }
+
+    try {
+      (window as any)?.ZaraAndroidBridge?.stopNativeTts?.();
+    } catch {}
 
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
@@ -843,6 +863,7 @@ class AudioManager {
   ): Promise<boolean> {
     if (!base64Wav) return false;
     this.stopAudio();
+    this.ensureNativeSpeakerRoute();
     const playbackId = this.activePlaybackId;
     const rate = Math.max(0.85, Math.min(1.18, playbackRate || 1.0));
     const isScreenHidden =
@@ -859,7 +880,7 @@ class AudioManager {
       if (ctx.state === 'suspended') {
         await Promise.race([
           ctx.resume(),
-          new Promise((_, rej) => window.setTimeout(() => rej(new Error('ctx_suspended')), 500)),
+          new Promise((_, rej) => window.setTimeout(() => rej(new Error('ctx_suspended')), 1100)),
         ]);
       }
 
@@ -1053,7 +1074,13 @@ class AudioManager {
       onEnd?: () => void;
     }
   ): Promise<void> {
+    const cleanCheck = (text || '').trim();
+    if (!cleanCheck && !options?.base64Audio) {
+      options?.onEnd?.();
+      return;
+    }
     this.stopAudio();
+    this.ensureNativeSpeakerRoute();
     const myPlaybackId = this.activePlaybackId;
     const rate = options?.rate ?? 1.0;
     const voiceName = options?.voiceName || 'Zephyr';
@@ -1158,20 +1185,62 @@ class AudioManager {
     }
   ): Promise<void> {
     return new Promise<void>((resolve) => {
-      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-        this.notifyVoiceNotice({
-          available: false,
-          message: 'Speech synthesis is not supported on this browser or platform.',
-          lang: options?.language || 'urdu',
-        });
+      const cleanText = text.replace(/[*_~`#]/g, '').trim();
+      if (!cleanText) {
         this.setSpeakingState(false);
         options?.onEnd?.();
         resolve();
         return;
       }
 
-      const cleanText = text.replace(/[*_~`#]/g, '').trim();
-      if (!cleanText) {
+      const lang = options?.language || 'urdu';
+      const isGurmukhi = /[\u0A00-\u0A7F]/.test(cleanText);
+      const isDevanagari = /[\u0900-\u097F]/.test(cleanText);
+      const isArabicScript = /[\u0600-\u06FF]/.test(cleanText) && lang === 'arabic';
+      const fallbackLangCode =
+        lang === 'punjabi' || isGurmukhi
+          ? 'pa-IN'
+          : lang === 'hindi' || isDevanagari
+          ? 'hi-IN'
+          : lang === 'uzbek'
+          ? 'uz-UZ'
+          : lang === 'malay'
+          ? 'ms-MY'
+          : lang === 'arabic' || isArabicScript
+          ? 'ar-SA'
+          : lang === 'urdu' || lang === 'roman_urdu'
+          ? 'ur-PK'
+          : 'en-US';
+
+      // Prefer Native Android TextToSpeech first inside APK WebView (speechSynthesis.getVoices() is often empty on Android WebView)
+      const myPlaybackId = this.activePlaybackId;
+      const nativeBridge = typeof window !== 'undefined' ? (window as any).ZaraAndroidBridge : null;
+      if (nativeBridge?.speakNativeTts) {
+        try {
+          this.ensureNativeSpeakerRoute();
+          const spokenOk = Boolean(nativeBridge.speakNativeTts(cleanText, fallbackLangCode));
+          if (spokenOk) {
+            this.setSpeakingState(true);
+            options?.onStart?.();
+            const estMs = Math.min(45000, Math.max(1800, cleanText.length * 72));
+            this.safetyTimer = window.setTimeout(() => {
+              if (myPlaybackId === this.activePlaybackId) {
+                this.setSpeakingState(false);
+                options?.onEnd?.();
+              }
+              resolve();
+            }, estMs);
+            return;
+          }
+        } catch {}
+      }
+
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+        this.notifyVoiceNotice({
+          available: false,
+          message: 'Speech synthesis is not supported on this browser or platform.',
+          lang: options?.language || 'urdu',
+        });
         this.setSpeakingState(false);
         options?.onEnd?.();
         resolve();
@@ -1196,10 +1265,7 @@ class AudioManager {
       if (chunks.length === 0) chunks.push(cleanText);
 
       const voices = window.speechSynthesis.getVoices();
-      const lang = options?.language || 'urdu';
       const targetGender = getVoiceGenderFromName(options?.voiceName);
-      const isGurmukhi = /[\u0A00-\u0A7F]/.test(cleanText);
-      const isDevanagari = /[\u0900-\u097F]/.test(cleanText);
 
       const matchesGender = (v: SpeechSynthesisVoice) => {
         const nameLower = v.name.toLowerCase();
@@ -1228,8 +1294,6 @@ class AudioManager {
         ) ||
         voices.find((v) => v.lang.toLowerCase().startsWith(prefix));
 
-      const isArabicScript = /[\u0600-\u06FF]/.test(cleanText) && lang === 'arabic';
-
       const chosenVoice =
         (lang === 'punjabi' || isGurmukhi
           ? findForLang('pa') || findForLang('ur') || findForLang('hi')
@@ -1244,37 +1308,6 @@ class AudioManager {
           : lang === 'english'
           ? findForLang('en-pk') || findForLang('en-in') || findForLang('en')
           : findForLang('ur-pk') || findForLang('ur') || findForLang('hi')) || null;
-
-      if (!chosenVoice) {
-        if (voices.length > 0) {
-          this.notifyVoiceNotice({
-            available: false,
-            message: `Selected natural ${targetGender} voice for ${lang} is unavailable on this device. Using standard device voice.`,
-            lang,
-          });
-        } else {
-          this.notifyVoiceNotice({
-            available: false,
-            message: 'Device text-to-speech voice pack not found. Displaying text response.',
-            lang,
-          });
-        }
-      }
-
-      const fallbackLangCode =
-        lang === 'punjabi' || isGurmukhi
-          ? 'pa-IN'
-          : lang === 'hindi' || isDevanagari
-          ? 'hi-IN'
-          : lang === 'uzbek'
-          ? 'uz-UZ'
-          : lang === 'malay'
-          ? 'ms-MY'
-          : lang === 'arabic' || isArabicScript
-          ? 'ar-SA'
-          : lang === 'urdu' || lang === 'roman_urdu'
-          ? 'ur-PK'
-          : 'en-US';
 
       let completed = false;
       let pollId: number | null = null;
@@ -1344,6 +1377,61 @@ class AudioManager {
         finish();
       }
     });
+  }
+
+  async testZaraVoice(
+    language = 'auto',
+    voiceName = 'Zephyr'
+  ): Promise<{ ok: boolean; channel: 'neural_tts' | 'native_android_tts' | 'browser_tts' | 'failed'; detail: string }> {
+    this.unlock();
+    this.ensureNativeSpeakerRoute();
+    const sample =
+      language === 'english'
+        ? 'Hello! Zara voice output is loud and clear.'
+        : 'Assalam o Alaikum! Main Zara hoon, meri aawaz bilkul saaf aa rahi hai.';
+    try {
+      const synth = await this.synthesizeVoiceAudio(sample, {
+        language,
+        voiceName,
+      });
+      if (synth?.base64Wav) {
+        const played = await this.playAudioBase64(synth.base64Wav, 1.0, undefined, undefined, sample);
+        if (played) {
+          return {
+            ok: true,
+            channel: 'neural_tts',
+            detail: 'Neural Gemini TTS audio played cleanly on speaker.',
+          };
+        }
+      }
+    } catch {}
+
+    const nativeBridge = typeof window !== 'undefined' ? (window as any).ZaraAndroidBridge : null;
+    if (nativeBridge?.speakNativeTts) {
+      const ok = Boolean(nativeBridge.speakNativeTts(sample, language === 'english' ? 'en-US' : 'ur-PK'));
+      if (ok) {
+        return {
+          ok: true,
+          channel: 'native_android_tts',
+          detail: 'Native Android TextToSpeech fallback played on speaker.',
+        };
+      }
+    }
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      await this.speakWithOfflineFallback(sample, { language, voiceName });
+      return {
+        ok: true,
+        channel: 'browser_tts',
+        detail: 'Browser SpeechSynthesis fallback completed.',
+      };
+    }
+
+    return {
+      ok: false,
+      channel: 'failed',
+      detail: 'No audio output channel could be unlocked.',
+    };
   }
 
   getIsSpeaking(): boolean {

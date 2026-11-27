@@ -36,6 +36,8 @@ class ZaraWakeWordService : Service() {
         const val KEY_WAKE_PHRASE = ZaraBridgeContract.KEY_WAKE_WORD_PHRASE
         const val ACTION_WAKE_WORD_DETECTED = ZaraBridgeContract.ACTION_WAKE_WORD_DETECTED
         const val ACTION_STOP_WAKE_WORD = "com.zara.ai.assistant.STOP_WAKE_WORD"
+        const val ACTION_PAUSE_WAKE = "com.zara.ai.assistant.PAUSE_WAKE_WORD"
+        const val ACTION_RESUME_WAKE = "com.zara.ai.assistant.RESUME_WAKE_WORD"
 
         @Volatile
         var isRunning: Boolean = false
@@ -52,6 +54,8 @@ class ZaraWakeWordService : Service() {
 
     @Volatile
     private var keepListening = false
+    @Volatile
+    private var isPausedForCall = false
     @Volatile
     private var vadThread: Thread? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -70,6 +74,7 @@ class ZaraWakeWordService : Service() {
             ZaraBridgeContract.prefs(this).edit()
                 .putBoolean(KEY_WAKE_ENABLED, false)
                 .apply()
+            isPausedForCall = false
             keepListening = false
             isRunning = false
             try {
@@ -84,6 +89,33 @@ class ZaraWakeWordService : Service() {
             }
             stopSelf()
             return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_PAUSE_WAKE) {
+            isPausedForCall = true
+            keepListening = false
+            try {
+                vadThread?.interrupt()
+            } catch (_: Exception) {
+            }
+            mainHandler.post {
+                try {
+                    recognizer?.cancel()
+                    recognizer?.destroy()
+                    recognizer = null
+                } catch (_: Exception) {
+                }
+                recognizerBusy = false
+            }
+            return START_STICKY
+        }
+
+        if (intent?.action == ACTION_RESUME_WAKE) {
+            isPausedForCall = false
+            if (isRunning && !recognizerBusy && isWakeEnabled(this)) {
+                startAdaptiveVadLoop()
+            }
+            return START_STICKY
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -101,7 +133,7 @@ class ZaraWakeWordService : Service() {
         }
 
         isRunning = true
-        if (!recognizerBusy) {
+        if (!recognizerBusy && !isPausedForCall) {
             startAdaptiveVadLoop()
         }
         return START_STICKY
@@ -264,9 +296,9 @@ class ZaraWakeWordService : Service() {
         } catch (_: Exception) {
         }
         recognizer = null
-        if (isRunning && isWakeEnabled(this)) {
+        if (isRunning && !isPausedForCall && isWakeEnabled(this)) {
             mainHandler.postDelayed({
-                if (isRunning && !recognizerBusy) {
+                if (isRunning && !isPausedForCall && !recognizerBusy) {
                     startAdaptiveVadLoop()
                 }
             }, 250L)

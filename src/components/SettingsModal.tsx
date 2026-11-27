@@ -11,7 +11,6 @@ import {
   ShieldAlert,
   ScanFace,
   Lock,
-  Code2,
   Activity,
   AlarmClock,
   Heart,
@@ -23,7 +22,6 @@ import {
   Check,
   Send,
   PowerOff,
-  ExternalLink,
   PhoneCall,
   PhoneOff,
   MessageSquare,
@@ -33,32 +31,23 @@ import {
   Camera,
   RefreshCw,
   CircleDot,
-  Share2,
   ArrowLeft,
   Bell,
-  Briefcase,
   Eye,
-  FileArchive,
   Flashlight,
   Image as ImageIcon,
   ImagePlus,
   MonitorUp,
   PictureInPicture2,
   Power,
-  Smile,
   SwitchCamera,
   Fingerprint,
   MapPin,
   HardDrive,
-  BatteryCharging,
   Layers,
-  Car,
-  FolderOpen,
-  Monitor,
   Pencil,
   Search,
   AlertTriangle,
-  Crown,
   Globe,
   Palette,
   MicOff,
@@ -70,7 +59,6 @@ import {
   AlarmScheduleItem,
   AzanCityId,
   AzanRamadanConfig,
-  BuiltAppItem,
   CameraFacing,
   DiagnosticCheckItem,
   IntruderAlertEvent,
@@ -78,7 +66,6 @@ import {
   MemoryCategory,
   MemoryItem,
   PersonalityConfig,
-  ProTierEntitlement,
   SecurityAndControlConfig,
   SettingsTabId,
   SpokenNotificationConfig,
@@ -94,17 +81,6 @@ import {
   getVoiceGenderFromName,
 } from '../types';
 import { zaraSelfHealEngine } from '../services/selfHealAndMacroService';
-import type { AiStudioTab } from './AdvancedAiStudioModal';
-import {
-  PLAY_BILLING_SKUS,
-  activateProTier,
-  downgradeToStandardTier,
-  fetchProTierStatus,
-  getCachedTierEntitlement,
-  getTierPlanBadgeLabel,
-  getTierRequestHeaders,
-  launchNativePlayProPurchase,
-} from '../services/proTierService';
 import { audioService } from '../services/audioService';
 import {
   BRAIN_ENGINE_OPTIONS,
@@ -178,6 +154,8 @@ import {
   subscribeOwnerAuth,
 } from '../services/ownerAuthService';
 
+import { BatteryCharging } from 'lucide-react';
+
 interface SettingsModalProps {
   isOpen: boolean;
   initialTab?: SettingsTabId;
@@ -195,8 +173,6 @@ interface SettingsModalProps {
   isMobileFrame: boolean;
   onToggleMobileFrame: () => void;
   downloadLinkUrl: string;
-  isInstalled: boolean;
-  onOpenInstall: () => void;
   onOpenMobileControl: () => void;
   onOpenMobilePermissions?: () => void;
   schedules: AlarmScheduleItem[];
@@ -209,15 +185,6 @@ interface SettingsModalProps {
   onUpdateMemory?: (id: string, updates: Partial<MemoryItem>) => void;
   onDeleteMemory: (id: string) => void;
   onSendProfileToChat: () => void;
-  builtApps: BuiltAppItem[];
-  isBuildingApp: boolean;
-  onBuildNewApp: (
-    prompt: string,
-    category: 'game' | 'station' | 'app' | 'utility'
-  ) => Promise<void>;
-  onOpenBuiltAppPreview: (app: BuiltAppItem) => void;
-  onDeleteBuiltApp: (id: string) => void;
-  // All Former Bottom-Bar Controls Moved into Settings ("جتنے بھی نیچے بٹن ہیں اس کو سیٹنگ میں کنورٹ کر دو")
   alwaysOnVoiceEnabled?: boolean;
   isAlwaysOnRunning?: boolean;
   isDirectMicActive?: boolean;
@@ -225,7 +192,6 @@ interface SettingsModalProps {
   visionMode?: VisionMode;
   cameraFacing?: CameraFacing;
   isFloatingPiP?: boolean;
-  autoGestureWatch?: boolean;
   spokenAlertsEnabled?: boolean;
   spokenNotifConfig?: SpokenNotificationConfig;
   onUpdateSpokenNotifConfig?: (updates: Partial<SpokenNotificationConfig>) => void;
@@ -240,17 +206,11 @@ interface SettingsModalProps {
   onSnapCameraToChat?: () => Promise<void>;
   onToggleScreenShare?: () => void;
   onTriggerSelfHeal?: () => void;
-  onOpenMoodGesture?: () => void;
-  onOpenAdvancedWork?: () => void;
   onTriggerBack?: () => void;
   onTriggerClose?: () => void;
-  onOpenProjectFiles?: () => void;
   onOpenAvatarPicker?: () => void;
   onOpenSpokenAlerts?: () => void;
   onReplayLastReply?: () => void;
-  onOpenAiStudio?: (tab?: AiStudioTab) => void;
-  onOpenDriverMode?: () => void;
-  onOpenFileManager?: () => void;
   onEnableAllFunctions?: () => Promise<void>;
   azanConfig?: AzanRamadanConfig;
   onUpdateAzanConfig?: (updates: Partial<AzanRamadanConfig>) => void;
@@ -261,7 +221,6 @@ const VALID_SETTINGS_TABS: SettingsTabId[] = [
   'controls',
   'apps',
   'security',
-  'builder',
   'diagnostics',
   'schedule',
   'profile',
@@ -300,8 +259,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isMobileFrame,
   onToggleMobileFrame,
   downloadLinkUrl,
-  isInstalled,
-  onOpenInstall,
   onOpenMobileControl,
   onOpenMobilePermissions,
   schedules,
@@ -314,11 +271,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateMemory,
   onDeleteMemory,
   onSendProfileToChat,
-  builtApps,
-  isBuildingApp,
-  onBuildNewApp,
-  onOpenBuiltAppPreview,
-  onDeleteBuiltApp,
   alwaysOnVoiceEnabled = true,
   isAlwaysOnRunning = false,
   isDirectMicActive = false,
@@ -326,7 +278,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   visionMode = 'off',
   cameraFacing = 'user',
   isFloatingPiP = false,
-  autoGestureWatch = false,
   spokenAlertsEnabled = false,
   spokenNotifConfig,
   onUpdateSpokenNotifConfig,
@@ -341,17 +292,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSnapCameraToChat,
   onToggleScreenShare,
   onTriggerSelfHeal,
-  onOpenMoodGesture,
-  onOpenAdvancedWork,
   onTriggerBack,
   onTriggerClose,
-  onOpenProjectFiles,
   onOpenAvatarPicker,
   onOpenSpokenAlerts,
   onReplayLastReply,
-  onOpenAiStudio,
-  onOpenDriverMode,
-  onOpenFileManager,
   onEnableAllFunctions,
   azanConfig,
   onUpdateAzanConfig,
@@ -397,7 +342,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [runningAppIds, setRunningAppIds] = useState<string[]>([]);
   const [appSearch, setAppSearch] = useState('');
   const [appToast, setAppToast] = useState<string | null>(null);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [copiedProfile, setCopiedProfile] = useState(false);
 
   // WhatsApp Direct Number / Contact / General Text & Call state
@@ -421,9 +365,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [wakePhraseDraft, setWakePhraseDraft] = useState(
     securityConfig.customWakeWord || 'hey zara'
   );
-  const [proTier, setProTier] = useState<ProTierEntitlement>(() => getCachedTierEntitlement());
-  const [proTierBusy, setProTierBusy] = useState(false);
-  const [proTierNote, setProTierNote] = useState<string | null>(null);
+  const [voiceTestNote, setVoiceTestNote] = useState<string | null>(null);
   const [selfUpdateBusy, setSelfUpdateBusy] = useState(false);
   const [liveUpdateReport, setLiveUpdateReport] = useState<ZaraUpdateReport | null>(null);
   const [selfUpdateMessage, setSelfUpdateMessage] = useState<string | null>(null);
@@ -432,20 +374,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      fetchProTierStatus().then(setProTier).catch(() => {});
       zaraSelfHealEngine.fetchUpdateCheckReport().then((r) => {
         if (r) setLiveUpdateReport(r);
       }).catch(() => {});
     }
   }, [isOpen]);
-
-  // AI App / Game / Station Builder state
-  const [builderPrompt, setBuilderPrompt] = useState('');
-  const [builderCategory, setBuilderCategory] = useState<'game' | 'station' | 'app' | 'utility'>(
-    'game'
-  );
-  const [isBuilderMicOn, setIsBuilderMicOn] = useState(false);
-  const builderMicRef = useRef<DirectMicSession | null>(null);
 
   // Diagnostics / Health Doctor state
   const [diagChecks, setDiagChecks] = useState<DiagnosticCheckItem[]>([]);
@@ -493,8 +426,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       isPlatformBiometricSupported().then(setBioHardwareSupported).catch(() => {});
     } else {
       stopEnrollCamera();
-      builderMicRef.current?.stopAndDiscard();
-      setIsBuilderMicOn(false);
       micTestSessionRef.current?.stopAndDiscard();
       micTestSessionRef.current = null;
       setIsTestingMicStt(false);
@@ -547,7 +478,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     return () => {
       stopEnrollCamera();
-      builderMicRef.current?.stopAndDiscard();
     };
   }, []);
 
@@ -763,70 +693,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setAppToast(ok ? 'Fingerprint / Biometric Verified ✓' : 'Biometric verification canceled or failed.');
   };
 
-  // Builder Voice Input inside Settings
-  const handleToggleBuilderMic = async () => {
-    audioService.unlock();
-    if (isBuilderMicOn) {
-      const wav = builderMicRef.current?.finishAndGetWav();
-      setIsBuilderMicOn(false);
-      if (wav) {
-        try {
-          const res = await fetch('/api/voice-chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audioBase64: wav, mimeType: 'audio/wav', language }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.userTranscription) {
-              setBuilderPrompt(data.userTranscription);
-              await onBuildNewApp(data.userTranscription, builderCategory);
-              onClose();
-            }
-          }
-        } catch {}
-      }
-      return;
-    }
-
-    audioService.stopAudio();
-    const session = new DirectMicSession();
-    builderMicRef.current = session;
-    setIsBuilderMicOn(true);
-    const ok = await session.start({
-      onVolume: () => {},
-      onAutoFinish: async (wav) => {
-        setIsBuilderMicOn(false);
-        try {
-          const res = await fetch('/api/voice-chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audioBase64: wav, mimeType: 'audio/wav', language }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.userTranscription) {
-              setBuilderPrompt(data.userTranscription);
-              await onBuildNewApp(data.userTranscription, builderCategory);
-              onClose();
-            }
-          }
-        } catch {}
-      },
-      onError: () => setIsBuilderMicOn(false),
-    });
-    if (!ok) setIsBuilderMicOn(false);
-  };
-
-  const handleSubmitBuilderForm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!builderPrompt.trim() || isBuildingApp) return;
-    const p = builderPrompt.trim();
-    setBuilderPrompt('');
-    await onBuildNewApp(p, builderCategory);
-    onClose();
-  };
-
   // Diagnostics Runner
   const handleRunHealthDoctor = async (speakOutLoud = true) => {
     setIsRunningDiag(true);
@@ -904,15 +770,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       );
     }
-  };
-
-  const handleCopyDownloadLink = async () => {
-    audioService.playChime('tap');
-    try {
-      await navigator.clipboard.writeText(downloadLinkUrl);
-      setCopiedLink(true);
-      window.setTimeout(() => setCopiedLink(false), 2500);
-    } catch {}
   };
 
   const handleCopyProfile = async () => {
@@ -1049,14 +906,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           headers: {
             'Content-Type': 'application/json',
             ...authHeaders,
-            ...getTierRequestHeaders(),
           },
           body: JSON.stringify({
             audioBase64: wavBase64,
             mimeType: 'audio/wav',
             history: [],
             language,
-            assistantId: config.activeAssistantId || 'zara',
+            assistantId: 'zara',
             preferredReplyLanguage: config.preferredReplyLanguage || '',
             loveMode: false,
             affectionLevel: config.affectionLevel,
@@ -1332,18 +1188,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Full-Authority Open Navigation Grid — All 9 Tabs Always Accessible */}
-        <div className="grid grid-cols-3 gap-1 p-1 mt-2.5 rounded-xl bg-slate-950 border border-slate-800">
+        {/* Clean 8-Tab Navigation Grid */}
+        <div className="grid grid-cols-4 gap-1 p-1 mt-2.5 rounded-xl bg-slate-950 border border-slate-800">
           {[
-            { id: 'controls', label: 'All Controls' },
+            { id: 'controls', label: 'Controls' },
             { id: 'apps', label: 'Apps & WA' },
-            { id: 'security', label: 'Face/Lock' },
-            { id: 'builder', label: 'Builder' },
-            { id: 'diagnostics', label: 'Issues/Fix' },
-            { id: 'schedule', label: 'Time/Alarm' },
+            { id: 'security', label: 'Security' },
+            { id: 'diagnostics', label: 'Voice/Fix' },
+            { id: 'schedule', label: 'Alarms' },
             { id: 'profile', label: 'Profile' },
-            { id: 'romance', label: 'Emotions' },
-            { id: 'memory', label: '100+ Days' },
+            { id: 'romance', label: 'Style' },
+            { id: 'memory', label: 'Memory' },
           ].map((t) => (
             <button
               key={t.id}
@@ -1610,13 +1465,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (isTestingVoice) {
                         audioService.stopAudio(true);
                         setIsTestingVoice(false);
                         return;
                       }
-                      handleSelectNeuralVoice((config.voiceName as ZaraVoiceName) || 'Zephyr');
+                      setIsTestingVoice(true);
+                      setVoiceTestNote('Testing speaker output...');
+                      const res = await audioService.testZaraVoice(
+                        language,
+                        (config.voiceName as ZaraVoiceName) || 'Zephyr'
+                      );
+                      setVoiceTestNote(res.detail);
+                      setAppToast(res.detail);
+                      setIsTestingVoice(false);
                     }}
                     className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
                   >
@@ -1628,11 +1491,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ) : (
                       <>
                         <Play className="w-3.5 h-3.5 shrink-0" />
-                        <span>Test Female Voice</span>
+                        <span>Test Zara Voice</span>
                       </>
                     )}
                   </button>
                 </div>
+
+                {voiceTestNote && (
+                  <div className="px-2.5 py-1.5 rounded-xl bg-emerald-950/75 border border-emerald-400/40 text-[11px] text-emerald-100 font-semibold">
+                    {voiceTestNote}
+                  </div>
+                )}
 
                 {/* Speed & Pitch Sliders */}
                 <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-white/10">
@@ -1679,18 +1548,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span className="text-[11px] font-extrabold text-emerald-300">
                       AI Brain &amp; Text-to-Speech Engine
                     </span>
-                    {onOpenAiStudio && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenAiStudio('brains');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/45 text-[10px] font-bold text-sky-200 cursor-pointer"
-                      >
-                        Test All 11 Systems →
-                      </button>
-                    )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     <select
@@ -2360,126 +2217,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
 
-              {/* AI Creative Studio Shortcuts */}
-              {onOpenAiStudio && (
-                <div className="p-3 rounded-2xl bg-slate-900/90 border border-sky-500/30 space-y-2">
-                  <div className="text-xs font-extrabold text-sky-300">
-                    AI Studios &amp; Advanced Hubs
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('research');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-400/45 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span>Live Web &amp; Assistants</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('social');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-pink-400/40 text-pink-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Share2 className="w-3.5 h-3.5 text-pink-400 shrink-0" />
-                      <span>Social Media Hub</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('devlab');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-400/40 text-emerald-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Code2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Flutter &amp; Code Lab</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('audit');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-400/40 text-amber-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Self-Audit &amp; Health</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('office');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-500/35 text-cyan-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Briefcase className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span>Office Work</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('pctools');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-sky-500/35 text-sky-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Code2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                      <span>PC &amp; Dev Tools</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('security');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/35 text-emerald-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Security Lab</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('photo');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-violet-500/35 text-violet-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <ImageIcon className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                      <span>Photo &amp; Video Studio</span>
-                    </button>
-                  </div>
-
-                  {onOpenMobilePermissions && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenMobilePermissions();
-                      }}
-                      className="w-full min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-amber-500/35 text-amber-100 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Full Mobile Permissions &amp; WebAPK Guide</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
               {/* 2. Quick Chat, Photo Send, Full Chat History, Copy & Replay (Moved from Bottom Bar!) */}
               <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/15 space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -2700,10 +2437,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* 4. Complete Grid of All Studio, Camera, Work & Device Controls */}
+              {/* 4. Core Camera, Phone & Device Controls */}
               <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/15 space-y-2">
                 <div className="text-xs font-extrabold text-white">
-                  All Studio, Camera, Work &amp; Device Controls
+                  Camera, Alerts &amp; Phone Controls
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
@@ -2774,35 +2511,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-pink-400/40 text-pink-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                   >
                     <ImageIcon className="w-3.5 h-3.5 text-pink-300 shrink-0" />
-                    <span>Voice &amp; Alerts Hub</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenAdvancedWork?.();
-                    }}
-                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-cyan-400/45 text-cyan-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Briefcase className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
-                    <span>AI Work Studio</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenMoodGesture?.();
-                    }}
-                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer ${
-                      autoGestureWatch
-                        ? 'bg-pink-600 border-pink-300 text-white'
-                        : 'bg-slate-950 border-pink-400/40 text-pink-200'
-                    }`}
-                  >
-                    <Smile className="w-3.5 h-3.5 shrink-0" />
-                    <span>{autoGestureWatch ? 'Gesture: ON' : 'Mood & Gesture'}</span>
+                    <span>Portrait &amp; Look</span>
                   </button>
 
                   <button
@@ -2856,18 +2565,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => setTab('builder')}
-                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-amber-400/40 text-amber-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Code2 className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                    <span>Build App / Game</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => {
                       onTriggerSelfHeal?.();
-                      setAppToast('Running Auto-Fix, Cache Repair & Self-Update ✓');
+                      setAppToast('Running Auto-Fix & Cache Repair ✓');
                     }}
                     className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-amber-950/75 border border-amber-400/50 text-amber-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
                   >
@@ -2876,7 +2576,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         isSelfHealing ? 'animate-spin' : ''
                       }`}
                     />
-                    <span>{isSelfHealing ? 'Updating...' : 'Auto-Fix & Update'}</span>
+                    <span>{isSelfHealing ? 'Repairing...' : 'Auto-Fix Audio/App'}</span>
                   </button>
 
                   <button
@@ -2902,72 +2602,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <X className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                     <span>Close App (بند)</span>
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenProjectFiles?.();
-                    }}
-                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-rose-950/80 border border-rose-400/50 text-rose-100 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <FileArchive className="w-3.5 h-3.5 text-rose-300 shrink-0" />
-                    <span>All Files A–Z</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenInstall();
-                    }}
-                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-emerald-400/45 text-emerald-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Install App Link</span>
-                  </button>
-
-                  {onOpenDriverMode && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenDriverMode();
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-sky-400/50 text-sky-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Car className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                      <span>Driver Mode</span>
-                    </button>
-                  )}
-
-                  {onOpenFileManager && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenFileManager();
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-indigo-400/50 text-indigo-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <FolderOpen className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                      <span>File Manager</span>
-                    </button>
-                  )}
-
-                  {onOpenAiStudio && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenAiStudio('pctools');
-                      }}
-                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-950 border border-emerald-400/50 text-emerald-200 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Monitor className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>PC Control</span>
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -3188,61 +2822,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </form>
 
-              {/* Play Store Direct Install + Multi-Mobile App Download Link */}
-              <div className="p-3.5 rounded-2xl bg-[#0b1622] border border-emerald-500/45 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-extrabold text-white truncate">
-                      All Mobiles Share &amp; Download Link
-                    </div>
-                    <div className="text-[10px] text-emerald-300 truncate">
-                      {isInstalled
-                        ? 'Installed on Mobile ✓ Share with any phone'
-                        : 'Share this link to download on any mobile'}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioService.playChime('tap');
-                      onClose();
-                      onOpenInstall();
-                    }}
-                    className="min-h-[38px] px-3 py-1.5 rounded-xl bg-[#01875f] hover:bg-[#019a6c] text-white font-extrabold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 shrink-0" />
-                    <span>Install / Check</span>
-                  </button>
-                </div>
-
-                <div className="p-2 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-cyan-200 font-mono truncate flex-1">
-                    {downloadLinkUrl}
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleCopyDownloadLink}
-                      className="min-h-[32px] px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      {copiedLink ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedLink ? 'Copied!' : 'Copy'}</span>
-                    </button>
-                    <a
-                      href={`whatsapp://send?text=${encodeURIComponent(
-                        `📲 Download & Install Zara AI App on your mobile:\n${downloadLinkUrl}`
-                      )}`}
-                      className="min-h-[32px] px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 no-underline"
-                      title="Share App Download Link on WhatsApp"
-                    >
-                      <Share2 className="w-3 h-3" />
-                      <span>WA</span>
-                    </a>
-                  </div>
-                </div>
-              </div>
-
               {/* Featured Row: Play Store, Google, WhatsApp, YouTube, Instagram, Phone Settings */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-0.5">
@@ -3460,7 +3039,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }
                     className="min-h-[34px] px-2 py-1.5 rounded-xl bg-cyan-950/70 hover:bg-cyan-900/70 border border-cyan-500/45 text-cyan-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
                   >
-                    <ExternalLink className="w-3 h-3 shrink-0" />
+                    <Smartphone className="w-3 h-3 shrink-0" />
                     <span>Chrome Permissions</span>
                   </button>
                   <button
@@ -3970,181 +3549,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
 
-              {/* Android APK & AAB Packaging Hub */}
-              <div className="p-3.5 rounded-2xl bg-[#101811] border border-emerald-500/40 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-extrabold text-white flex items-center gap-1.5">
-                      <FileArchive className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Zara APK &amp; Play Store AAB Package</span>
-                    </div>
-                    <div className="text-[10px] text-emerald-200 truncate">
-                      {ZARA_LIVE_APK_CONFIG.packageId} · v{ZARA_LIVE_APK_CONFIG.versionName}
-                    </div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-950 border border-emerald-500/40 text-[10px] font-mono text-emerald-300 shrink-0">
-                    APK + AAB
-                  </span>
-                </div>
-
-                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-300 space-y-1">
-                  <div className="truncate text-cyan-300">URL: {ZARA_LIVE_APK_CONFIG.liveUrl}</div>
-                  <div>APK: cd android &amp;&amp; {ZARA_LIVE_APK_CONFIG.apkCommand}</div>
-                  <div>AAB: cd android &amp;&amp; {ZARA_LIVE_APK_CONFIG.aabCommand}</div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <a
-                    href="/api/export/zara-android-project.zip"
-                    download="Zara-AI-Android-Studio-Project.zip"
-                    onClick={() => audioService.playChime('activate')}
-                    className="col-span-2 min-h-[38px] px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center justify-center gap-1.5 no-underline cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 shrink-0" />
-                    <span>Download Android Studio + APK Project (.ZIP)</span>
-                  </a>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const cmds = `cd android && ${ZARA_LIVE_APK_CONFIG.apkCommand} && ${ZARA_LIVE_APK_CONFIG.aabCommand}`;
-                      const res = await copySelectedOrFullText(cmds);
-                      if (res.ok) setAppToast('Copied APK & AAB Gradle build commands ✓');
-                    }}
-                    className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>Copy APK/AAB Cmd</span>
-                  </button>
-                  {onOpenProjectFiles && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenProjectFiles();
-                      }}
-                      className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-200 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <Download className="w-3 h-3" />
-                      <span>All Source Files</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Zara Pro Tier & Google Play Billing v7 Entitlement Hub */}
-              <div className="p-3.5 rounded-2xl bg-[#1a1306] border border-amber-400/50 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-extrabold text-white flex items-center gap-1.5">
-                      <Crown className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>Zara Pro Tier &amp; Google Play Billing</span>
-                    </div>
-                    <div className="text-[10px] text-amber-200/90 mt-0.5">
-                      Priority Maya/Dimaag orchestration, Ultra HD TTS, native Play Billing &amp; dev tools
-                    </div>
-                  </div>
-                  <span
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${
-                      proTier.plan === 'pro'
-                        ? 'bg-amber-400 text-black'
-                        : 'bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {getTierPlanBadgeLabel(proTier.plan, proTier.source)}
-                  </span>
-                </div>
-
-                {proTier.expiresAtIso && proTier.plan === 'pro' && (
-                  <div className="text-[10px] text-amber-200 font-mono">
-                    Active until: {new Date(proTier.expiresAtIso).toLocaleDateString()}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    disabled={proTierBusy}
-                    onClick={async () => {
-                      setProTierBusy(true);
-                      try {
-                        const res = await activateProTier({ mode: 'trial_7d' });
-                        setProTier(res.entitlement);
-                        setProTierNote(res.message);
-                      } finally {
-                        setProTierBusy(false);
-                      }
-                    }}
-                    className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-[10px] font-extrabold cursor-pointer"
-                  >
-                    {proTier.plan === 'pro' && proTier.source === 'trial_7d'
-                      ? '7-Day Trial Active ✓'
-                      : 'Start 7-Day Pro Trial'}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={proTierBusy}
-                    onClick={() => {
-                      const launched = launchNativePlayProPurchase(PLAY_BILLING_SKUS.monthly.sku);
-                      setProTierNote(
-                        launched.launched
-                          ? 'Google Play Billing purchase sheet opened.'
-                          : launched.reason || 'Install Android AAB to purchase via Play Store.'
-                      );
-                    }}
-                    className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-amber-400/40 text-amber-200 text-[10px] font-bold cursor-pointer"
-                  >
-                    Play Billing ({PLAY_BILLING_SKUS.monthly.priceLabel})
-                  </button>
-
-                  {ownerAuth.isOwnerVerified && (
-                    <button
-                      type="button"
-                      disabled={proTierBusy}
-                      onClick={async () => {
-                        setProTierBusy(true);
-                        try {
-                          const res = await activateProTier({ mode: 'owner_master' });
-                          setProTier(res.entitlement);
-                          setProTierNote(res.message);
-                        } finally {
-                          setProTierBusy(false);
-                        }
-                      }}
-                      className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold cursor-pointer"
-                    >
-                      Activate Owner Pro
-                    </button>
-                  )}
-
-                  {proTier.plan === 'pro' && (
-                    <button
-                      type="button"
-                      disabled={proTierBusy}
-                      onClick={async () => {
-                        setProTierBusy(true);
-                        try {
-                          const res = await downgradeToStandardTier();
-                          setProTier(res.entitlement);
-                          setProTierNote('Reverted to Standard Free Tier.');
-                        } finally {
-                          setProTierBusy(false);
-                        }
-                      }}
-                      className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold cursor-pointer"
-                    >
-                      Switch to Standard
-                    </button>
-                  )}
-                </div>
-
-                {proTierNote && (
-                  <div className="text-[10px] text-amber-100 bg-slate-950/80 border border-amber-400/30 rounded-xl px-2.5 py-1.5">
-                    {proTierNote}
-                  </div>
-                )}
-              </div>
-
               {/* Hardware Fingerprint / Biometric Lock */}
               <div className="p-3.5 rounded-2xl bg-[#091526] border border-sky-500/45 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -4481,177 +3885,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* ================= TAB 3: VOICE & PROMPT AI APP / GAME / STATION BUILDER ================= */}
-          {activeTab === 'builder' && (
-            <div className="space-y-3">
-              <form
-                onSubmit={handleSubmitBuilderForm}
-                className="p-3.5 rounded-2xl bg-[#0e0924] border border-cyan-500/45 space-y-2.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-extrabold text-cyan-300 flex items-center gap-1.5">
-                    <Code2 className="w-4 h-4" />
-                    <span>Zara AI App, Game &amp; Station Builder</span>
-                  </span>
-                  <span className="text-[10px] text-pink-300">Full Code + Browser Link</span>
-                </div>
-
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Speak or type any Game, Radio/Music Station, or App — Zara writes the complete
-                  working code, sends the link in Chat, and opens it live!
-                </p>
-
-                {/* Category Selector */}
-                <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
-                  {(
-                    [
-                      { id: 'game', label: 'Gaming' },
-                      { id: 'station', label: 'Station' },
-                      { id: 'app', label: 'Full App' },
-                      { id: 'utility', label: 'System' },
-                    ] as const
-                  ).map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setBuilderCategory(c.id)}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold cursor-pointer ${
-                        builderCategory === c.id
-                          ? 'bg-cyan-600 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Voice Mic + Text Command Input */}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleToggleBuilderMic}
-                    className={`min-h-[42px] min-w-[42px] rounded-xl flex items-center justify-center border cursor-pointer shrink-0 ${
-                      isBuilderMicOn
-                        ? 'bg-rose-600 border-rose-300 text-white'
-                        : 'bg-slate-950 border-cyan-500/40 text-cyan-300'
-                    }`}
-                    title="Speak App Command"
-                  >
-                    {isBuilderMicOn ? (
-                      <Square className="w-4 h-4 fill-white" />
-                    ) : (
-                      <Mic className="w-4 h-4" />
-                    )}
-                  </button>
-
-                  <input
-                    type="text"
-                    value={builderPrompt}
-                    onChange={(e) => setBuilderPrompt(e.target.value)}
-                    placeholder="e.g. Car racing game banao / Live FM music station..."
-                    className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-
-                {/* 1-Tap Instant Builder Templates */}
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { p: '3-Lane Neon Car Racing Arcade Game with Score', c: 'game' as const },
-                    { p: 'Live FM Music & DJ Bass Synthesizer Station', c: 'station' as const },
-                    { p: 'Classic Snake & Star Collector Mobile Game', c: 'game' as const },
-                    { p: 'Royal Badshah Calculator & Expense System App', c: 'app' as const },
-                  ].map((preset, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        setBuilderCategory(preset.c);
-                        setBuilderPrompt(preset.p);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-400 text-[10px] text-cyan-200 cursor-pointer"
-                    >
-                      {preset.p.split(' ').slice(0, 4).join(' ')}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={!builderPrompt.trim() || isBuildingApp}
-                  className="min-h-[42px] w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-pink-600 hover:brightness-110 disabled:opacity-50 text-white font-extrabold text-xs cursor-pointer"
-                >
-                  {isBuildingApp
-                    ? 'Zara is Coding & Building Your App...'
-                    : 'Build App, Send Link & Open Now'}
-                </button>
-              </form>
-
-              {/* Built Apps Library */}
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-300 px-0.5">
-                  Your Built Games, Stations &amp; Apps ({builtApps.length})
-                </div>
-
-                {builtApps.length === 0 ? (
-                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-center text-xs text-slate-400">
-                    No custom apps built yet — speak a command like &ldquo;Zara ek car game
-                    banao&rdquo; or use the builder above!
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
-                    {builtApps.map((b) => (
-                      <div
-                        key={b.id}
-                        className="p-3 rounded-2xl bg-slate-900/85 border border-slate-800 space-y-2"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-white truncate">{b.title}</div>
-                            <div className="text-[10px] text-cyan-300 font-mono truncate">
-                              {b.url}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteBuiltApp(b.id)}
-                            className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer shrink-0"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onClose();
-                              onOpenBuiltAppPreview(b);
-                            }}
-                            className="min-h-[34px] py-1.5 px-2.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-bold text-[11px] flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <Play className="w-3 h-3" />
-                            <span>Run &amp; Code</span>
-                          </button>
-
-                          <a
-                            href={b.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="min-h-[34px] py-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center justify-center gap-1 no-underline"
-                          >
-                            <span>Open Link</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* ================= TAB 4: ZARA & MOBILE SELF-DIAGNOSTICS DOCTOR ================= */}
           {activeTab === 'diagnostics' && (
             <div className="space-y-3">
@@ -4711,17 +3944,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="min-h-[34px] px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold shrink-0 cursor-pointer"
                       >
                         Fix Now
-                      </button>
-                    ) : chk.fixAction === 'install_link' ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onOpenInstall();
-                        }}
-                        className="min-h-[34px] px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 text-[10px] font-extrabold shrink-0 cursor-pointer"
-                      >
-                        Fix Link
                       </button>
                     ) : chk.fixAction === 'reconnect' ? (
                       <button

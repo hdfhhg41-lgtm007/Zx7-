@@ -2395,27 +2395,83 @@ export function detectMusicControlCommand(rawText: string): MusicControlCommand 
   }
 
   const playMatch =
-    trimmed.match(/^(?:zara\s+)?(?:please\s+)?(?:play|bajao|chalao|lagao|sunao)\s+(.+)$/i) ||
-    trimmed.match(/^(.+?)\s+(?:song|gaana|gana|music|naat|qawwali|track)\s*(?:play|bajao|chalao|lagao|sunao|چلاؤ|بجاؤ|لگاؤ|سناؤ|चलाओ|बजाओ|लगाओ|सुनाओ|ਚਲਾਓ|ਵਜਾਓ)$/i) ||
-    trimmed.match(/(?:چلاؤ|بجاؤ|لگاؤ|سناؤ|चलाओ|बजाओ|लगाओ|सुनाओ|ਚਲਾਓ|ਵਜਾਓ)\s+(.+)$/i);
+    trimmed.match(/^(?:zara\s+)?(?:please\s+)?(?:play|search|bajao|chalao|lagao|sunao)\s+(.+)$/i) ||
+    trimmed.match(/^(.+?)\s+(?:song|gaana|gana|music|naat|qawwali|track|video)\s*(?:play|search|bajao|chalao|lagao|sunao|چلاؤ|بجاؤ|لگاؤ|سناؤ|سرچ\s*کرو|चलाओ|बजाओ|लगाओ|सुनाओ|सर्च\s*करो|ਚਲਾਓ|ਵਜਾਓ)$/i) ||
+    trimmed.match(/(?:چلاؤ|بجاؤ|لگاؤ|سناؤ|پلے\s*کرو|चलाओ|बजाओ|लगाओ|सुनाओ|प्ले\s*करो|ਚਲਾਓ|ਵਜਾਓ)\s+(.+)$/i);
 
   const hasMusicCue =
-    /\b(song|songs|music|gaana|gana|naat|qawwali|ghazal|spotify|youtube\s*music|track|playlist|bajao|play)\b/i.test(lower) ||
-    /(گانا|گانے|میوزک|نعت|قوالی|غزل|गाना|गाने|म्यूज़िक|सॉन्ग|नाअत|ग़ज़ल|ਗਾਣਾ|ਗੀਤ|ਮਿਊਜ਼ਿਕ)/i.test(trimmed);
+    /\b(song|songs|music|gaana|gana|naat|qawwali|ghazal|spotify|youtube|yt\s*music|track|playlist|bajao|play)\b/i.test(lower) ||
+    /(گانا|گانے|میوزک|سونگ|نعت|قوالی|غزل|یوٹیوب|गाना|गाने|म्यूज़िक|सॉन्ग|यूट्यूब|नाअत|ग़ज़ल|ਗਾਣਾ|ਗੀਤ|ਮਿਊਜ਼ਿਕ)/i.test(trimmed);
 
   if (hasMusicCue && playMatch && playMatch[1]) {
     const query = playMatch[1]
-      .replace(/\b(on\s+youtube\s+music|on\s+spotify|on\s+youtube|please|song|gaana|gana|music|play|bajao|chalao|lagao)\b/gi, '')
+      .replace(/\b(on\s+youtube\s+music|on\s+spotify|on\s+youtube|youtube\s+par|youtube\s+pe|youtube\s+mein|please|song|gaana|gana|music|play|search|karo|bajao|chalao|lagao)\b/gi, '')
+      .replace(/(یوٹیوب\s*(?:پر|پہ|میں)|گانا|سونگ|پلے|چلاؤ|سرچ\s*کرو|کرو)/gi, '')
       .trim();
     if (query.length >= 2) {
       const provider: MusicControlCommand['provider'] = /spotify/i.test(lower)
         ? 'spotify'
-        : 'yt_music';
+        : /youtube\s*music|yt\s*music/i.test(lower)
+        ? 'yt_music'
+        : 'youtube';
       return { action: 'play', query, provider };
     }
   }
 
   return null;
+}
+
+export function launchYouTubeSong(query: string): {
+  ok: boolean;
+  message: string;
+  url: string;
+  channel: 'native_bridge' | 'deep_link' | 'web';
+} {
+  const clean = (query || '').trim();
+  const encoded = encodeURIComponent(clean || 'trending songs');
+  const ytSearchUrl = `https://www.youtube.com/results?search_query=${encoded}`;
+  const nativeBridge = typeof window !== 'undefined' ? window.ZaraAndroidBridge : undefined;
+
+  if (nativeBridge?.launchYouTubeSong) {
+    try {
+      const ok = Boolean(nativeBridge.launchYouTubeSong(clean));
+      if (ok) {
+        return {
+          ok: true,
+          url: ytSearchUrl,
+          channel: 'native_bridge',
+          message: clean ? `Searching and playing "${clean}" on YouTube.` : 'Opening YouTube.',
+        };
+      }
+    } catch {}
+  }
+
+  if (detectMobilePlatform() === 'android' && typeof document !== 'undefined') {
+    const intentUri = `intent://www.youtube.com/results?search_query=${encoded}#Intent;scheme=https;package=com.google.android.youtube;S.browser_fallback_url=${encodeURIComponent(ytSearchUrl)};end`;
+    try {
+      const anchor = document.createElement('a');
+      anchor.href = intentUri;
+      anchor.target = '_top';
+      anchor.rel = 'noopener noreferrer';
+      anchor.className = 'hidden';
+      document.body.appendChild(anchor);
+      anchor.click();
+      window.setTimeout(() => anchor.parentNode?.removeChild(anchor), 300);
+      return {
+        ok: true,
+        url: ytSearchUrl,
+        channel: 'deep_link',
+        message: clean ? `Opening YouTube for "${clean}".` : 'Opening YouTube.',
+      };
+    } catch {}
+  }
+
+  return {
+    ok: true,
+    url: ytSearchUrl,
+    channel: 'web',
+    message: clean ? `Prepared YouTube search for "${clean}".` : 'Opening YouTube.',
+  };
 }
 
 export function executeMusicControlCommand(cmd: MusicControlCommand): {
@@ -2427,6 +2483,16 @@ export function executeMusicControlCommand(cmd: MusicControlCommand): {
   const nativeBridge = typeof window !== 'undefined' ? window.ZaraAndroidBridge : undefined;
 
   if (cmd.action === 'play' && cmd.query) {
+    if (cmd.provider === 'youtube' || !cmd.provider) {
+      const ytRes = launchYouTubeSong(cmd.query);
+      return {
+        ok: ytRes.ok,
+        channel: ytRes.channel === 'native_bridge' ? 'native_bridge' : 'deep_link',
+        fallbackUrl: ytRes.url,
+        message: ytRes.message,
+      };
+    }
+
     const encoded = encodeURIComponent(cmd.query);
     const ytMusicUrl = `https://music.youtube.com/search?q=${encoded}`;
     const spotifyUrl = `https://open.spotify.com/search/${encoded}`;

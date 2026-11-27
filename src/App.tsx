@@ -1,11 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  ExternalLink,
   ShieldCheck,
-  ShieldAlert,
   AlarmClock,
-  PowerOff,
-  Code2,
   PhoneCall,
   Check,
   UserCheck,
@@ -13,17 +9,9 @@ import {
 
 import type { AssistantControlHubTab } from './components/NotificationsModal';
 import type { MobileControlTab } from './components/MobileControlModal';
-import {
-  SecurityOverlayMode,
-  SecurityShieldOverlay,
-} from './components/SecurityShieldOverlay';
-import { usePWAInstall } from './hooks/usePWAInstall';
 
 const MemoriesModal = lazy(() =>
   import('./components/MemoriesModal').then((m) => ({ default: m.MemoriesModal }))
-);
-const SoulModal = lazy(() =>
-  import('./components/SoulModal').then((m) => ({ default: m.SoulModal }))
 );
 import { SettingsModal } from './components/SettingsModal';
 const NotificationsModal = lazy(() =>
@@ -32,38 +20,12 @@ const NotificationsModal = lazy(() =>
 const ChatDrawer = lazy(() =>
   import('./components/ChatDrawer').then((m) => ({ default: m.ChatDrawer }))
 );
-const PWAInstallModal = lazy(() =>
-  import('./components/PWAInstallModal').then((m) => ({ default: m.PWAInstallModal }))
-);
 const MobileControlModal = lazy(() =>
   import('./components/MobileControlModal').then((m) => ({ default: m.MobileControlModal }))
-);
-const BuiltAppPreviewModal = lazy(() =>
-  import('./components/BuiltAppPreviewModal').then((m) => ({ default: m.BuiltAppPreviewModal }))
-);
-const ZaraProjectExportModal = lazy(() =>
-  import('./components/ZaraProjectExportModal').then((m) => ({
-    default: m.ZaraProjectExportModal,
-  }))
-);
-const MoodGestureWorkModal = lazy(() =>
-  import('./components/MoodGestureWorkModal').then((m) => ({ default: m.MoodGestureWorkModal }))
-);
-const AdvancedAiStudioModal = lazy(() =>
-  import('./components/AdvancedAiStudioModal').then((m) => ({
-    default: m.AdvancedAiStudioModal,
-  }))
 );
 const VoiceCallModal = lazy(() =>
   import('./components/VoiceCallModal').then((m) => ({ default: m.VoiceCallModal }))
 );
-const DriverModeModal = lazy(() =>
-  import('./components/DriverModeModal').then((m) => ({ default: m.DriverModeModal }))
-);
-const FileManagerModal = lazy(() =>
-  import('./components/FileManagerModal').then((m) => ({ default: m.FileManagerModal }))
-);
-import type { AiStudioTab } from './components/AdvancedAiStudioModal';
 import { ZaraSciFi3DHudDashboard } from './components/hud3d/ZaraSciFi3DHudDashboard';
 
 class ModalErrorBoundary extends React.Component<
@@ -111,11 +73,6 @@ class ModalErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
-import {
-  PcAllowedAction,
-  detectPcVoiceCommand,
-  executeAuthorizedPcCommand,
-} from './services/computerControlService';
 
 import { audioService } from './services/audioService';
 import {
@@ -129,7 +86,6 @@ import {
   screenKeepAlive,
 } from './services/alwaysOnFloatService';
 import {
-  MobileAppDefinition,
   closeMobileAppNow,
   detectCameraFrontBackCommand,
   detectMobileCommandFromText,
@@ -148,17 +104,6 @@ import {
   zaraSelfHealEngine,
 } from './services/selfHealAndMacroService';
 import {
-  GESTURE_ACTION_META,
-  MOOD_DISPLAY_META,
-  MoodAndGestureScanResult,
-  analyzeCameraMoodAndGesture,
-  detectMoodFromText,
-  detectMoodGestureOrWorkCommand,
-  loadWorkTasks,
-  runAdvancedWorkStudio,
-  saveWorkTasks,
-} from './services/moodAndGestureService';
-import {
   AzanAlertEventKey,
   autoExtractMemoryFromTurn,
   buildAzanVoicePrompt,
@@ -175,20 +120,12 @@ import {
   loadLongTermMemories,
   loadLongTermMessages,
   loadSavedSchedules,
-  mergeMissZsSeedMemoriesOnce,
   saveAzanRamadanConfig,
   saveDeviceMemories,
   saveLongTermMemories,
   saveLongTermMessages,
   saveSchedules,
 } from './services/scheduleAndMemoryService';
-import {
-  createMissZsChatNoteMessage,
-  ensureMissZsNoteInMessages,
-  MISS_ZS_CHAT_NOTE_ID,
-  MISS_ZS_CHAT_SEEDED_KEY,
-  MISS_ZS_OWNER_CHAT_SEEDED_KEY,
-} from './data/missZsBlueprintNotes';
 import {
   buildProactiveCompanionMessage,
   detectEmotionForCompanion,
@@ -207,19 +144,10 @@ import {
   subscribeOwnerAuth,
 } from './services/ownerAuthService';
 import {
-  buildNewAppWithZara,
-  captureSafeLocationCoords,
-  detectAppBuilderCommand,
   detectDiagnosticsCommand,
   detectSpecialControlCommand,
   endExternalCallNow,
-  loadBuiltApps,
-  openWhatsAppNumberText,
-  recordIntruderAlert,
   runFullZaraAndMobileDiagnostics,
-  saveBuiltApps,
-  startWhatsAppOrPhoneCall,
-  syncBuiltAppsToServer,
 } from './services/ownerSecurityAndBuilderService';
 import {
   buildConfirmationPromptSpeech,
@@ -256,19 +184,9 @@ import {
   getAssistantProfile,
 } from './services/assistantRouterService';
 import {
-  activateProTier,
-  fetchProTierStatus,
-  getTierRequestHeaders,
-} from './services/proTierService';
-import {
-  AdvancedWorkTaskItem,
-  AiAssistantId,
   AlarmScheduleItem,
   AzanRamadanConfig,
-  BuiltAppItem,
   CameraFacing,
-  DetectedHandGesture,
-  DetectedUserMood,
   IncomingNotificationItem,
   Language,
   ChatMessage,
@@ -289,9 +207,7 @@ const SECURITY_STORAGE_KEY = 'zara_security_control_v1';
 const ALWAYS_ON_VOICE_KEY = 'zara_always_on_voice_v1';
 
 export default function App() {
-  // Modals & Screen Circle state (All former bottom buttons now live inside Settings -> 'controls'!)
   const [showMemories, setShowMemories] = useState(false);
-  const [showSoul, setShowSoul] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId>('controls');
   const [showNotifications, setShowNotifications] = useState(false);
@@ -305,30 +221,11 @@ export default function App() {
     loadIncomingNotifications()
   );
   const [showChatDrawer, setShowChatDrawer] = useState(false);
-  const [showInstallModal, setShowInstallModal] = useState(false);
-  const [autoStartPlayDownload, setAutoStartPlayDownload] = useState(false);
   const [showMobileControl, setShowMobileControl] = useState(false);
   const [mobileControlTab, setMobileControlTab] = useState<MobileControlTab>('permissions');
   const [highlightedSettingId, setHighlightedSettingId] = useState<string | null>(null);
-  const [showAiStudio, setShowAiStudio] = useState(false);
-  const [aiStudioTab, setAiStudioTab] = useState<AiStudioTab>('office');
   const [showAudioCall, setShowAudioCall] = useState(false);
   const [audioCallMinimized, setAudioCallMinimized] = useState(false);
-  const [showDriverMode, setShowDriverMode] = useState(false);
-  const [showFileManager, setShowFileManager] = useState(false);
-  const [pendingPcConfirm, setPendingPcConfirm] = useState<{
-    action: PcAllowedAction;
-    params: Record<string, any>;
-    label: string;
-  } | null>(null);
-  const [showProjectExport, setShowProjectExport] = useState<boolean>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('export_files') === '1' || params.get('all_files') === '1';
-    } catch {
-      return false;
-    }
-  });
 
   // 24/7 Instant Voice Command Listener (starts cleanly via user's ON tap or granted permission restore)
   const [alwaysOnVoiceEnabled, setAlwaysOnVoiceEnabled] = useState<boolean>(false);
@@ -351,49 +248,26 @@ export default function App() {
     }
   };
 
-  const { isInstalled, isInIframe, playStoreLaunchUrl } = usePWAInstall();
-  // Default full-screen viewport immediately on launch ("سامنے پوری اسکرین پہ دکھنا چاہیے زارا ایپ اوپن کرتے ہی")
+  // Default full-screen viewport immediately on launch
   const [isMobileFrame, setIsMobileFrame] = useState(false);
 
-  // Auto-open Google Play Direct Installer or Professional AI Studio / Chat via shortcut query params
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const studioParam = params.get('studio') as AiStudioTab | null;
     const actionParam = params.get('action');
     let handled = false;
-    if ((params.get('play_install') === '1' || params.get('install') === '1') && !isInstalled) {
-      setAutoStartPlayDownload(true);
-      setShowInstallModal(true);
-      handled = true;
-    } else if (
-      studioParam &&
-      [
-        'brains',
-        'research',
-        'social',
-        'devlab',
-        'audit',
-        'office',
-        'pctools',
-        'security',
-        'messages',
-        'photo',
-        'video',
-      ].includes(studioParam)
-    ) {
-      setAiStudioTab(studioParam);
-      setShowAiStudio(true);
-      handled = true;
-    } else if (actionParam === 'chat') {
+    if (actionParam === 'chat') {
       setShowChatDrawer(true);
+      handled = true;
+    } else if (actionParam === 'audio_call' || actionParam === 'call') {
+      setShowAudioCall(true);
       handled = true;
     }
     if (handled) {
       const nextUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, '', nextUrl || '/');
     }
-  }, [isInstalled]);
+  }, []);
 
   // Core User, Online/Offline Hybrid Brain, Studio Task & Zara Configuration
   const [language, setLanguage] = useState<Language>(() => {
@@ -471,23 +345,8 @@ export default function App() {
     zaraVision.getFacingMode()
   );
   const [isSelfHealing, setIsSelfHealing] = useState(false);
-  const [needsPermissionSetup, setNeedsPermissionSetup] = useState(false);
 
   const markStudioTaskProgress = (_rawCommand: string, _status: 'working' | 'completed') => {};
-
-  // App Open / Close / WhatsApp Status Toast on Screen
-  const [appControlToast, setAppControlToast] = useState<{
-    mode: 'open' | 'close';
-    app: MobileAppDefinition | null;
-    href: string;
-    fallbackHref?: string;
-    label: string;
-  } | null>(null);
-
-  // Built Apps, Builder Busy State & Live App Preview Modal
-  const [builtApps, setBuiltApps] = useState<BuiltAppItem[]>(() => loadBuiltApps());
-  const [isBuildingApp, setIsBuildingApp] = useState(false);
-  const [activePreviewApp, setActivePreviewApp] = useState<BuiltAppItem | null>(null);
 
   // Alarms, Work Time Schedules, Azan/Sehri/Iftar & Battery Thermal State
   const [schedules, setSchedules] = useState<AlarmScheduleItem[]>(() => loadSavedSchedules());
@@ -500,16 +359,6 @@ export default function App() {
   }>({ pct: null, tempC: null, charging: null });
   const overheatWarnedAtRef = useRef<number>(0);
   const lowBatWarnedRef = useRef<boolean>(false);
-
-  // Real-Time Mood & Touchless Gesture Recognition + Advanced Work Studio State
-  const [showMoodWorkModal, setShowMoodWorkModal] = useState(false);
-  const [moodWorkInitialTab, setMoodWorkInitialTab] = useState<'mood_gesture' | 'work'>(
-    'mood_gesture'
-  );
-  const [currentMood, setCurrentMood] = useState<DetectedUserMood>('calm');
-  const [lastGesture, setLastGesture] = useState<DetectedHandGesture>('none');
-  const [autoGestureWatch, setAutoGestureWatch] = useState(false);
-  const [workTasks, setWorkTasks] = useState<AdvancedWorkTaskItem[]>(() => loadWorkTasks());
 
   const homeMicRef = useRef<DirectMicSession | null>(null);
   const alwaysOnRef = useRef<AlwaysOnVoiceListener | null>(null);
@@ -650,11 +499,6 @@ export default function App() {
     return secDefaults;
   });
 
-  // Never block launch with automatic Face Scan or PIN Lock (available manually inside Settings)
-  const [securityOverlayMode, setSecurityOverlayMode] = useState<SecurityOverlayMode | null>(null);
-  const [intruderReason, setIntruderReason] = useState<string>('');
-  const [antiTouchArmedLive, setAntiTouchArmedLive] = useState(false);
-
   const [isPinLocked, setIsPinLocked] = useState<boolean>(false);
   const [pinEntry, setPinEntry] = useState('');
   const [pinError, setPinError] = useState(false);
@@ -696,36 +540,20 @@ export default function App() {
     language: 'urdu',
   });
 
-  const seedMissZsChatOnce = (base: ChatMessage[], flagKey: string): ChatMessage[] => {
-    try {
-      if (localStorage.getItem(flagKey) === '1') {
-        return base;
-      }
-      const { next } = ensureMissZsNoteInMessages(base);
-      localStorage.setItem(flagKey, '1');
-      return next;
-    } catch {
-      return ensureMissZsNoteInMessages(base).next;
-    }
-  };
-
   // 100+ Days Long-Term Persistent Memories & Messages (Firebase Cloud Vault for Owner + Local Device Vault)
   const [ownerMemories, setOwnerMemories] = useState<MemoryItem[]>(() => {
     const snap = getOwnerAuthSnapshot();
     if (!snap.isOwnerVerified || !snap.signedInUid) return [];
-    return mergeMissZsSeedMemoriesOnce(loadLongTermMemories(), `owner_${snap.signedInUid}`).next;
+    return loadLongTermMemories();
   });
-  const [deviceMemories, setDeviceMemories] = useState<MemoryItem[]>(
-    () => mergeMissZsSeedMemoriesOnce(loadDeviceMemories(), 'guest').next
-  );
+  const [deviceMemories, setDeviceMemories] = useState<MemoryItem[]>(() => loadDeviceMemories());
   const [ownerMessages, setOwnerMessages] = useState<ChatMessage[]>(() => {
     const snap = getOwnerAuthSnapshot();
     if (!snap.isOwnerVerified || !snap.signedInUid) {
       return [];
     }
     const saved = loadLongTermMessages();
-    const base = saved && saved.length > 0 ? saved : [createDefaultOwnerWelcome()];
-    return seedMissZsChatOnce(base, `${MISS_ZS_OWNER_CHAT_SEEDED_KEY}_${snap.signedInUid}`);
+    return saved && saved.length > 0 ? saved : [createDefaultOwnerWelcome()];
   });
 
   // Persistent normal chat session for Guests (kept strictly isolated from Owner Vault)
@@ -740,7 +568,7 @@ export default function App() {
         }
       }
     } catch {}
-    return seedMissZsChatOnce(base, MISS_ZS_CHAT_SEEDED_KEY);
+    return base;
   });
 
   useEffect(() => {
@@ -794,8 +622,8 @@ export default function App() {
     const onNativeWake = (e: Event) => {
       const detail = (e as CustomEvent<{ phrase?: string; heard?: string }>).detail || {};
       audioService.unlock();
+      audioService.ensureSpeakerAudioRoute();
       audioService.playChime('activate');
-      setSecurityOverlayMode((cur) => (cur === 'zara_closed' ? null : cur));
       screenKeepAlive.enable();
       setHomeStatusBanner(
         `🎤 Wake-Word "${detail.phrase || securityConfig.customWakeWord || 'hey zara'}" Active — Zara Listening!`
@@ -815,24 +643,6 @@ export default function App() {
       securityConfig.customWakeWord || 'hey zara'
     );
   }, [securityConfig.wakeWordOnlyMode, securityConfig.customWakeWord]);
-
-  // Sync Pro Tier status on mount & listen for Native Play Billing verification callbacks
-  useEffect(() => {
-    fetchProTierStatus().catch(() => {});
-    const onPlayBilling = async (e: Event) => {
-      const detail = (e as CustomEvent<{ state?: string; sku?: string; purchaseToken?: string }>).detail;
-      if (detail?.state === 'purchased' && detail.purchaseToken) {
-        const res = await activateProTier({
-          mode: 'play_billing',
-          sku: detail.sku || 'zara_pro_monthly',
-          purchaseToken: detail.purchaseToken,
-        });
-        setHomeStatusBanner(res.message);
-      }
-    };
-    window.addEventListener('zara-play-billing-update', onPlayBilling);
-    return () => window.removeEventListener('zara-play-billing-update', onPlayBilling);
-  }, [ownerAuth.isOwnerVerified]);
 
   const lastUserActivityAtRef = useRef<number>(Date.now());
   const hasUserInteractedRef = useRef<boolean>(false);
@@ -1117,10 +927,6 @@ export default function App() {
   }, [schedules]);
 
   useEffect(() => {
-    saveWorkTasks(workTasks);
-  }, [workTasks]);
-
-  useEffect(() => {
     if (!ownerAuth.isOwnerVerified) return;
     saveLongTermMemories(ownerMemories);
   }, [ownerMemories, ownerAuth.isOwnerVerified]);
@@ -1143,18 +949,13 @@ export default function App() {
     let cancelled = false;
     const localSavedMsgs = loadLongTermMessages();
     const localSavedMems = loadLongTermMemories();
-    const ownerSeedFlag = `${MISS_ZS_OWNER_CHAT_SEEDED_KEY}_${ownerAuth.signedInUid}`;
-    const seedMsgsBase =
+    const seedMsgs =
       localSavedMsgs && localSavedMsgs.length > 0
         ? localSavedMsgs
         : ownerMessages.length > 0
         ? ownerMessages
         : [createDefaultOwnerWelcome()];
-    const seedMsgs = seedMissZsChatOnce(seedMsgsBase, ownerSeedFlag);
-    const seedMems = mergeMissZsSeedMemoriesOnce(
-      localSavedMems && localSavedMems.length > 0 ? localSavedMems : ownerMemories,
-      `owner_${ownerAuth.signedInUid}`
-    ).next;
+    const seedMems = localSavedMems && localSavedMems.length > 0 ? localSavedMems : ownerMemories;
 
     setOwnerMessages(seedMsgs);
     setOwnerMemories(seedMems);
@@ -1166,15 +967,12 @@ export default function App() {
           setOwnerMessages((prev) => {
             const base = prev.length > 0 ? prev : seedMsgs;
             const combined = mergeChatMessageHistories(base, mergedMessages);
-            const hasRealHistory = combined.some(
-              (m) => m.id !== 'init-1' && m.id !== MISS_ZS_CHAT_NOTE_ID
-            );
+            const hasRealHistory = combined.some((m) => m.id !== 'init-1');
             const filtered =
               hasRealHistory && base.some((m) => m.id === 'init-1')
                 ? combined.filter((m) => m.id !== 'init-1')
                 : combined;
-            const ensured = ensureMissZsNoteInMessages(filtered).next;
-            return ensured.length !== prev.length ? ensured : prev;
+            return filtered.length !== prev.length ? filtered : prev;
           });
         }
         if (mergedMemories.length > 0) {
@@ -1194,16 +992,6 @@ export default function App() {
       cancelled = true;
     };
   }, [ownerAuth.isOwnerVerified, ownerAuth.signedInUid]);
-
-  useEffect(() => {
-    saveBuiltApps(builtApps);
-  }, [builtApps]);
-
-  useEffect(() => {
-    if (builtApps.length > 0) {
-      syncBuiltAppsToServer(builtApps);
-    }
-  }, []);
 
   useEffect(() => {
     return audioService.subscribeSpeaking((sp) => setIsSpeaking(sp));
@@ -1301,11 +1089,7 @@ export default function App() {
   // Autonomous Self-Update, Issue Clear & Macro Auto-Execution Watchdog
   useEffect(() => {
     zaraSelfHealEngine.registerVoiceHealHook(async () => {
-      const blocked =
-        isPinLocked ||
-        securityOverlayRef.current === 'intruder_lockout' ||
-        securityOverlayRef.current === 'owner_face_scan';
-      if (alwaysOnVoiceEnabled && !blocked && alwaysOnRef.current) {
+      if (alwaysOnVoiceEnabled && !isPinLocked && alwaysOnRef.current) {
         screenKeepAlive.enable();
         if (!alwaysOnRef.current.isPipelineHealthy()) {
           return await alwaysOnRef.current.forceSelfHeal();
@@ -1327,13 +1111,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    queryMobilePermissions().then((p) => {
-      if (p.microphone !== 'granted') {
-        setNeedsPermissionSetup(true);
-      } else {
-        setNeedsPermissionSetup(false);
-      }
-    });
+    queryMobilePermissions().catch(() => {});
   }, []);
 
   // Seamless Online / Offline Hybrid Brain Status Announcer ("نیٹ آن ہو یا آف، ایپ پراپرلی کام کرے")
@@ -1367,107 +1145,7 @@ export default function App() {
     };
   }, [language, config.voiceSpeed, config.voiceName, config.loveMode]);
 
-  // Intruder Voice Alert & Immediate Phone Screen Lockout
-  const speakIntruderVoiceWarning = () => {
-    audioService.unlock();
-    audioService.playChime('call_end');
-    const warning =
-      'خبردار! ملیشیا والا بادشاہ، آپ کا کوئی فون چھو رہا ہے اور یوز کرنے کی کوشش کر رہا ہے! میں نے فوراً فون اور اسکرین لاک کر دی ہے!';
-    audioService.speakText(warning, {
-      language: 'urdu',
-      rate: config.voiceSpeed,
-      voiceName: config.voiceName || 'Zephyr',
-    });
-  };
-
-  const triggerIntruderLockout = (reason: string, snapshotDataUrl?: string) => {
-    setAntiTouchArmedLive(false);
-    setIntruderReason(reason);
-    setSecurityOverlayMode('intruder_lockout');
-    speakIntruderVoiceWarning();
-    void (async () => {
-      let loc: string | null = null;
-      if (securityConfig.antiTheftGpsEnabled !== false) {
-        loc = await captureSafeLocationCoords().catch(() => null);
-      }
-      recordIntruderAlert(reason, snapshotDataUrl, loc || undefined);
-    })();
-  };
-
-  // Anti-Touch / Unauthorized Motion Guard Listener
-  useEffect(() => {
-    if (!antiTouchArmedLive) return;
-
-    const handleUnauthorizedTouch = () => {
-      triggerIntruderLockout('Someone touched your mobile while Anti-Touch Guard was armed!');
-    };
-
-    const handleDeviceMotion = (e: DeviceMotionEvent) => {
-      const acc = e.accelerationIncludingGravity;
-      if (!acc) return;
-      const total = Math.abs(acc.x || 0) + Math.abs(acc.y || 0) + Math.abs(acc.z || 0);
-      if (total > 23) {
-        triggerIntruderLockout('Someone picked up / shook your mobile!');
-      }
-    };
-
-    window.addEventListener('pointerdown', handleUnauthorizedTouch, { capture: true });
-    window.addEventListener('keydown', handleUnauthorizedTouch, { capture: true });
-    window.addEventListener('devicemotion', handleDeviceMotion);
-
-    return () => {
-      window.removeEventListener('pointerdown', handleUnauthorizedTouch, { capture: true });
-      window.removeEventListener('keydown', handleUnauthorizedTouch, { capture: true });
-      window.removeEventListener('devicemotion', handleDeviceMotion);
-    };
-  }, [antiTouchArmedLive]);
-
-  const handleArmAntiTouchGuard = () => {
-    audioService.unlock();
-    audioService.playChime('activate');
-    setHomeStatusBanner(
-      'Anti-Touch Guard arming in 3 seconds — if anyone touches the phone, Zara will lock it!'
-    );
-    audioService.speakText(
-      'جی میرے مالک! تین سیکنڈ میں اینٹی ٹچ گارڈ آن ہو رہا ہے — اب اگر کسی نے بھی موبائل کو ہاتھ لگایا تو میں فوراً فون لاک کر کے آپ کو بتاؤں گی!',
-      { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
-    );
-    window.setTimeout(() => {
-      setAntiTouchArmedLive(true);
-      setHomeStatusBanner('🛡️ Anti-Touch Guard ARMED — Watching Phone!');
-    }, 3000);
-  };
-
-  // Owner Face Verified Handler
-  const handleOwnerVerifiedSuccess = () => {
-    audioService.unlock();
-    audioService.playChime('activate');
-    setSecurityOverlayMode(null);
-    setIsPinLocked(false);
-    setIntruderReason('');
-
-    const verified = ownerAuthRef.current.isOwnerVerified;
-    const ownerTitle = verified ? 'Owner' : 'User';
-    const welcomeText = verified
-      ? 'Face verification complete. Ready whenever you speak or message.'
-      : 'Device unlocked. Ready to assist.';
-    const snap = getMobileClockSnapshot();
-
-    appendActiveMessages((prev) => [
-      ...prev,
-      {
-        id: `face-ok-${Date.now()}`,
-        sender: 'zara',
-        text: welcomeText,
-        timestamp: snap.shortTime12,
-        createdAtMs: Date.now(),
-        language: 'english',
-      },
-    ]);
-    setHomeStatusBanner(verified ? `Verified ${ownerTitle} ✓` : 'Unlocked ✓');
-  };
-
-  // Close Zara Screen into Background Standby ("call kato / apna Zara app close karo") — keeps 24/7 Voice Commander listening!
+  // Close Zara Screen into Background Standby — keeps 24/7 Wake-Word listening if enabled
   const handleCloseZaraAppNow = () => {
     audioService.stopAudio();
     audioService.playChime('call_end');
@@ -1476,7 +1154,8 @@ export default function App() {
     setIsHomeMicActive(false);
     setShowChatDrawer(false);
     setShowSettings(false);
-    setSecurityOverlayMode('zara_closed');
+    setShowAudioCall(false);
+    setHomeStatusBanner('Zara minimized to standby — say "Hey Zara" anytime.');
     if (alwaysOnVoiceEnabled) {
       screenKeepAlive.enable();
       if (!alwaysOnRef.current?.isRunning()) {
@@ -1494,13 +1173,6 @@ export default function App() {
     if (ringingSchedule) {
       audioService.stopAudio();
       setRingingSchedule(null);
-    } else if (activePreviewApp) {
-      setActivePreviewApp(null);
-    } else if (showInstallModal) {
-      setShowInstallModal(false);
-      setAutoStartPlayDownload(false);
-    } else if (showMoodWorkModal) {
-      setShowMoodWorkModal(false);
     } else if (showMobileControl) {
       setShowMobileControl(false);
     } else if (showNotifications) {
@@ -1509,17 +1181,14 @@ export default function App() {
       setShowSettings(false);
     } else if (showChatDrawer) {
       setShowChatDrawer(false);
-    } else if (showMemories || showSoul) {
+    } else if (showMemories) {
       setShowMemories(false);
-      setShowSoul(false);
-    } else if (appControlToast) {
-      setAppControlToast(null);
     } else if (visionMode !== 'off') {
       zaraVision.stop();
     }
 
     setHomeStatusBanner('Stepped Back (واپس) ✓');
-    const msg = 'جی میرے مالک! میں بیک آ گئی ہوں!';
+    const msg = 'Ji, main back aa gayi hoon.';
     if (speakOut) {
       audioService.speakText(msg, {
         language,
@@ -1530,31 +1199,18 @@ export default function App() {
     return msg;
   };
 
-  // Universal CLOSE Active App / Overlay — honestly reports whether OS/native close succeeded or browser sandbox limits apply
+  // Universal CLOSE Active App / Overlay
   const handleCloseActiveCommand = (targetHint?: string, speakOut = true): string => {
     audioService.playChime('tap');
     endExternalCallNow();
 
     const closed = closeMobileAppNow(targetHint || 'last_active');
-    setActivePreviewApp(null);
     setShowSettings(false);
-    setShowMoodWorkModal(false);
     setShowMobileControl(false);
     setShowChatDrawer(false);
-    setShowInstallModal(false);
-    setShowDriverMode(false);
-    setShowFileManager(false);
-
-    const closedName = closed.app?.name || (targetHint === 'whatsapp' ? 'WhatsApp' : '');
-    const labelText = closed.honestReport || (closedName ? `Handled ${closedName}` : 'Closed Zara overlays');
-    setAppControlToast({
-      mode: 'close',
-      app: closed.app,
-      href: '',
-      label: labelText,
-    });
 
     const msg = closed.honestReport;
+    setHomeStatusBanner(msg);
 
     if (speakOut) {
       audioService.speakText(msg, {
@@ -1564,66 +1220,6 @@ export default function App() {
       });
     }
     return msg;
-  };
-
-  // Build Any App, Game, or Station by Command & Send Link in Chat + Open Preview!
-  const handleBuildNewApp = async (
-    promptText: string,
-    categoryHint: 'game' | 'station' | 'app' | 'utility' = 'app'
-  ) => {
-    setIsBuildingApp(true);
-    markStudioTaskProgress(`Build ${categoryHint}: ${promptText}`, 'working');
-    setHomeStatusBanner(`Zara & AI Team coding "${promptText.slice(0, 36)}"...`);
-    audioService.unlock();
-    audioService.speakText(
-      'جی میرے مالک! میں نے اور میرے اے آئی اسسٹنٹس نے آپ کی کمانڈ سن لی ہے اور ابھی پورا کوڈ اور سسٹم بنا کر اوپن کر رہے ہیں!',
-      { language, rate: config.voiceSpeed, voiceName: config.voiceName || 'Zephyr' }
-    );
-
-    try {
-      const built = await buildNewAppWithZara(promptText, categoryHint);
-      setBuiltApps((prev) => [built, ...prev]);
-      markStudioTaskProgress(`Built ${built.title}`, 'completed');
-
-      const snap = getMobileClockSnapshot();
-      const doneReply = `جی میرے مالک! میں نے اور میرے اسسٹنٹس نے آپ کے حکم پر "${built.title}" کا پورا کوڈ اور سسٹم تیار کر دیا ہے!\n🔗 ڈائریکٹ براؤزر لنک: ${built.url}`;
-
-      appendActiveMessages((prev) => [
-        ...prev,
-        {
-          id: `built-msg-${Date.now()}`,
-          sender: 'zara',
-          text: doneReply,
-          timestamp: snap.shortTime12,
-          createdAtMs: Date.now(),
-          builtApp: {
-            id: built.id,
-            slug: built.slug,
-            title: built.title,
-            url: built.url,
-            category: built.category,
-          },
-        },
-      ]);
-
-      setHomeStatusBanner(`Built "${built.title}" ✓ Link added to Chat & Opened!`);
-      setActivePreviewApp(built);
-      audioService.playChime('activate');
-      audioService.speakText(
-        `میرے مالک! آپ کی ${built.title} بالکل تیار ہو گئی ہے، میں نے چیٹ میں لنک دے دیا ہے اور آپ کی اسکرین پر اوپن کر دی ہے!`,
-        {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-          loveMode: config.loveMode,
-        }
-      );
-    } catch {
-      markStudioTaskProgress(promptText, 'completed');
-      setHomeStatusBanner('App Builder encountered a temporary error — please try again.');
-    } finally {
-      setIsBuildingApp(false);
-    }
   };
 
   // Real-time 1-second Alarm & Work Schedule Watcher
@@ -1841,19 +1437,14 @@ export default function App() {
       );
       if (res.app) {
         markStudioTaskProgress(`Opened ${res.app.name}`, 'completed');
-        setAppControlToast({
-          mode: 'open',
-          app: res.app,
-          href: res.href,
-          label: res.honestReport || `Launching ${res.app.name}`,
-        });
+        setHomeStatusBanner(res.honestReport || `Launching ${res.app.name}`);
       }
       return;
     }
 
     const cmd = detectMobileCommandFromText(textOrId);
     if (!cmd) {
-      // Dynamic Infinix / Android PackageManager app launch for any installed app by spoken name
+      // Dynamic Android PackageManager app launch for any installed app by spoken name
       const dynMatch = textOrId
         .trim()
         .match(/^(?:please\s+|zara\s+)?(?:open|launch|start)\s+([a-z0-9 ._-]{2,36})$/i) ||
@@ -1893,12 +1484,7 @@ export default function App() {
       );
       if (res.app) {
         markStudioTaskProgress(`Opened ${res.app.name}`, 'completed');
-        setAppControlToast({
-          mode: 'open',
-          app: res.app,
-          href: res.href,
-          label: res.honestReport || `Opening ${res.app.name}`,
-        });
+        setHomeStatusBanner(res.honestReport || `Opening ${res.app.name}`);
       }
     }
   };
@@ -2005,136 +1591,6 @@ export default function App() {
       setIsSelfHealing(false);
     }
   };
-
-  // Priority Work Task Handlers + Live Touchless Gesture & Mood Execution
-  const handleAddWorkTask = (
-    title: string,
-    priority: 'urgent' | 'today' | 'normal' = 'today',
-    aiNotes?: string
-  ) => {
-    const newTask: AdvancedWorkTaskItem = {
-      id: `work-${Date.now()}`,
-      title,
-      priority,
-      completed: false,
-      aiNotes,
-      createdAtMs: Date.now(),
-    };
-    setWorkTasks((prev) => [newTask, ...prev]);
-  };
-
-  const handleToggleWorkTask = (id: string) => {
-    setWorkTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
-  };
-
-  const handleDeleteWorkTask = (id: string) => {
-    setWorkTasks((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const handleMoodGestureDetected = async (
-    res: MoodAndGestureScanResult,
-    silentIfNoGesture = false
-  ) => {
-    setCurrentMood(res.mood);
-    setLastGesture(res.gesture);
-
-    // 1. Touchless Open-Palm Stop Gesture: immediately pause Zara audio!
-    if (res.gesture === 'open_palm_stop') {
-      audioService.stopAudio();
-      setHomeStatusBanner('Open Palm Gesture — Zara paused speaking');
-      return;
-    }
-
-    // 2. Touchless Peace / V-Sign Gesture: auto-snap camera photo into Chat!
-    if (res.gesture === 'peace_victory') {
-      setHomeStatusBanner('Peace Gesture — Capturing camera photo to Chat...');
-      await handleSnapCameraToChat();
-      return;
-    }
-
-    if (silentIfNoGesture && res.gesture === 'none') {
-      setHomeStatusBanner(`Mood: ${MOOD_DISPLAY_META[res.mood].label}`);
-      return;
-    }
-
-    const gestureSuffix =
-      res.gesture !== 'none' ? ` · ${GESTURE_ACTION_META[res.gesture].label}` : '';
-    setHomeStatusBanner(`Mood: ${MOOD_DISPLAY_META[res.mood].label}${gestureSuffix}`);
-
-    appendActiveMessages((prev) => [
-      ...prev,
-      {
-        id: `mood-${Date.now()}`,
-        sender: 'zara',
-        text: res.spokenReply,
-        timestamp: getMobileClockSnapshot().shortTime12,
-        createdAtMs: Date.now(),
-        language,
-      },
-    ]);
-
-    audioService.selfHealAudioPipeline();
-    await audioService.speakText(res.spokenReply, {
-      language,
-      pitch: config.voicePitch,
-      rate: config.voiceSpeed,
-      voiceName: config.voiceName || 'Zephyr',
-      loveMode: ownerAuthRef.current.isOwnerVerified ? config.loveMode : false,
-      base64Audio: res.audio,
-    });
-  };
-
-  const handleToggleAutoGestureWatch = async () => {
-    audioService.unlock();
-    const next = !autoGestureWatch;
-    setAutoGestureWatch(next);
-    if (next) {
-      if (zaraVision.getMode() !== 'camera') {
-        const started = await zaraVision.startCamera('user');
-        if (!started.ok) {
-          setAutoGestureWatch(false);
-          setHomeStatusBanner(started.error || 'Camera required for Live Gesture Watch');
-          return;
-        }
-      }
-      setHomeStatusBanner('Live Touchless Gesture & Mood Watch ON');
-    } else {
-      setHomeStatusBanner('Live Gesture Watch Paused');
-    }
-  };
-
-  const moodGestureHandlerRef = useRef(handleMoodGestureDetected);
-  useEffect(() => {
-    moodGestureHandlerRef.current = handleMoodGestureDetected;
-  });
-
-  // Background Touchless Camera Gesture & Mood Watcher (polls every 7s when Auto Gesture Watch is ON)
-  useEffect(() => {
-    if (!autoGestureWatch) return;
-    let inFlight = false;
-    const interval = window.setInterval(async () => {
-      if (inFlight || document.visibilityState === 'hidden') return;
-      const frame = zaraVision.captureFrameBase64();
-      if (!frame?.base64) return;
-      inFlight = true;
-      try {
-        const res = await analyzeCameraMoodAndGesture({
-          imageBase64: frame.base64,
-          userNickname: config.userNickname,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        await moodGestureHandlerRef.current(res, true);
-      } catch {
-        // Ignore transient poll errors silently
-      } finally {
-        inFlight = false;
-      }
-    }, 7000);
-
-    return () => window.clearInterval(interval);
-  }, [autoGestureWatch, config.userNickname, config.voiceName]);
 
   // Persist Spoken Notification Config & Incoming Notification Log
   useEffect(() => {
@@ -2408,15 +1864,6 @@ export default function App() {
 
     setPendingConfirmAction(null);
     setHomeStatusBanner(res.statusReport);
-    if (res.href) {
-      setAppControlToast({
-        mode: 'open',
-        app: null,
-        href: res.href,
-        fallbackHref: res.fallbackHref,
-        label: res.statusReport,
-      });
-    }
 
     const nowSnap = getMobileClockSnapshot();
     appendActiveMessages((prev) => [
@@ -2469,42 +1916,11 @@ export default function App() {
     }
   };
 
-  // Process special Owner commands (Voice Confirmation, Repeat Notification, Multi-step Macros, Self-Heal, Front/Back Camera, Mood/Gesture, Call/Message Dictation, App Control!)
+  // Process special commands (Voice Confirmation, Repeat Notification, Multi-step Macros, Self-Heal, Front/Back Camera, Call/Message Dictation, App Control!)
   const tryHandleSpecialIntercepts = async (
     rawText: string,
     isSubMacroStep = false
   ): Promise<string | null> => {
-    // 0. Handle Voice Yes/No Confirmation when a PC lock action is awaiting confirmation
-    if (pendingPcConfirm) {
-      const decision = detectVoiceConfirmationDecision(rawText);
-      if (decision === 'confirm') {
-        const pending = pendingPcConfirm;
-        setPendingPcConfirm(null);
-        const res = await executeAuthorizedPcCommand(pending.action, pending.params, true);
-        const msg = res.ok
-          ? `Confirmed: ${res.output || pending.label} succeeded on your computer.`
-          : `Could not execute "${pending.label}": ${res.error || 'PC Companion Agent is offline.'}`;
-        setHomeStatusBanner(msg);
-        await audioService.speakText(msg, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        return msg;
-      }
-      if (decision === 'cancel') {
-        setPendingPcConfirm(null);
-        const cancelMsg = 'Okay, cancelled the computer command.';
-        setHomeStatusBanner(cancelMsg);
-        await audioService.speakText(cancelMsg, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        return cancelMsg;
-      }
-    }
-
     // 0a. Handle Voice Yes/No Confirmation when a Call or Message is awaiting authorization
     if (pendingConfirmAction) {
       const decision = detectVoiceConfirmationDecision(rawText);
@@ -2524,13 +1940,15 @@ export default function App() {
       }
     }
 
-    // 0b. Driver Mode, File Manager, Memory/File Delete Confirmation Guard & Authorized PC Control
-    if (/\b(driver\s*mode|driving\s*mode|ڈرائیور\s*موڈ|ड्राइवर\s*मोड)\b/i.test(rawText)) {
-      const turningOff = /\b(off|exit|close|stop|band|بند|बंद)\b/i.test(rawText);
-      setShowDriverMode(!turningOff);
-      const msg = turningOff
-        ? 'Driver Mode closed.'
-        : 'Driver Mode is now active. Spoken message alerts and hands-free controls are ready — drive safely.';
+    // 0b. Memory Delete Confirmation Guard
+    if (
+      /\b(delete|remove|erase|clear)\s+(?:a\s+|this\s+|that\s+|my\s+|all\s+)?(memory|memories|vault)\b/i.test(
+        rawText
+      )
+    ) {
+      setShowMemories(true);
+      const msg =
+        'For safety, I never delete memories without explicit confirmation. I opened your Memory Vault — select the memory and confirm deletion.';
       setHomeStatusBanner(msg);
       await audioService.speakText(msg, {
         language,
@@ -2538,85 +1956,6 @@ export default function App() {
         voiceName: config.voiceName || 'Zephyr',
       });
       return msg;
-    }
-
-    if (
-      /\b(open\s*(?:my\s*)?files|file\s*manager|storage\s*manager|search\s*(?:my\s*)?files|فائل\s*مینیجر|फ़ाइल\s*मैनेजर)\b/i.test(
-        rawText
-      )
-    ) {
-      setShowFileManager(true);
-      const msg = 'Opening your Smart File & Storage Manager so you can browse, search, or have me explain your authorized files.';
-      setHomeStatusBanner('Opened Smart File & Storage Manager');
-      await audioService.speakText(msg, {
-        language,
-        rate: config.voiceSpeed,
-        voiceName: config.voiceName || 'Zephyr',
-      });
-      return msg;
-    }
-
-    if (
-      /\b(delete|remove|erase|clear)\s+(?:a\s+|this\s+|that\s+|my\s+|all\s+)?(memory|memories|file|files|folder|vault)\b/i.test(
-        rawText
-      )
-    ) {
-      const isFile = /\b(file|files|folder)\b/i.test(rawText);
-      if (isFile) {
-        setShowFileManager(true);
-      } else {
-        setShowMemories(true);
-      }
-      const msg = isFile
-        ? 'For safety, I never delete files automatically. I opened the File Manager — please tap Delete and confirm explicitly on screen.'
-        : 'For safety, I never delete memories without explicit confirmation. I opened your Memory Vault — select the memory and confirm deletion.';
-      setHomeStatusBanner(msg);
-      await audioService.speakText(msg, {
-        language,
-        rate: config.voiceSpeed,
-        voiceName: config.voiceName || 'Zephyr',
-      });
-      return msg;
-    }
-
-    const pcCmd = detectPcVoiceCommand(rawText);
-    if (pcCmd) {
-      if (!ownerAuthRef.current.isOwnerVerified) {
-        const denyPc = 'Authorized Owner Google Sign-In is required before executing computer commands.';
-        await audioService.speakText(denyPc, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-          loveMode: false,
-        });
-        return denyPc;
-      }
-      if (pcCmd.requiresConfirm) {
-        setPendingPcConfirm({
-          action: pcCmd.action,
-          params: pcCmd.params,
-          label: pcCmd.label,
-        });
-        const askConfirm = `Please confirm explicitly: do you want me to ${pcCmd.label}? Say Yes or tap Confirm.`;
-        setHomeStatusBanner(`Confirm PC action: ${pcCmd.label}`);
-        await audioService.speakText(askConfirm, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        return askConfirm;
-      }
-      const res = await executeAuthorizedPcCommand(pcCmd.action, pcCmd.params, false);
-      const replyPc = res.ok
-        ? `Computer command "${pcCmd.label}" succeeded: ${res.output || 'Done.'}`
-        : `Computer command "${pcCmd.label}" failed: ${res.error || 'No authorized PC Companion Agent is connected.'}`;
-      setHomeStatusBanner(replyPc.slice(0, 110));
-      await audioService.speakText(replyPc, {
-        language,
-        rate: config.voiceSpeed,
-        voiceName: config.voiceName || 'Zephyr',
-      });
-      return replyPc;
     }
 
     // 0c. Repeat Last Incoming Call or Message Notification Command
@@ -2717,44 +2056,6 @@ export default function App() {
         });
       }
       return mRes.message;
-    }
-
-    // 2.2d Autonomous Multi-Step Dev / Task Goal ("automate task ...", "build and test a flutter/react project ...")
-    if (
-      /\b(automate\s*task|run\s*task\s*pipeline|multi[\s-]*step\s*task|auto[\s-]*build\s*(?:and\s*)?(?:test|api)|create\s+(?:a\s+)?(?:project|app)\s+and\s+(?:build|create|test)\s+(?:an?\s+)?api)\b/i.test(
-        rawText
-      )
-    ) {
-      try {
-        setHomeStatusBanner('Planning & executing multi-step workflow...');
-        const authHeaders = await getOwnerAuthHeaders();
-        const taskRes = await fetchWithContainerWakeup('/api/tasks/plan-execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({ goal: rawText }),
-        });
-        const taskJson = await taskRes.json().catch(() => ({}));
-        if (taskJson?.ok && taskJson.plan?.steps) {
-          const steps = taskJson.plan.steps as Array<any>;
-          for (const st of steps) {
-            if (st.tool === 'music_control' && st.clientAction?.musicCmd) {
-              executeMusicControlCommand(st.clientAction.musicCmd);
-            } else if (st.tool === 'phone_control' && st.clientAction?.appId) {
-              executeMobileAppCommand(st.clientAction.appId, 'open');
-            }
-          }
-          const summary = taskJson.plan.summary || `Completed ${steps.length} workflow steps.`;
-          setHomeStatusBanner(summary.slice(0, 120));
-          if (config.autoSpeak) {
-            await audioService.speakText(summary, {
-              language,
-              rate: config.voiceSpeed,
-              voiceName: config.voiceName || 'Zephyr',
-            });
-          }
-          return summary;
-        }
-      } catch {}
     }
 
     // 2.3 Surroundings Perception Scan Command
@@ -2870,14 +2171,9 @@ export default function App() {
         openSettingsAtTab(internalUiCmd.tabId || 'controls');
       } else if (internalUiCmd.kind === 'open_chat') {
         setShowChatDrawer(true);
-      } else if (internalUiCmd.kind === 'open_ai_studio') {
-        setAiStudioTab(internalUiCmd.studioTab || 'office');
-        setShowAiStudio(true);
       } else if (internalUiCmd.kind === 'open_mobile_hub') {
         setMobileControlTab('permissions');
         setShowMobileControl(true);
-      } else if (internalUiCmd.kind === 'open_pwa_install') {
-        setShowInstallModal(true);
       }
 
       audioService.selfHealAudioPipeline();
@@ -2924,7 +2220,6 @@ export default function App() {
         setIsManualCameraPreview(true);
         const res = await zaraVision.startCamera('user');
         if (res.ok) {
-          setNeedsPermissionSetup(false);
           setHomeStatusBanner('Front Selfie Camera ON ✓');
           const msg = isVerified
             ? 'جی میرے مالک! میں نے فرنٹ سیلفی کیمرہ آن کر دیا ہے اور آپ کو لائیو دیکھ رہی ہوں!'
@@ -2941,7 +2236,6 @@ export default function App() {
         setIsManualCameraPreview(true);
         const res = await zaraVision.startCamera('environment');
         if (res.ok) {
-          setNeedsPermissionSetup(false);
           setHomeStatusBanner('Back Rear Camera ON ✓');
           const msg =
             'جی میرے مالک! میں نے موبائل کا بیک کیمرہ آن کر دیا ہے اور سامنے کا منظر لائیو دیکھ رہی ہوں!';
@@ -2986,108 +2280,17 @@ export default function App() {
       }
     }
 
-    // 3b. Voice & Chat Mood/Gesture Scan + Advanced Work Studio Commands
-    const moodWorkCmd = detectMoodGestureOrWorkCommand(rawText);
-    if (moodWorkCmd) {
-      if (moodWorkCmd.type === 'scan_mood_gesture') {
-        setHomeStatusBanner('Scanning your Mood & Gesture...');
-        let frameB64 = zaraVision.captureFrameBase64()?.base64;
-        if (!frameB64) {
-          const snapped = await zaraVision.snapPhotoFromLens('user');
-          frameB64 = snapped?.base64;
-        }
-        const scanRes = await analyzeCameraMoodAndGesture({
-          imageBase64: frameB64,
-          textContext: rawText,
-          userNickname: config.userNickname,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        setCurrentMood(scanRes.mood);
-        setLastGesture(scanRes.gesture);
-        setHomeStatusBanner(
-          `Mood: ${MOOD_DISPLAY_META[scanRes.mood].label} · ${
-            GESTURE_ACTION_META[scanRes.gesture].label
-          }`
-        );
-        audioService.selfHealAudioPipeline();
-        await audioService.speakText(scanRes.spokenReply, {
-          language,
-          pitch: config.voicePitch,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-          loveMode: config.loveMode,
-          base64Audio: scanRes.audio,
-        });
-        return scanRes.spokenReply;
-      }
-
-      if (
-        moodWorkCmd.type === 'open_mood_gesture_hub' ||
-        moodWorkCmd.type === 'open_advanced_work'
-      ) {
-        const targetTab =
-          moodWorkCmd.type === 'open_advanced_work' ? 'work' : 'mood_gesture';
-        setMoodWorkInitialTab(targetTab);
-        setShowMoodWorkModal(true);
-        const msg =
-          targetTab === 'work'
-            ? 'جی میرے مالک! میں نے آپ کا ایڈوانس ورک اسٹوڈیو، فوکس ٹائمر اور کام کی لسٹ اوپن کر دی ہے!'
-            : 'جی میرے مالک! میں نے موڈ اور ٹچ لیس جیسچر سسٹم اوپن کر دیا ہے!';
-        await audioService.speakText(msg, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-          loveMode: config.loveMode,
-        });
-        return msg;
-      }
-
-      if (moodWorkCmd.type === 'add_work_task' && moodWorkCmd.taskTitle) {
-        handleAddWorkTask(moodWorkCmd.taskTitle, 'today');
-        setHomeStatusBanner(`Saved Work Task: ${moodWorkCmd.taskTitle}`);
-        const msg = `جی میرے مالک! میں نے آپ کے ایڈوانس ورک لسٹ میں یہ کام نوٹ کر لیا ہے: "${moodWorkCmd.taskTitle}"!`;
-        await audioService.speakText(msg, {
-          language,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        return msg;
-      }
-
-      if (moodWorkCmd.type === 'run_work_ai') {
-        setHomeStatusBanner('Zara & AI Assistants drafting work...');
-        const workRes = await runAdvancedWorkStudio({
-          workMode: moodWorkCmd.workMode || 'action_plan',
-          prompt: moodWorkCmd.workPrompt || rawText,
-          userNickname: config.userNickname,
-          voiceName: config.voiceName || 'Zephyr',
-        });
-        setHomeStatusBanner(`${workRes.title} Ready ✓`);
-        audioService.selfHealAudioPipeline();
-        await audioService.speakText(workRes.spokenSummary, {
-          language,
-          pitch: config.voicePitch,
-          rate: config.voiceSpeed,
-          voiceName: config.voiceName || 'Zephyr',
-          loveMode: config.loveMode,
-          base64Audio: workRes.audio,
-        });
-        return `${workRes.title}\n\n${workRes.output}`;
-      }
-    }
-
     if (
       /(zara\s*(app\s*)?(open|on|wake|chalu|kholo|khol)|زارا\s*(ایپ\s*)?(اوپن|آن|کھولو|جاگو)|ज़ारा\s*(ऐप\s*)?(ओपन|ऑन|खोलो|चालू))/i.test(
         rawText
       ) &&
       !/(whatsapp|youtube|camera|instagram|tiktok|facebook|settings)/i.test(rawText)
     ) {
-      setSecurityOverlayMode(null);
       screenKeepAlive.enable();
       const verified = ownerAuthRef.current.isOwnerVerified;
       const wakeMsg = verified
-        ? 'جی میرے مالک ملیشیا والا بادشاہ! میں اور میرے اے آئی اسسٹنٹس لائیو حاضر ہیں — فون سائیڈ پر پڑا ہو، نیٹ آف ہو یا اسکرین بند ہو، آپ کی ہر آواز پر ہم کام کریں گے!'
-        : 'جی دوست! میں حاضر ہوں — بتائیے میں آپ کے کس عام کام یا سوال میں مدد کروں؟';
+        ? 'Ji, Zara ready hai! Aap bol kar kuch bhi poochh sakte hain ya phone control kar sakte hain.'
+        : 'Ji! Main Zara hoon — batayein main aapki kya madad karoon?';
       audioService.selfHealAudioPipeline();
       await audioService.speakText(wakeMsg, {
         language,
@@ -3148,7 +2351,6 @@ export default function App() {
                 headers: {
                   'Content-Type': 'application/json',
                   ...authHeaders,
-                  ...getTierRequestHeaders(),
                 },
                 body: JSON.stringify({
                   message: screenPrompt,
@@ -3364,13 +2566,14 @@ export default function App() {
         return msg;
       }
       if (special.type === 'lock_phone_now') {
-        setSecurityOverlayMode('intruder_lockout');
-        setIntruderReason('Locked on Owner Voice Command');
-        return 'جی میرے مالک! میں نے فوراً موبائل اسکرین لاک کر دی ہے!';
+        performAndroidAccessibilityAction('lock_screen');
+        setIsPinLocked(true);
+        setHomeStatusBanner('Phone / Zara locked.');
+        return 'Phone screen lock activated.';
       }
       if (special.type === 'arm_touch_guard') {
-        handleArmAntiTouchGuard();
-        return 'جی میرے مالک! اینٹی ٹچ سیکیورٹی گارڈ آن ہو رہا ہے!';
+        setHomeStatusBanner('PIN lock protection is available inside Settings -> Security.');
+        return 'PIN lock protection is available inside Settings -> Security.';
       }
       if (special.type === 'whatsapp_text') {
         const pendingMsg: PendingCallOrMessageAction = {
@@ -3418,13 +2621,8 @@ export default function App() {
       if (special.type === 'end_external_call') {
         const ended = endExternalCallNow();
         closeMobileAppNow('whatsapp');
-        setAppControlToast({
-          mode: 'close',
-          app: null,
-          href: '',
-          label: `Call Ended ${ended || ''} ✓`,
-        });
-        const msg = 'جی میرے مالک! میں نے اس کی کال بند اور ختم کر دی ہے!';
+        setHomeStatusBanner(`Call Ended ${ended || ''} ✓`);
+        const msg = 'Call ended.';
         await audioService.speakText(msg, {
           language,
           rate: config.voiceSpeed,
@@ -3444,67 +2642,7 @@ export default function App() {
       return report.spokenUrduReport;
     }
 
-    const buildCmd = detectAppBuilderCommand(rawText);
-    if (buildCmd) {
-      handleBuildNewApp(buildCmd.prompt, buildCmd.category);
-      return `جی میرے مالک! میں اور میرے اسسٹنٹس آپ کے لیے "${buildCmd.prompt}" کا مکمل کوڈ اور ایپ تیار کر رہے ہیں — ابھی لنک کے ساتھ اوپن ہو جائے گی!`;
-    }
-
-    if (
-      /(पूरी\s*फाइल|सारी\s*फाइल|सब\s*फाइल|जितनी\s*भी\s*फाइल|ऑल\s*टू\s*जेड|कौन\s*सा\s*टूल|कौन\s*सा\s*कोड|पूरा\s*कोड|सोर्स\s*कोड|all\s*files|full\s*code|source\s*code|export\s*files|پوری\s*فائل|ساری\s*فائل|پورا\s*کوڈ)/i.test(
-        rawText
-      )
-    ) {
-      setShowProjectExport(true);
-      const msg =
-        'जी मेरे मालिक! मैंने ज़ारा की शुरू से लेकर अब तक की सभी फाइलें, टूल्स की A-to-Z जानकारी और पूरा सोर्स कोड डाउनलोड पैनल खोल दिया है!';
-      await audioService.speakText(msg, {
-        language,
-        rate: config.voiceSpeed,
-        voiceName: config.voiceName || 'Zephyr',
-      });
-      return msg;
-    }
-
     return null;
-  };
-
-  const handleSwitchAssistant = async (
-    targetId: AiAssistantId,
-    announceVoice = true
-  ): Promise<string> => {
-    const profile = getAssistantProfile(targetId);
-    setConfig((prev) => ({ ...prev, activeAssistantId: targetId }));
-    const switchText =
-      targetId === 'zara'
-        ? 'Connected back to Main Zara Assistant (Personal AI OS).'
-        : `Connected to ${profile.name} (${profile.disclosureText}). Say "disconnect assistant" or tap Back to Zara anytime to return to Main Zara.`;
-    setHomeStatusBanner(`Active Assistant: ${profile.shortLabel}`);
-    appendActiveMessages((prev) => [
-      ...prev,
-      {
-        id: `switch-${Date.now()}`,
-        sender: 'zara',
-        text: switchText,
-        timestamp: getMobileClockSnapshot().shortTime12,
-        createdAtMs: Date.now(),
-        language,
-        assistantId: targetId,
-        assistantLabel: profile.shortLabel,
-      },
-    ]);
-    if (announceVoice) {
-      audioService.selfHealAudioPipeline();
-      await audioService.speakText(switchText, {
-        language: language === 'auto' ? 'english' : language,
-        pitch: config.voicePitch,
-        rate: config.voiceSpeed,
-        voiceName:
-          targetId === 'zara' ? config.voiceName || 'Zephyr' : profile.defaultVoice,
-        loveMode: false,
-      });
-    }
-    return switchText;
   };
 
   // Handle sending a text, Gallery/Camera photo, or recognized voice command
@@ -3530,11 +2668,6 @@ export default function App() {
 
     markStudioTaskProgress(displayUserText, 'working');
 
-    const passiveMood = detectMoodFromText(displayUserText);
-    if (passiveMood) {
-      setCurrentMood(passiveMood);
-    }
-
     const nowSnap = getMobileClockSnapshot();
     if (!isMacroStep) {
       const userMsg: ChatMessage = {
@@ -3549,14 +2682,10 @@ export default function App() {
       appendActiveMessages((prev) => [...prev, userMsg]);
     }
 
-    // Check AI-to-AI assistant switching commands ("connect me with Mother Assistant", "back to Zara", etc.)
+    // Check multilingual voice switch commands
     const assistantCmd = !effectiveImageDataUrl
       ? detectAssistantOrLanguageCommand(displayUserText)
       : null;
-    if (assistantCmd?.type === 'switch_assistant' && assistantCmd.assistantId) {
-      markStudioTaskProgress(displayUserText, 'completed');
-      return await handleSwitchAssistant(assistantCmd.assistantId, config.autoSpeak);
-    }
     if (assistantCmd?.type === 'language_switch' && assistantCmd.targetLanguage) {
       handleSelectLanguage(assistantCmd.targetLanguage);
       const confirmTxt =
@@ -3588,19 +2717,17 @@ export default function App() {
       const interceptedReply = await tryHandleSpecialIntercepts(displayUserText, isMacroStep);
       if (interceptedReply) {
         markStudioTaskProgress(displayUserText, 'completed');
-        if (!detectAppBuilderCommand(displayUserText)) {
-          appendActiveMessages((prev) => [
-            ...prev,
-            {
-              id: `${Date.now()}-z`,
-              sender: 'zara',
-              text: interceptedReply,
-              timestamp: getMobileClockSnapshot().shortTime12,
-              createdAtMs: Date.now(),
-              language,
-            },
-          ]);
-        }
+        appendActiveMessages((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-z`,
+            sender: 'zara',
+            text: interceptedReply,
+            timestamp: getMobileClockSnapshot().shortTime12,
+            createdAtMs: Date.now(),
+            language,
+          },
+        ]);
         return interceptedReply;
       }
     }
@@ -3631,37 +2758,26 @@ export default function App() {
     }
     const isOwnerVerified = getOwnerAuthSnapshot().isOwnerVerified;
     const heartLockedNow = Boolean(config.heartLockEnabled && !config.heartLockUnlocked);
-    const activeAssistantId: AiAssistantId = config.activeAssistantId || 'zara';
+    const activeAssistantId = 'zara' as const;
     const activeAssistantProfile = getAssistantProfile(activeAssistantId);
-    const effectiveVoiceForAssistant =
-      activeAssistantId === 'zara'
-        ? config.voiceName || 'Zephyr'
-        : activeAssistantProfile.defaultVoice;
-    const effectiveLoveMode =
-      activeAssistantId === 'zara'
-        ? Boolean(isOwnerVerified && config.loveMode && !heartLockedNow)
-        : false;
-    const baseEmotionMode: ZaraEmotionMode =
-      activeAssistantId === 'zara'
-        ? heartLockedNow
-          ? 'calm'
-          : config.emotionMode || 'apnapan'
-        : 'calm';
+    const effectiveVoiceForAssistant = config.voiceName || 'Zephyr';
+    const effectiveLoveMode = Boolean(isOwnerVerified && config.loveMode && !heartLockedNow);
+    const baseEmotionMode: ZaraEmotionMode = heartLockedNow
+      ? 'calm'
+      : config.emotionMode || 'apnapan';
 
-    const moodShift =
-      activeAssistantId === 'zara' && !heartLockedNow && !effectiveImageDataUrl
-        ? detectEmotionForCompanion(displayUserText, baseEmotionMode, effectiveLoveMode)
-        : { nextMood: baseEmotionMode, changed: false, reasonPromptNote: '' };
+    const moodShift = !heartLockedNow && !effectiveImageDataUrl
+      ? detectEmotionForCompanion(displayUserText, baseEmotionMode, effectiveLoveMode)
+      : { nextMood: baseEmotionMode, changed: false, reasonPromptNote: '' };
 
-    const effectiveEmotionMode: ZaraEmotionMode =
-      activeAssistantId === 'zara' && !heartLockedNow ? moodShift.nextMood : baseEmotionMode;
-    if (activeAssistantId === 'zara' && !heartLockedNow && moodShift.changed) {
+    const effectiveEmotionMode: ZaraEmotionMode = !heartLockedNow ? moodShift.nextMood : baseEmotionMode;
+    if (!heartLockedNow && moodShift.changed) {
       setConfig((prev) => ({ ...prev, emotionMode: moodShift.nextMood }));
     }
 
     const activeMemList = isOwnerVerified ? ownerMemories : deviceMemories;
 
-    // 100% OFFLINE LOCAL BRAIN EXECUTION ("نیٹ آن ہو یا آف، ایپ پراپرلی کام کرے")
+    // 100% OFFLINE LOCAL BRAIN EXECUTION
     if (!isAppOnline()) {
       const offlineRes = await runOfflineZaraBrain({
         userText: displayUserText,
@@ -3670,7 +2786,6 @@ export default function App() {
         userNickname: config.userNickname || 'Friend',
         loveMode: effectiveLoveMode,
         schedules,
-        workTasks,
         memories: !heartLockedNow ? activeMemList : [],
       });
       const offlineMsg: ChatMessage = {
@@ -3747,7 +2862,6 @@ export default function App() {
           headers: {
             'Content-Type': 'application/json',
             ...authHeaders,
-            ...getTierRequestHeaders(),
           },
           body: JSON.stringify({
             message: displayUserText,
@@ -3815,8 +2929,8 @@ export default function App() {
           : 'Main sun rahi hoon — bataiye kya madad karoon?';
       const replyText = data.text || fallbackReply;
       const serverAudio: string | null = data.audio || null;
-      const replyAssistantId: AiAssistantId = data.assistantId || activeAssistantId;
-      const replyAssistantLabel: string = data.assistantLabel || activeAssistantProfile.shortLabel;
+      const replyAssistantId = 'zara' as const;
+      const replyAssistantLabel: string = activeAssistantProfile.shortLabel;
 
       if (data.deviceAction?.action === 'drop_call') {
         audioService.stopAudio();
@@ -3892,7 +3006,6 @@ export default function App() {
         userNickname: verifiedNow ? config.userNickname : 'Friend',
         loveMode: verifiedNow ? config.loveMode : false,
         schedules,
-        workTasks,
         memories: verifiedNow ? ownerMemories : [],
       });
       if (voiceTurnTokenRef.current !== activeTurnToken) {
@@ -3985,12 +3098,9 @@ export default function App() {
       const activeFrame = zaraVision.captureFrameBase64();
       const authHeaders = await getOwnerAuthHeaders();
 
-      const activeAssistantId: AiAssistantId = config.activeAssistantId || 'zara';
+      const activeAssistantId = 'zara' as const;
       const activeAssistantProfile = getAssistantProfile(activeAssistantId);
-      const effectiveVoiceForAssistant =
-        activeAssistantId === 'zara'
-          ? config.voiceName || 'Zephyr'
-          : activeAssistantProfile.defaultVoice;
+      const effectiveVoiceForAssistant = config.voiceName || 'Zephyr';
 
       const contextualVoiceDigest = !heartLockedNow
         ? buildMemoryAndScheduleDigest(activeMemList, activeThread, schedules, 'voice command')
@@ -4019,7 +3129,6 @@ export default function App() {
             headers: {
               'Content-Type': 'application/json',
               ...authHeaders,
-              ...getTierRequestHeaders(),
             },
             body: JSON.stringify({
               audioBase64: wavBase64,
@@ -4098,9 +3207,8 @@ export default function App() {
 
         const serverVerified = Boolean(data.ownerVerified);
         const heard = data.userTranscription || '';
-        const replyAssistantId: AiAssistantId = data.assistantId || activeAssistantId;
-        const replyAssistantLabel: string =
-          data.assistantLabel || activeAssistantProfile.shortLabel;
+        const replyAssistantId = 'zara' as const;
+        const replyAssistantLabel: string = activeAssistantProfile.shortLabel;
         let reply =
           data.zaraReply ||
           (language === 'english'
@@ -4116,21 +3224,11 @@ export default function App() {
         const nowId = Date.now();
 
         if (heard) {
-          if (
-            securityOverlayRef.current === 'zara_closed' &&
-            !/(close|band|off|بند|کلوز|آف|बंद|क्लोज)/i.test(heard)
-          ) {
-            setSecurityOverlayMode(null);
-          }
           capture100DayMemoryIfNotable(heard);
           if (detectUserBusyIntent(heard)) {
             busyUntilRef.current = Date.now() + 10 * 60_000;
           }
-          const heardMood = detectMoodFromText(heard);
-          if (heardMood) {
-            setCurrentMood(heardMood);
-          }
-          if (activeAssistantId === 'zara' && !heartLockedNow) {
+          if (!heartLockedNow) {
             const allowRomanticVoice = Boolean(serverVerified && config.loveMode);
             const voiceShift = detectEmotionForCompanion(
               heard,
@@ -4142,24 +3240,7 @@ export default function App() {
             }
           }
 
-          // Voice command switching between the 6 AI Assistants
           const voiceAssistantCmd = detectAssistantOrLanguageCommand(heard);
-          if (voiceAssistantCmd?.type === 'switch_assistant' && voiceAssistantCmd.assistantId) {
-            appendActiveMessages((prev) => [
-              ...prev,
-              {
-                id: `${nowId}-u`,
-                sender: 'user',
-                text: heard,
-                timestamp: timeLabel,
-                createdAtMs: nowId,
-                language,
-              },
-            ]);
-            await handleSwitchAssistant(voiceAssistantCmd.assistantId, true);
-            setHomeStatusBanner(null);
-            return;
-          }
           if (voiceAssistantCmd?.type === 'language_switch' && voiceAssistantCmd.targetLanguage) {
             handleSelectLanguage(voiceAssistantCmd.targetLanguage);
             const confirmTxt =
@@ -4218,20 +3299,16 @@ export default function App() {
                 createdAtMs: nowId,
                 language,
               },
-              ...(detectAppBuilderCommand(heard)
-                ? []
-                : [
-                    {
-                      id: `${nowId}-z`,
-                      sender: 'zara' as const,
-                      text: specialReply,
-                      timestamp: timeLabel,
-                      createdAtMs: nowId + 1,
-                      language,
-                      assistantId: replyAssistantId,
-                      assistantLabel: replyAssistantLabel,
-                    },
-                  ]),
+              {
+                id: `${nowId}-z`,
+                sender: 'zara' as const,
+                text: specialReply,
+                timestamp: timeLabel,
+                createdAtMs: nowId + 1,
+                language,
+                assistantId: replyAssistantId,
+                assistantLabel: replyAssistantLabel,
+              },
             ]);
             setHomeStatusBanner(null);
             return;
@@ -4373,17 +3450,15 @@ export default function App() {
     }
   };
 
-  // Keep latest handlers & overlay state in refs for Always-On 24/7 Hands-Free & Lock-Screen Voice Commander
+  // Keep latest handlers in refs for Always-On 24/7 Hands-Free & Lock-Screen Voice Commander
   const sendMsgRef = useRef(handleSendMessage);
   const sendWavRef = useRef(handleSendAudioWav);
-  const securityOverlayRef = useRef(securityOverlayMode);
   useEffect(() => {
     sendMsgRef.current = handleSendMessage;
     sendWavRef.current = handleSendAudioWav;
-    securityOverlayRef.current = securityOverlayMode;
   });
 
-  // Mount & Manage Always-On Zero-Touch Voice Commander (Works without touching mobile, Lock Screen, Side, or Background!)
+  // Mount & Manage Always-On Zero-Touch Voice Commander
   useEffect(() => {
     const listener = new AlwaysOnVoiceListener(
       {
@@ -4396,12 +3471,6 @@ export default function App() {
         },
         onCommandTranscript: async (finalText) => {
           setVoiceError(null);
-          if (
-            securityOverlayRef.current === 'zara_closed' &&
-            !/(close|band|off|بند|کلوز|آف|बंद|क्लोज)/i.test(finalText)
-          ) {
-            setSecurityOverlayMode(null);
-          }
           audioService.selfHealAudioPipeline();
           setIsThinkingHome(true);
           try {
@@ -4420,7 +3489,6 @@ export default function App() {
         onPermissionError: (msg) => {
           setHomeStatusBanner(msg);
           setVoiceErrorNotice(msg, 0);
-          setNeedsPermissionSetup(true);
         },
         onVoiceError: (msg) => {
           setHomeStatusBanner(msg);
@@ -4445,15 +3513,10 @@ export default function App() {
       savedContinuousOn = localStorage.getItem(ALWAYS_ON_VOICE_KEY) === '1';
     } catch {}
 
-    const blockedBySecurity =
-      isPinLocked ||
-      securityOverlayMode === 'intruder_lockout' ||
-      securityOverlayMode === 'owner_face_scan';
-
     // Only auto-start on load if mic permission was previously granted AND user left continuous mode ON
     if (
       savedContinuousOn &&
-      !blockedBySecurity &&
+      !isPinLocked &&
       typeof navigator !== 'undefined' &&
       navigator.permissions?.query
     ) {
@@ -4494,16 +3557,11 @@ export default function App() {
     );
   }, [securityConfig.wakeWordOnlyMode, securityConfig.customWakeWord]);
 
-  // Keep 24/7 Voice Commander running even in 'zara_closed' Standby & Minimized Background!
-  // Only stop if disabled or locked by PIN/Intruder, and pause temporarily during direct capture.
+  // Keep 24/7 Voice Commander running in Standby & Background; pause during active Audio Call or direct capture
   useEffect(() => {
     if (!alwaysOnRef.current) return;
-    const blockedBySecurity =
-      isPinLocked ||
-      securityOverlayMode === 'intruder_lockout' ||
-      securityOverlayMode === 'owner_face_scan';
 
-    if (!alwaysOnVoiceEnabled || blockedBySecurity) {
+    if (!alwaysOnVoiceEnabled || isPinLocked) {
       alwaysOnRef.current.stop();
       return;
     }
@@ -4516,7 +3574,7 @@ export default function App() {
         alwaysOnRef.current.setPaused(false);
       }
     }
-  }, [alwaysOnVoiceEnabled, isHomeMicActive, showAudioCall, securityOverlayMode, isPinLocked]);
+  }, [alwaysOnVoiceEnabled, isHomeMicActive, showAudioCall, isPinLocked]);
 
   useEffect(() => {
     return () => {
@@ -4544,13 +3602,11 @@ export default function App() {
         try {
           localStorage.setItem(ALWAYS_ON_VOICE_KEY, '0');
         } catch {}
-        setNeedsPermissionSetup(true);
         const errMsg =
           'Could not start background microphone. Please allow Microphone access in App Permissions.';
         setHomeStatusBanner(errMsg);
         setVoiceErrorNotice(errMsg, 0);
       } else {
-        setNeedsPermissionSetup(false);
         setVoiceError(null);
         setHomeStatusBanner(
           '24/7 Voice Commander ON — Zara hears you on Side, Lock Screen & Background!'
@@ -4621,14 +3677,11 @@ export default function App() {
         setIsHomeMicActive(false);
         updateHomeMicVolQuantized(0);
         setHomeStatusBanner(msg);
-        setNeedsPermissionSetup(true);
       },
     });
 
     if (!ok) {
       setIsHomeMicActive(false);
-    } else {
-      setNeedsPermissionSetup(false);
     }
   };
 
@@ -4680,13 +3733,11 @@ export default function App() {
         try {
           localStorage.setItem(ALWAYS_ON_VOICE_KEY, '0');
         } catch {}
-        setNeedsPermissionSetup(true);
         const failMsg =
           'Could not start microphone. Please allow microphone access and tap the voice button once.';
         setHomeStatusBanner(failMsg);
         setVoiceErrorNotice(failMsg, 0);
       } else {
-        setNeedsPermissionSetup(false);
         setVoiceError(null);
         setHomeStatusBanner(
           'Continuous Voice ON — Speak naturally; Zara listens and replies automatically until you tap Stop.'
@@ -4745,7 +3796,6 @@ export default function App() {
     setIsManualCameraPreview(true);
     const res = await zaraVision.startCamera(facing);
     if (res.ok) {
-      setNeedsPermissionSetup(false);
       const isBack = res.facing === 'environment';
       setHomeStatusBanner(
         isBack
@@ -4853,7 +3903,6 @@ export default function App() {
     }
     const res = await requestAllPermissionsMaster();
     if (res.micGranted) {
-      setNeedsPermissionSetup(false);
       setSecurityConfig((prev) => ({ ...prev, allPermissionsGranted: true }));
       screenKeepAlive.enable();
       if (alwaysOnVoiceEnabled) {
@@ -4914,11 +3963,10 @@ export default function App() {
     } catch {}
     screenKeepAlive.enable();
     await requestAllPermissionsMaster().catch(() => {});
-    setNeedsPermissionSetup(false);
     await alwaysOnRef.current?.start().catch(() => {});
-    setHomeStatusBanner('All Zara Functions ON ✓ (Voice, Moods, Self-Check, Alerts & Controls Ready)');
+    setHomeStatusBanner('All Zara Functions ON ✓ (Voice, Alerts & Controls Ready)');
     audioService.speakText(
-      'जी बिल्कुल! मैंने ज़ारा ऐप के सारे फंक्शन ऑन कर दिए हैं — वॉइस, इमोशंस, ऑटो अपडेट चेक, अलर्ट्स और सारे कंट्रोल्स अब पूरी तरह एक्टिव हैं!',
+      'Ji bilkul! Maine Zara ke saare voice aur phone controls active kar diye hain!',
       {
         language,
         rate: config.voiceSpeed,
@@ -5003,7 +4051,8 @@ export default function App() {
   };
 
   const handleSendProfileToChat = () => {
-    const profileText = formatZaraProfileShareText(playStoreLaunchUrl);
+    const shareOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+    const profileText = formatZaraProfileShareText(shareOrigin);
     const nowSnap = getMobileClockSnapshot();
     appendActiveMessages((prev) => [
       ...prev,
@@ -5022,11 +4071,6 @@ export default function App() {
     const timeLabel = getMobileClockSnapshot().shortTime12;
     const nowId = Date.now();
     capture100DayMemoryIfNotable(userText);
-
-    const buildCmd = detectAppBuilderCommand(userText);
-    if (buildCmd) {
-      handleBuildNewApp(buildCmd.prompt, buildCmd.category);
-    }
 
     const parsedVoiceSched = detectScheduleCommandFromText(userText);
     if (parsedVoiceSched) {
@@ -5079,12 +4123,7 @@ export default function App() {
   );
   const handleOpenAudioCallStable = useCallback(() => {
     audioService.unlock();
-    audioService.stopAudio();
-    setAudioCallMinimized(false);
-    setShowAudioCall(true);
-  }, []);
-  const handleStartLiveModeStable = useCallback(() => {
-    audioService.unlock();
+    audioService.ensureSpeakerAudioRoute();
     audioService.stopAudio();
     homeMicRef.current?.stopAndDiscard();
     setIsHomeMicActive(false);
@@ -5101,31 +4140,15 @@ export default function App() {
   }, []);
   const handleOpenMemoriesStable = useCallback(() => setShowMemories(true), []);
   const handleOpenChatStable = useCallback(() => setShowChatDrawer(true), []);
-  const handleOpenAiStudioStable = useCallback((tab?: AiStudioTab) => {
-    setAiStudioTab(tab || 'office');
-    setShowAiStudio(true);
-  }, []);
-  const handleOpenCharacterStable = useCallback(() => setShowSoul(true), []);
   const handleStopCameraStable = useCallback(() => {
     setIsManualCameraPreview(false);
     zaraVision.stop();
     setHomeStatusBanner('Camera turned OFF.');
   }, []);
-  const handleOpenDriverModeStable = useCallback(() => setShowDriverMode(true), []);
-  const handleOpenFileManagerStable = useCallback(() => setShowFileManager(true), []);
   const handleOpenMobileControlStable = useCallback(() => {
     setHighlightedSettingId(null);
     setMobileControlTab('permissions');
     setShowMobileControl(true);
-  }, []);
-  const handleOpenMoodWorkStable = useCallback(() => {
-    setMoodWorkInitialTab('mood_gesture');
-    setShowMoodWorkModal(true);
-  }, []);
-  const handleOpenProjectFilesStable = useCallback(() => setShowProjectExport(true), []);
-  const handleOpenInstallStable = useCallback(() => {
-    setAutoStartPlayDownload(true);
-    setShowInstallModal(true);
   }, []);
   const handleOpenWhatsAppQuickStable = useCallback(() => {
     audioService.unlock();
@@ -5220,30 +4243,8 @@ export default function App() {
     });
   }, [language, config.voiceSpeed, config.voiceName]);
 
-  // 1. Owner Face Verification / Anti-Touch Intruder Screen Lock / Zara Standby Overlay
-  if (securityOverlayMode) {
-    return (
-      <SecurityShieldOverlay
-        mode={securityOverlayMode}
-        ownerName={ownerAuth.isOwnerVerified ? securityConfig.ownerName || 'Owner' : 'Protected'}
-        ownerFaceDataUrl={securityConfig.ownerFaceDataUrl}
-        pinCode={securityConfig.pinCode || '1234'}
-        biometricLockEnabled={securityConfig.biometricLockEnabled}
-        biometricCredentialId={securityConfig.biometricCredentialId}
-        intruderReason={intruderReason}
-        backgroundVoiceActive={alwaysOnVoiceEnabled && isAlwaysOnRunning}
-        onVerifiedOwner={handleOwnerVerifiedSuccess}
-        onIntruderDetected={triggerIntruderLockout}
-        onRepeatIntruderVoice={speakIntruderVoiceWarning}
-        onReopenZaraFromClosed={() => {
-          setSecurityOverlayMode(null);
-        }}
-      />
-    );
-  }
-
-  // 2. Security PIN Lock Screen Overlay
-  if (isPinLocked && securityConfig.pinEnabled) {
+  // Security PIN Lock Screen Overlay
+  if (isPinLocked) {
     return (
       <div className="min-h-screen w-full bg-[#04020e] flex items-center justify-center p-4 text-white">
         <div className="w-full max-w-sm rounded-3xl bg-gradient-to-b from-[#130a2e] to-[#070316] border border-cyan-500/40 p-6 space-y-4 shadow-[0_0_50px_rgba(6,182,212,0.3)] text-center">
@@ -5253,7 +4254,7 @@ export default function App() {
           <div>
             <h1 className="text-xl font-black text-white">Zara Mobile Security</h1>
             <p className="text-xs text-slate-300 mt-1">
-              Enter Owner 4-digit PIN
+              Enter 4-digit PIN
             </p>
           </div>
           <input
@@ -5273,9 +4274,6 @@ export default function App() {
               } else if (val.length === 4) {
                 setPinError(true);
                 setPinEntry('');
-                if (securityConfig.autoLockOnIntruder !== false) {
-                  triggerIntruderLockout('Unauthorized login attempt with wrong PIN!');
-                }
               }
             }}
             placeholder="••••"
@@ -5283,7 +4281,7 @@ export default function App() {
           />
           {pinError && (
             <p className="text-xs text-rose-400 font-bold">
-              Incorrect PIN! Security Alert Triggered.
+              Incorrect PIN! Try again.
             </p>
           )}
         </div>
@@ -5319,8 +4317,6 @@ export default function App() {
         onUpdateConfig={handleUpdateConfigInline}
         onSendMessage={handleSendMessageStable}
         onSendAudioWav={handleSendAudioWavStable}
-        onToggleMic={handleToggleFrontMicMaster}
-        onSkipVoiceTurn={handleSkipVoiceTurn}
         onEnableAllFunctions={handleEnableAllZaraFunctions}
         allFunctionsActive={Boolean(
           alwaysOnVoiceEnabled &&
@@ -5332,14 +4328,12 @@ export default function App() {
         )}
         isAudioCallOpen={showAudioCall}
         onOpenAudioCall={handleOpenAudioCallStable}
-        onStartLiveMode={handleStartLiveModeStable}
         onOpenSettings={handleOpenSettingsControlsStable}
         onOpenNotifications={handleOpenNotificationsAlertsStable}
         unreadNotificationsCount={incomingNotifs.length}
         onOpenMemories={handleOpenMemoriesStable}
         onOpenChat={handleOpenChatStable}
-        onOpenAiStudio={handleOpenAiStudioStable}
-        onOpenCharacter={handleOpenCharacterStable}
+        onOpenCharacter={handleOpenMemoriesStable}
         securityConfig={securityConfig}
         isOwnerVerified={ownerAuth.isOwnerVerified}
         language={language}
@@ -5349,64 +4343,16 @@ export default function App() {
         onStartCamera={() => handleSelectCameraLens('user')}
         onStopCamera={handleStopCameraStable}
         onToggleScreenShare={handleToggleHomeScreenShare}
-        onOpenDriverMode={handleOpenDriverModeStable}
-        onOpenFileManager={handleOpenFileManagerStable}
         batteryTelemetry={batteryTelemetry}
         onScanSurroundings={handleScanSurroundings}
-        onOpenWhatsAppDigest={() => {
-          setNotifModalTab('alerts');
-          setShowNotifications(true);
-        }}
         onOpenWhatsAppQuick={handleOpenWhatsAppQuickStable}
         onOpenMobileControl={handleOpenMobileControlStable}
-        onOpenMoodWork={handleOpenMoodWorkStable}
-        onOpenProjectFiles={handleOpenProjectFilesStable}
-        onOpenInstall={handleOpenInstallStable}
       />
 
-      {/* Event-Only Floating Overlays (Alarms, Call/Msg Confirmations, Mic Permission Prompt) */}
-      {(pendingConfirmAction ||
-        pendingPcConfirm ||
-        ringingSchedule ||
-        antiTouchArmedLive ||
-        isBuildingApp ||
-        needsPermissionSetup ||
-        appControlToast) && (
+      {/* In-App Event Confirmations Only (WhatsApp / Call Confirmation & Active Alarm) */}
+      {(pendingConfirmAction || ringingSchedule) && (
         <div className="pointer-events-none fixed top-16 inset-x-0 z-40 px-3 flex justify-center">
           <div className="pointer-events-auto w-full max-w-md flex flex-col gap-2">
-            {pendingPcConfirm && (
-              <div className="w-full p-3 rounded-2xl bg-rose-950/95 backdrop-blur-md border border-rose-400/80 shadow-2xl space-y-2.5">
-                <div className="text-xs font-bold text-white">
-                  Confirm Computer Action: {pendingPcConfirm.label}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingPcConfirm(null);
-                      setHomeStatusBanner('Computer action cancelled.');
-                    }}
-                    className="min-h-[40px] rounded-xl bg-slate-900 border border-white/15 text-xs font-bold text-slate-200 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const act = pendingPcConfirm;
-                      setPendingPcConfirm(null);
-                      const res = await executeAuthorizedPcCommand(act.action, act.params, true);
-                      setHomeStatusBanner(
-                        res.ok ? `Executed: ${act.label}` : `Failed: ${res.error || 'Offline'}`
-                      );
-                    }}
-                    className="min-h-[40px] rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white cursor-pointer"
-                  >
-                    Confirm
-                  </button>
-                </div>
-              </div>
-            )}
             {pendingConfirmAction && (
               <div className="w-full p-3 rounded-2xl bg-slate-950/95 backdrop-blur-md border border-emerald-400/80 shadow-2xl space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -5528,7 +4474,7 @@ export default function App() {
                           ? 'Confirm (ہاں)'
                           : 'Confirm Call (ہاں)'
                         : pendingConfirmAction.kind === 'message'
-                        ? 'Confirm & Prepare'
+                        ? 'Confirm & Send'
                         : 'Confirm Call'}
                     </span>
                   </button>
@@ -5570,101 +4516,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
-            {antiTouchArmedLive && (
-              <div className="w-full px-3 py-2 rounded-2xl bg-rose-950/90 backdrop-blur-md border border-rose-400/80 flex items-center gap-2 text-xs text-rose-100 font-semibold">
-                <ShieldAlert className="w-4 h-4 text-rose-300 shrink-0" />
-                <span>Anti-Touch Guard Armed — Any touch locks phone</span>
-              </div>
-            )}
-
-            {isBuildingApp && (
-              <div className="w-full px-3 py-2 rounded-2xl bg-slate-950/90 backdrop-blur-md border border-sky-400/70 flex items-center gap-2 text-xs text-sky-100 font-semibold">
-                <Code2 className="w-4 h-4 text-sky-300 animate-spin shrink-0" />
-                <span>Zara is coding &amp; building your app...</span>
-              </div>
-            )}
-
-            {needsPermissionSetup && (
-              <div className="w-full p-2.5 rounded-2xl bg-slate-950/95 backdrop-blur-md border border-emerald-400/60 flex items-center justify-between gap-2 shadow-xl">
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-white">
-                    Enable Microphone Permission
-                  </div>
-                  <div className="text-[11px] text-emerald-200 truncate">
-                    Allows Zara to hear &amp; reply continuously
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleQuickAllowAllHome}
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs shrink-0 whitespace-nowrap cursor-pointer"
-                >
-                  Allow Mic
-                </button>
-              </div>
-            )}
-
-            {appControlToast && (
-              <div
-                className={`w-full px-3 py-2 rounded-2xl backdrop-blur-md border flex items-center justify-between gap-2 ${
-                  appControlToast.mode === 'close'
-                    ? 'bg-rose-950/90 border-rose-400/80 text-rose-100'
-                    : 'bg-emerald-950/90 border-emerald-400/80 text-emerald-100'
-                }`}
-              >
-                <span className="text-xs font-semibold truncate">{appControlToast.label}</span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {appControlToast.mode === 'open' && appControlToast.href && (
-                    <>
-                      {appControlToast.href.startsWith('#') ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            appControlToast.app && openInAppMobileSetting(appControlToast.app.id)
-                          }
-                          className="min-h-[34px] px-2.5 py-1 rounded-lg bg-emerald-500 text-black font-bold text-[11px] cursor-pointer"
-                        >
-                          Open
-                        </button>
-                      ) : (
-                        <a
-                          href={appControlToast.fallbackHref || appControlToast.href}
-                          target={isInIframe ? '_top' : '_self'}
-                          rel="noopener noreferrer"
-                          className="min-h-[34px] px-2.5 py-1 rounded-lg bg-emerald-500 text-black font-bold text-[11px] flex items-center gap-1 no-underline"
-                        >
-                          <span>Open</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (appControlToast.app) {
-                            handleCloseActiveCommand(appControlToast.app.id, true);
-                          } else {
-                            handleCloseActiveCommand('whatsapp', true);
-                          }
-                        }}
-                        className="min-h-[34px] px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
-                      >
-                        <PowerOff className="w-3 h-3" />
-                        <span>Close</span>
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setAppControlToast(null)}
-                    className="min-h-[34px] text-xs text-slate-300 px-1.5 cursor-pointer"
-                    aria-label="Dismiss"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -5682,23 +4533,25 @@ export default function App() {
             onUpdateSecurity={(updates) =>
               setSecurityConfig((prev) => ({ ...prev, ...updates }))
             }
-            onTriggerFaceScanNow={() => setSecurityOverlayMode('owner_face_scan')}
-            onArmAntiTouchGuard={handleArmAntiTouchGuard}
+            onTriggerFaceScanNow={() => {
+              setShowSettings(false);
+              setIsPinLocked(true);
+            }}
+            onArmAntiTouchGuard={() => {
+              setShowSettings(false);
+              setIsPinLocked(true);
+            }}
             onLockPhoneScreenNow={() => {
-              setIntruderReason('Locked immediately by Owner');
-              setSecurityOverlayMode('intruder_lockout');
+              performAndroidAccessibilityAction('lock_screen');
+              setShowSettings(false);
+              setIsPinLocked(true);
             }}
             onCloseZaraAppNow={handleCloseZaraAppNow}
             language={language}
             onSelectLanguage={handleSelectLanguage}
             isMobileFrame={isMobileFrame}
             onToggleMobileFrame={() => setIsMobileFrame(!isMobileFrame)}
-            downloadLinkUrl={playStoreLaunchUrl}
-            isInstalled={isInstalled}
-            onOpenInstall={() => {
-              setAutoStartPlayDownload(true);
-              setShowInstallModal(true);
-            }}
+            downloadLinkUrl={typeof window !== 'undefined' ? window.location.origin : ''}
             onOpenMobileControl={() => {
               setHighlightedSettingId(null);
               setMobileControlTab('permissions');
@@ -5718,14 +4571,7 @@ export default function App() {
             onAddMemory={handleAddMemory}
             onUpdateMemory={handleUpdateMemory}
             onDeleteMemory={handleDeleteMemory}
-            onOpenDriverMode={() => setShowDriverMode(true)}
-            onOpenFileManager={() => setShowFileManager(true)}
             onSendProfileToChat={handleSendProfileToChat}
-            builtApps={builtApps}
-            isBuildingApp={isBuildingApp}
-            onBuildNewApp={handleBuildNewApp}
-            onOpenBuiltAppPreview={(app) => setActivePreviewApp(app)}
-            onDeleteBuiltApp={(id) => setBuiltApps((prev) => prev.filter((b) => b.id !== id))}
             alwaysOnVoiceEnabled={alwaysOnVoiceEnabled}
             isAlwaysOnRunning={isAlwaysOnRunning}
             isDirectMicActive={isHomeMicActive}
@@ -5733,7 +4579,6 @@ export default function App() {
             visionMode={visionMode}
             cameraFacing={cameraFacing}
             isFloatingPiP={isFloatingPiP}
-            autoGestureWatch={autoGestureWatch}
             spokenAlertsEnabled={spokenNotifConfig.enabled}
             spokenNotifConfig={spokenNotifConfig}
             onUpdateSpokenNotifConfig={(updates) =>
@@ -5761,17 +4606,8 @@ export default function App() {
             onTriggerSelfHeal={() => {
               handleTriggerSelfHeal(true);
             }}
-            onOpenMoodGesture={() => {
-              setMoodWorkInitialTab('mood_gesture');
-              setShowMoodWorkModal(true);
-            }}
-            onOpenAdvancedWork={() => {
-              setMoodWorkInitialTab('work');
-              setShowMoodWorkModal(true);
-            }}
             onTriggerBack={() => handleGoBackCommand(true)}
             onTriggerClose={() => handleCloseActiveCommand(undefined, true)}
-            onOpenProjectFiles={() => setShowProjectExport(true)}
             onOpenAvatarPicker={() => {
               setNotifModalTab('alerts');
               setShowNotifications(true);
@@ -5780,12 +4616,9 @@ export default function App() {
               setNotifModalTab('alerts');
               setShowNotifications(true);
             }}
-            onOpenAiStudio={(tab) => {
-              setAiStudioTab(tab || 'office');
-              setShowAiStudio(true);
-            }}
             onReplayLastReply={() => {
               audioService.selfHealAudioPipeline();
+              audioService.ensureSpeakerAudioRoute();
               audioService.speakText(latestZaraMessage, {
                 language,
                 pitch: config.voicePitch,
@@ -5842,16 +4675,6 @@ export default function App() {
           />
         )}
 
-        {showSoul && (
-          <SoulModal
-            isOpen={showSoul}
-            onClose={() => setShowSoul(false)}
-            config={config}
-            ownerPinCode={securityConfig.pinCode}
-            onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
-          />
-        )}
-
         {showMobileControl && (
           <MobileControlModal
             isOpen={showMobileControl}
@@ -5867,8 +4690,9 @@ export default function App() {
             onAskZaraAboutVision={handleAskZaraAboutVision}
             onTriggerOverheatTest={handleTriggerOverheatTest}
             onLockNow={() => {
-              setIntruderReason('Locked via Mobile Security Hub');
-              setSecurityOverlayMode('intruder_lockout');
+              performAndroidAccessibilityAction('lock_screen');
+              setShowMobileControl(false);
+              setIsPinLocked(true);
             }}
           />
         )}
@@ -5909,96 +4733,11 @@ export default function App() {
             onSnapCameraPhoto={handleSnapCameraPhoto}
             language={language}
             voiceName={config.voiceName}
-            activeAssistantId={config.activeAssistantId || 'zara'}
-            onSelectAssistant={(id) => {
-              handleSwitchAssistant(id, false);
-            }}
-            onOpenVoiceCall={() => {
-              setShowChatDrawer(false);
-              handleStartLiveModeStable();
-            }}
             loveMode={config.loveMode}
             romanceIntensity={config.romanceIntensity}
-            onOpenBuiltAppById={(id) => {
-              const found = builtApps.find((b) => b.id === id);
-              if (found) setActivePreviewApp(found);
-            }}
-            onEnsureMissZsNoteInChat={() => {
-              appendActiveMessages((prev) => {
-                const withoutOld = prev.filter((m) => m.id !== MISS_ZS_CHAT_NOTE_ID);
-                return [...withoutOld, createMissZsChatNoteMessage()];
-              });
-            }}
           />
         )}
 
-        {activePreviewApp && (
-          <BuiltAppPreviewModal
-            app={activePreviewApp}
-            onClose={() => setActivePreviewApp(null)}
-          />
-        )}
-
-        {showInstallModal && (
-          <PWAInstallModal
-            isOpen={showInstallModal}
-            onClose={() => {
-              setShowInstallModal(false);
-              setAutoStartPlayDownload(false);
-            }}
-            autoStartDownload={autoStartPlayDownload}
-            onOpenMobileSettings={() => {
-              setHighlightedSettingId(null);
-              setMobileControlTab('permissions');
-              setShowMobileControl(true);
-            }}
-          />
-        )}
-
-        {showMoodWorkModal && (
-          <MoodGestureWorkModal
-            isOpen={showMoodWorkModal}
-            initialTab={moodWorkInitialTab}
-            onClose={() => setShowMoodWorkModal(false)}
-            currentMood={currentMood}
-            lastGesture={lastGesture}
-            autoGestureWatch={autoGestureWatch}
-            onToggleAutoGestureWatch={handleToggleAutoGestureWatch}
-            onMoodGestureDetected={(res) => {
-              handleMoodGestureDetected(res, false);
-            }}
-            workTasks={workTasks}
-            onAddWorkTask={handleAddWorkTask}
-            onToggleWorkTask={handleToggleWorkTask}
-            onDeleteWorkTask={handleDeleteWorkTask}
-            userNickname={config.userNickname || 'Friend'}
-            voiceName={config.voiceName || 'Zephyr'}
-            language={language}
-            voiceSpeed={config.voiceSpeed}
-          />
-        )}
-
-        {showProjectExport && (
-          <ZaraProjectExportModal
-            isOpen={showProjectExport}
-            onClose={() => setShowProjectExport(false)}
-          />
-        )}
-
-        {showAiStudio && (
-          <AdvancedAiStudioModal
-            isOpen={showAiStudio}
-            onClose={() => setShowAiStudio(false)}
-            initialTab={aiStudioTab}
-            config={config}
-            onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
-            language={language}
-            isOwnerVerified={ownerAuth.isOwnerVerified}
-            onSendToChat={(txt) => {
-              handleSendMessage(txt);
-            }}
-          />
-        )}
         {showAudioCall && (
           <VoiceCallModal
             isOpen={showAudioCall}
@@ -6026,42 +4765,6 @@ export default function App() {
                 setPendingConfirmAction(cand);
               }
             }}
-          />
-        )}
-
-        {showDriverMode && (
-          <DriverModeModal
-            isOpen={showDriverMode}
-            onClose={() => setShowDriverMode(false)}
-            isListening={(alwaysOnVoiceEnabled && isAlwaysOnRunning) || isHomeMicActive}
-            isSpeaking={isSpeaking}
-            isThinking={isThinkingHome}
-            interimTranscript={interimVoiceText}
-            voiceError={voiceError}
-            latestZaraMessage={latestZaraMessage}
-            latestNotification={incomingNotifs[0] || null}
-            spokenConfig={spokenNotifConfig}
-            onUpdateSpokenConfig={(updates) =>
-              setSpokenNotifConfig((prev) => ({ ...prev, ...updates }))
-            }
-            onToggleMic={handleToggleFrontMicMaster}
-            onSkipVoiceTurn={handleSkipVoiceTurn}
-            onSendVoicePrompt={async (prompt) => {
-              await handleSendMessage(prompt);
-            }}
-            language={language}
-            config={config}
-            isOwnerVerified={ownerAuth.isOwnerVerified}
-          />
-        )}
-
-        {showFileManager && (
-          <FileManagerModal
-            isOpen={showFileManager}
-            onClose={() => setShowFileManager(false)}
-            memories={memories}
-            language={language}
-            voiceName={config.voiceName}
           />
         )}
       </Suspense>

@@ -11,6 +11,8 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
@@ -19,6 +21,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import android.telephony.SmsManager
 import android.view.KeyEvent
 import android.view.View
@@ -66,7 +69,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var assetLoader: WebViewAssetLoader
     private lateinit var webView: WebView
-    private var billingManager: ZaraPlayBillingManager? = null
+    private var nativeTts: TextToSpeech? = null
+    @Volatile private var nativeTtsReady = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
     private var torchEnabled = false
@@ -205,7 +209,7 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
         registerNativeReceivers()
-        setupBilling()
+        setupNativeTtsAndAudio()
         setupBackNavigation()
 
         val savedUrl = getSharedPreferences(ZaraWakeWordService.PREFS_NAME, Context.MODE_PRIVATE)
@@ -336,6 +340,9 @@ class MainActivity : AppCompatActivity() {
                         pendingWebPermissionRequest = request
                         requestAllRuntimePermissionsInternal()
                     } else if (requested.isNotEmpty()) {
+                        if (requested.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) {
+                            ensureSpeakerAudioRouteInternal()
+                        }
                         request.grant(requested.toTypedArray())
                     } else {
                         request.grant(request.resources)
@@ -479,10 +486,57 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun setupBilling() {
-        billingManager = ZaraPlayBillingManager(this) { payload ->
-            dispatchJsCallback("window.onZaraPlayBillingUpdate && window.onZaraPlayBillingUpdate($payload);")
-        }.also { it.startConnection() }
+    private fun setupNativeTtsAndAudio() {
+        ensureSpeakerAudioRouteInternal()
+        try {
+            nativeTts = TextToSpeech(this) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    nativeTtsReady = true
+                    val attr = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                    nativeTts?.setAudioAttributes(attr)
+                }
+            }
+        } catch (_: Exception) {
+            nativeTtsReady = false
+        }
+    }
+
+    private fun ensureSpeakerAudioRouteInternal(): Boolean {
+        return try {
+            val audioMgr = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            volumeControlStream = AudioManager.STREAM_MUSIC
+            audioMgr.mode = AudioManager.MODE_NORMAL
+            val hasExternalAudio = audioMgr.isWiredHeadsetOn || audioMgr.isBluetoothA2dpOn || audioMgr.isBluetoothScoOn
+            if (!hasExternalAudio) {
+                @Suppress("DEPRECATION")
+                audioMgr.isSpeakerphoneOn = true
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .build()
+                audioMgr.requestAudioFocus(focusReq)
+            } else {
+                @Suppress("DEPRECATION")
+                audioMgr.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            }
+            val curVol = audioMgr.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val maxVol = audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            if (curVol == 0 && maxVol > 0) {
+                audioMgr.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.65).toInt().coerceAtLeast(1), 0)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun setupBackNavigation() {
@@ -1009,18 +1063,104 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun isPlayBillingAvailable(): Boolean = billingManager?.isAvailable() ?: false
-
-        @JavascriptInterface
-        fun queryPlayBillingProducts(): String = billingManager?.getProductsJson() ?: "[]"
-
-        @JavascriptInterface
-        fun launchPlayBillingPurchase(productId: String): Boolean {
-            return billingManager?.launchPurchase(productId) ?: false
+        fun ensureSpeakerAudioRoute(): Boolean {
+            return ensureSpeakerAudioRouteInternal()
         }
 
         @JavascriptInterface
-        fun queryPlayPurchases(): String = billingManager?.queryActiveSubscriptions() ?: "[]"
+        fun speakNativeTts(text: String, langTag: String): Boolean {
+            val clean = text.trim()
+            if (clean.isEmpty() || !nativeTtsReady || nativeTts == null) return false
+            return try {
+                ensureSpeakerAudioRouteInternal()
+                val locale = Locale.forLanguageTag(langTag.ifBlank { "en-US" })
+                val res = nativeTts?.setLanguage(locale) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    nativeTts?.setLanguage(Locale.US)
+                }
+                val params = Bundle().apply {
+                    putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                }
+                nativeTts?.speak(clean, TextToSpeech.QUEUE_FLUSH, params, "zara_tts_${System.currentTimeMillis()}")
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun stopNativeTts(): Boolean {
+            return try {
+                nativeTts?.stop()
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun launchYouTubeSong(query: String): Boolean {
+            val clean = query.trim()
+            if (clean.isEmpty()) return launchPackage("com.google.android.youtube")
+            return try {
+                val searchIntent = Intent(Intent.ACTION_SEARCH).apply {
+                    setPackage("com.google.android.youtube")
+                    putExtra("query", clean)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    startActivity(searchIntent)
+                    true
+                } catch (_: Exception) {
+                    val encoded = URLEncoder.encode(clean, "UTF-8")
+                    val webUri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
+                    val ytView = Intent(Intent.ACTION_VIEW, webUri).apply {
+                        setPackage("com.google.android.youtube")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        startActivity(ytView)
+                        true
+                    } catch (_: Exception) {
+                        startActivity(Intent(Intent.ACTION_VIEW, webUri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                        true
+                    }
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun pauseWakeWordTemporarily(): Boolean {
+            return try {
+                if (!ZaraWakeWordService.isRunning) return false
+                val svc = Intent(this@MainActivity, ZaraWakeWordService::class.java).apply {
+                    action = ZaraWakeWordService.ACTION_PAUSE_WAKE
+                }
+                startService(svc)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun resumeWakeWord(): Boolean {
+            return try {
+                if (!ZaraWakeWordService.isWakeEnabled(this@MainActivity)) return false
+                val svc = Intent(this@MainActivity, ZaraWakeWordService::class.java).apply {
+                    action = ZaraWakeWordService.ACTION_RESUME_WAKE
+                }
+                ContextCompat.startForegroundService(this@MainActivity, svc)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
 
         @JavascriptInterface
         fun setCustomServerUrl(url: String): Boolean {
@@ -1085,7 +1225,12 @@ class MainActivity : AppCompatActivity() {
             unregisterReceiver(nativeEventReceiver)
         } catch (_: Exception) {
         }
-        billingManager?.destroy()
+        try {
+            nativeTts?.stop()
+            nativeTts?.shutdown()
+            nativeTts = null
+        } catch (_: Exception) {
+        }
         super.onDestroy()
     }
 }

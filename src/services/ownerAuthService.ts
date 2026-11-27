@@ -422,7 +422,6 @@ export async function syncOwnerVaultToFirestore(
     timestamp: String(m.timestamp || '').slice(0, 32),
     createdAtMs: Number(m.createdAtMs) || Date.now(),
     language: m.language,
-    builtApp: m.builtApp,
   }));
 
   const compactMems = (Array.isArray(memories) ? memories : []).slice(0, 300).map((item) => ({

@@ -29,16 +29,12 @@ import {
   type OrchestratedSttResult,
   type OrchestratedTtsResult,
 } from './src/server/aiOrchestrator.ts';
-import { ZaraDevPlatformEngine } from './src/server/devPlatformEngine.ts';
 import type {
   AiAssistantId,
   AiBrainEngineId,
   AiOrchestratorTestResult,
   AllAiSystemId,
-  ApiVaultProviderId,
-  AutonomousTaskPlan,
   MusicControlCommand,
-  ProTierEntitlement,
   ResearchSourceCitation,
   SelfImproveAuditReport,
   SelfImproveCapabilityCheck,
@@ -46,7 +42,6 @@ import type {
   SocialDraftItem,
   SocialPlatformId,
   TtsEngineId,
-  ZaraTierPlan,
   ZaraUpdateItem,
   ZaraUpdateReport,
 } from './src/types.ts';
@@ -1443,65 +1438,21 @@ function detectUserEmotionalDistress(text = ''): {
 }
 
 const ASSISTANT_DISPLAY_LABELS: Record<AiAssistantId, string> = {
-  zara: 'Main Zara Assistant',
-  mother: 'Mother Assistant (AI)',
-  sister: 'Sister Assistant (AI)',
-  research: 'Research Assistant (AI)',
-  coding: 'Coding Assistant (AI)',
-  business: 'Business Assistant (AI)',
+  zara: 'Zara AI Assistant',
 };
 
-function normalizeAssistantId(raw: unknown): AiAssistantId {
-  const id = String(raw || 'zara').toLowerCase().trim();
-  if (
-    id === 'mother' ||
-    id === 'sister' ||
-    id === 'research' ||
-    id === 'coding' ||
-    id === 'business'
-  ) {
-    return id;
-  }
+function normalizeAssistantId(_raw: unknown): AiAssistantId {
   return 'zara';
 }
 
 function getAssistantPersonaOverlay(
-  assistantId: AiAssistantId,
-  nickname: string
+  _assistantId: AiAssistantId,
+  _nickname: string
 ): string {
-  switch (assistantId) {
-    case 'mother':
-      return `\n=== ACTIVE AI-TO-AI CALL PERSONA: MOTHER ASSISTANT (SIMULATED AI) ===
-- You are now speaking as the "Mother Assistant" inside Zara AI.
-- PERSONALITY: Warm, nurturing, wise, affectionate maternal care, checking on ${nickname}'s health, rest, food, peace of mind, and offering steady comfort and encouragement.
-- STRICT AI IDENTITY HONESTY RULE: You are an AI conversational persona called Mother Assistant — NEVER pretend to be a real biological human mother or real-world contact. If asked or during introductions, be transparent that you are the Mother AI Assistant.`;
-    case 'sister':
-      return `\n=== ACTIVE AI-TO-AI CALL PERSONA: SISTER ASSISTANT (SIMULATED AI) ===
-- You are now speaking as the "Sister Assistant" inside Zara AI.
-- PERSONALITY: Friendly, lively, witty, cheerful, empathetic, like a supportive sister who listens openly and keeps spirits high.
-- STRICT AI IDENTITY HONESTY RULE: You are an AI conversational persona called Sister Assistant — NEVER pretend to be a real biological sister or real person.`;
-    case 'research':
-      return `\n=== ACTIVE AI-TO-AI CALL PERSONA: RESEARCH ASSISTANT (LIVE WEB INTEL AI) ===
-- You are now speaking as the "Research Assistant" inside Zara AI.
-- SPECIALTY: Real-time internet facts, international news, Pakistan & Malaysia news, politics, technology, AI breakthroughs, business, sports, science, and entertainment.
-- HONESTY RULE: Report verified facts from Google Search grounding clearly, distinguish verified recent facts from older knowledge, and never fabricate citations or breaking news.`;
-    case 'coding':
-      return `\n=== ACTIVE AI-TO-AI CALL PERSONA: CODING ASSISTANT (SENIOR ENGINEER AI) ===
-- You are now speaking as the "Coding Assistant" inside Zara AI.
-- SPECIALTY: Flutter/Dart, Android Kotlin & Jetpack Compose, TypeScript, JavaScript, Python, HTML/CSS, defensive security code review, and full-stack architecture debugging.
-- Write clean, runnable, bug-free code with concise explanations and zero placeholder stubs.`;
-    case 'business':
-      return `\n=== ACTIVE AI-TO-AI CALL PERSONA: BUSINESS ASSISTANT (EXECUTIVE STRATEGIST AI) ===
-- You are now speaking as the "Business Assistant" inside Zara AI.
-- SPECIALTY: Business strategy, financial/ROI organization, client emails & proposals, operational planning, and office productivity automation.`;
-    case 'zara':
-    default:
-      return '';
-  }
+  return '';
 }
 
-function shouldUseLiveWebResearch(assistantId: AiAssistantId, text = ''): boolean {
-  if (assistantId === 'research') return true;
+function shouldUseLiveWebResearch(_assistantId: AiAssistantId, text = ''): boolean {
   const q = (text || '').trim();
   if (!q) return false;
   return /\b(latest\s+news|today'?s?\s+news|breaking\s+news|current\s+news|pakistan\s+news|malaysia\s+news|world\s+news|weather\s+(today|now|in)|exchange\s+rate|gold\s+price|crypto\s+price|bitcoin\s+price|stock\s+price|cricket\s+score|who\s+won|election\s+results|search\s+(google|online|web|internet)|aaj\s+ki\s+khabar|taza\s+khabar|bugungi\s+yangilik|berita\s+terkini)\b/i.test(
@@ -1562,9 +1513,9 @@ function getZaraSystemPrompt(
   const zaraSelfKnowledgeGuide = `
 === ZARA AI ARCHITECTURE & CAPABILITIES ===
 - ${liveClockContext}
-- Central Zara brain orchestrating 6 specialized AI assistants (Main Zara, Mother AI, Sister AI, Research AI with real Google Search grounding, Coding AI, Business AI).
+- Unified Personal AI Assistant (Zara) with real Google Search grounding, full Android phone control, WhatsApp confirmation-gated messaging, social media control, and YouTube song search & play.
 - Universal multilingual understanding & speech (English, Urdu, Hindi, Punjabi, Roman Urdu, Uzbek, Malay, Arabic + mid-sentence code switching).
-- Native Android AAB wrapper (\`com.zara.ai.assistant\`) with \`ZaraAccessibilityService\`, low-power \`ZaraWakeWordService\`, and Pro Tier (\`ZaraPlayBillingManager\`).
+- Native Android wrapper (\`com.zara.ai.assistant\`) with \`ZaraAccessibilityService\` and \`ZaraWakeWordService\` ("Hey Zara").
 - Live environmental awareness (local date/time, weather, temperature, device sensors, authorized camera observation) and contextual long-term memory.${envBlock}`;
 
   // ==================== GUEST-SAFE LOCK MODE (ALL NON-OWNER USERS) ====================
@@ -1652,8 +1603,6 @@ ${activeMoodFlavor}${emotionGuidance}${transitionBlock}${voiceToneInstruction}
     ? 'Report the executed command result clearly, honestly, and concisely in 1 to 2 natural sentences.'
     : isVoiceMode
     ? 'VOICE CONVERSATION DEPTH: Speak in 2 to 5 warm, natural, emotionally intelligent spoken sentences without markdown bullet lists, bracketed tags, or raw emojis.'
-    : assistantId === 'coding' || assistantId === 'research' || assistantId === 'business'
-    ? 'TEXT DEPTH: Give a comprehensive, accurate, structured, directly actionable response.'
     : 'TEXT DEPTH: Write a thoughtful, natural, expressive reply directly addressing everything the user said, asked, or felt.';
 
   const memoryBlock = memoryDigest
@@ -1691,7 +1640,6 @@ async function generateZaraTextReplyWithMeta(
     isDistressed?: boolean;
     preferredBrain?: AiBrainEngineId;
     enabledOverride?: Record<string, boolean>;
-    tierPlan?: ZaraTierPlan;
   }
 ): Promise<OrchestratedChatResult> {
   return aiOrchestrator.orchestrateTextReply({
@@ -1702,7 +1650,6 @@ async function generateZaraTextReplyWithMeta(
     isDistressed: options?.isDistressed,
     preferredBrain: options?.preferredBrain,
     enabledOverride: options?.enabledOverride,
-    tierPlan: options?.tierPlan,
   });
 }
 
@@ -1836,12 +1783,6 @@ const aiOrchestrator = new ZaraAiOrchestrator({
   extractPcmFromWavOrRaw,
   splitTextIntoTtsChunks,
   generateZaraAudioViaLive,
-});
-
-const devPlatformEngine = new ZaraDevPlatformEngine({
-  rootDir: __dirname,
-  orchestrator: aiOrchestrator,
-  buildZipBuffer: (entries) => buildStandardZipArchive(entries),
 });
 
 function buildRomanticVoiceStylePrompt(
@@ -2036,7 +1977,6 @@ async function generateZaraAudioWithMeta(
     isOwnerVerified?: boolean;
     emotionMode?: string;
     ttsEngine?: TtsEngineId;
-    tierPlan?: ZaraTierPlan;
   }
 ): Promise<OrchestratedTtsResult> {
   const ttsEngine: TtsEngineId =
@@ -2107,7 +2047,6 @@ async function generateZaraAudioWithMeta(
     effectiveLove,
     enableSultryBreath,
     preferredTtsEngine: ttsEngine,
-    tierPlan: options?.tierPlan,
     preferExpressive,
     expressiveEmotion: emotionMode,
   });
@@ -2123,7 +2062,6 @@ async function generateZaraAudio(
     isOwnerVerified?: boolean;
     emotionMode?: string;
     ttsEngine?: TtsEngineId;
-    tierPlan?: ZaraTierPlan;
   }
 ): Promise<string | null> {
   const res = await generateZaraAudioWithMeta(text, preferredVoice, options);
@@ -2148,129 +2086,6 @@ async function transcribeUserAudio(
   return res.transcript;
 }
 
-// ======================== ZARA PRO TIER PERSISTENCE & HMAC TOKEN HELPER ========================
-const TIER_SECRET_PATH = path.join(__dirname, '.zara-tier-secret');
-const TIER_STORE_PATH = path.join(__dirname, '.zara-pro-tiers.json');
-const TIER_HMAC_SECRET = (() => {
-  if (process.env.ZARA_TIER_HMAC_SECRET && process.env.ZARA_TIER_HMAC_SECRET.length >= 16) {
-    return process.env.ZARA_TIER_HMAC_SECRET;
-  }
-  try {
-    if (fs.existsSync(TIER_SECRET_PATH)) {
-      const existing = fs.readFileSync(TIER_SECRET_PATH, 'utf8').trim();
-      if (existing.length >= 16) return existing;
-    }
-    const generated = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(TIER_SECRET_PATH, generated, 'utf8');
-    return generated;
-  } catch {
-    return crypto.createHash('sha256').update(`zara:${__dirname}:tier`).digest('hex');
-  }
-})();
-
-function buildEntitlementForPlan(
-  plan: ZaraTierPlan,
-  source: ProTierEntitlement['source'],
-  sku?: string,
-  expiresAtIso?: string
-): ProTierEntitlement {
-  const isPro = plan === 'pro';
-  return {
-    plan,
-    source,
-    active: true,
-    sku,
-    expiresAtIso,
-    features: {
-      priorityBrains: isPro,
-      ultraPremiumTts: isPro,
-      androidAutomation: isPro,
-      customWakeWordNative: isPro,
-      unlimitedResearchAndDev: isPro,
-    },
-  };
-}
-
-function loadPersistedTierMap(): Record<string, ProTierEntitlement> {
-  try {
-    if (!fs.existsSync(TIER_STORE_PATH)) return {};
-    return JSON.parse(fs.readFileSync(TIER_STORE_PATH, 'utf8')) || {};
-  } catch {
-    return {};
-  }
-}
-
-function savePersistedTierEntry(key: string, ent: ProTierEntitlement): void {
-  try {
-    const map = loadPersistedTierMap();
-    map[key] = ent;
-    const tmp = `${TIER_STORE_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(map, null, 2), 'utf8');
-    fs.renameSync(tmp, TIER_STORE_PATH);
-  } catch {}
-}
-
-function signTierToken(ent: ProTierEntitlement, subjectKey: string): string {
-  const payload = Buffer.from(
-    JSON.stringify({
-      sub: subjectKey,
-      plan: ent.plan,
-      source: ent.source,
-      sku: ent.sku,
-      exp: ent.expiresAtIso || null,
-      iat: Date.now(),
-    }),
-    'utf8'
-  ).toString('base64url');
-  const sig = crypto.createHmac('sha256', TIER_HMAC_SECRET).update(payload).digest('base64url');
-  return `${payload}.${sig}`;
-}
-
-function verifyTierRequest(
-  req: express.Request,
-  verifiedOwner = false
-): { tierPlan: ZaraTierPlan; entitlement: ProTierEntitlement } {
-  const headerToken = String(req.headers['x-zara-tier-token'] || '').trim();
-  if (headerToken && headerToken.includes('.')) {
-    const [payloadB64, sigB64] = headerToken.split('.');
-    try {
-      const expected = crypto
-        .createHmac('sha256', TIER_HMAC_SECRET)
-        .update(payloadB64)
-        .digest('base64url');
-      const a = Buffer.from(sigB64);
-      const b = Buffer.from(expected);
-      if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
-        const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-        const notExpired = !parsed.exp || Date.parse(parsed.exp) > Date.now();
-        if (parsed.plan === 'pro' && notExpired) {
-          return {
-            tierPlan: 'pro',
-            entitlement: buildEntitlementForPlan(
-              'pro',
-              parsed.source || 'trial_7d',
-              parsed.sku,
-              parsed.exp || undefined
-            ),
-          };
-        }
-      }
-    } catch {}
-  }
-
-  if (verifiedOwner) {
-    return {
-      tierPlan: 'pro',
-      entitlement: buildEntitlementForPlan('pro', 'owner_master'),
-    };
-  }
-
-  return {
-    tierPlan: 'standard',
-    entitlement: buildEntitlementForPlan('standard', 'standard'),
-  };
-}
-
 // Cryptographic Owner Auth & Guest-Safe Lock verification status endpoint
 app.get('/api/auth/owner-status', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -2288,7 +2103,6 @@ app.post('/api/chat', async (req, res) => {
   try {
     const ownerAuth = await verifyOwnerRequest(req);
     const verifiedOwner = ownerAuth.verified;
-    const tierInfo = verifyTierRequest(req, verifiedOwner);
 
     const {
       message,
@@ -2450,7 +2264,6 @@ app.post('/api/chat', async (req, res) => {
         isDistressed: detectUserEmotionalDistress(message).isDistressed,
         preferredBrain: brainMode,
         enabledOverride: enabledAiEngines,
-        tierPlan: tierInfo.tierPlan,
       });
       replyText = chatResult.text;
       selectedBrainMeta = chatResult.selectedBrain;
@@ -2525,7 +2338,6 @@ app.post('/api/chat', async (req, res) => {
           isOwnerVerified: verifiedOwner,
           emotionMode: effectiveEmotion,
           ttsEngine,
-          tierPlan: tierInfo.tierPlan,
         });
     res.json({
       text: replyText,
@@ -2536,7 +2348,6 @@ app.post('/api/chat', async (req, res) => {
       assistantLabel: ASSISTANT_DISPLAY_LABELS[assistantId],
       detectedLanguage: langInfo.detectedLanguageLabel,
       sources,
-      tierPlan: tierInfo.tierPlan,
       deviceAction: detectedCmd
         ? { action: detectedCmd.action, appId: detectedCmd.appId }
         : null,
@@ -2563,7 +2374,6 @@ app.post('/api/voice-chat', async (req, res) => {
   try {
     const ownerAuth = await verifyOwnerRequest(req);
     const verifiedOwner = ownerAuth.verified;
-    const tierInfo = verifyTierRequest(req, verifiedOwner);
 
     const {
       audioBase64,
@@ -2883,7 +2693,6 @@ app.post('/api/voice-chat', async (req, res) => {
           isDistressed: detectUserEmotionalDistress(userTranscription).isDistressed,
           preferredBrain: brainMode,
           enabledOverride: enabledAiEngines,
-          tierPlan: tierInfo.tierPlan,
         }
       );
       zaraReply = voiceChatResult.text;
@@ -2957,7 +2766,6 @@ app.post('/api/voice-chat', async (req, res) => {
       isOwnerVerified: verifiedOwner,
       emotionMode: effectiveEmotion,
       ttsEngine,
-      tierPlan: tierInfo.tierPlan,
     });
 
     res.json({
@@ -2971,7 +2779,6 @@ app.post('/api/voice-chat', async (req, res) => {
       assistantLabel: ASSISTANT_DISPLAY_LABELS[assistantId],
       detectedLanguage: langInfo.detectedLanguageLabel,
       sources,
-      tierPlan: tierInfo.tierPlan,
       deviceAction: detectedCmd
         ? { action: detectedCmd.action, appId: detectedCmd.appId }
         : null,
@@ -3000,7 +2807,6 @@ app.post('/api/tts', async (req, res) => {
   try {
     const ownerAuth = await verifyOwnerRequest(req);
     const verifiedOwner = ownerAuth.verified;
-    const tierInfo = verifyTierRequest(req, verifiedOwner);
 
     const {
       text,
@@ -3028,7 +2834,6 @@ app.post('/api/tts', async (req, res) => {
       isOwnerVerified: verifiedOwner,
       emotionMode: effectiveEmotion,
       ttsEngine,
-      tierPlan: tierInfo.tierPlan,
     });
     if (ttsRes.audioBase64) {
       return res.json({
@@ -3036,7 +2841,6 @@ app.post('/api/tts', async (req, res) => {
         format: 'wav',
         fallback: false,
         ownerVerified: verifiedOwner,
-        tierPlan: tierInfo.tierPlan,
         voiceStyle: effectiveLove ? 'owner_sultry' : 'guest_normal',
         ttsEngineUsed: ttsRes.ttsEngineUsed,
         ttsModelUsed: ttsRes.modelIdUsed,
@@ -3212,72 +3016,6 @@ app.post('/api/ai/orchestrator/test', async (req, res) => {
   }
 });
 
-// ======================== ZARA PRO TIER BILLING & ENTITLEMENT ENDPOINTS ========================
-app.get('/api/tier/status', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  const ownerAuth = await verifyOwnerRequest(req);
-  const resolved = verifyTierRequest(req, ownerAuth.verified);
-  return res.json({
-    ok: true,
-    entitlement: resolved.entitlement,
-    ownerVerified: ownerAuth.verified,
-  });
-});
-
-app.post('/api/tier/activate', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    const {
-      source = 'trial_7d',
-      sku = 'zara_pro_monthly',
-      purchaseToken = '',
-      clientKey = 'public-user',
-    } = req.body || {};
-
-    let validSource: ProTierEntitlement['source'] = 'trial_7d';
-    let expiresAtIso: string | undefined;
-    if (source === 'owner_master') {
-      if (!ownerAuth.verified) {
-        return res.status(403).json({
-          ok: false,
-          error: 'Owner verification required for owner_master Pro entitlement.',
-        });
-      }
-      validSource = 'owner_master';
-    } else if (source === 'play_billing') {
-      if (!purchaseToken || typeof purchaseToken !== 'string' || purchaseToken.length < 8) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Valid Google Play purchase token is required.',
-        });
-      }
-      validSource = 'play_billing';
-      expiresAtIso = new Date(Date.now() + 31 * 86400_000).toISOString();
-    } else {
-      validSource = 'trial_7d';
-      expiresAtIso = new Date(Date.now() + 7 * 86400_000).toISOString();
-    }
-
-    const subject = ownerAuth.verified && ownerAuth.uid ? `owner_${ownerAuth.uid}` : String(clientKey).slice(0, 64);
-    const entitlement = buildEntitlementForPlan('pro', validSource, String(sku).slice(0, 64), expiresAtIso);
-    const tierToken = signTierToken(entitlement, subject);
-    savePersistedTierEntry(subject, entitlement);
-
-    return res.json({
-      ok: true,
-      entitlement,
-      tierToken,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'Tier activation failed' });
-  }
-});
-
-app.post('/api/tier/downgrade', (_req, res) => {
-  const entitlement = buildEntitlementForPlan('standard', 'standard');
-  return res.json({ ok: true, entitlement, tierToken: '' });
-});
-
 // ======================== REAL-TIME GOOGLE SEARCH RESEARCH & GLOBAL NEWS ========================
 app.post('/api/research/search', async (req, res) => {
   try {
@@ -3346,19 +3084,15 @@ function saveSocialDrafts(items: SocialDraftItem[]): void {
 }
 
 function getSocialAccountsStatus(): SocialAccountStatus[] {
-  const resolveToken = (envKey: string, vaultProvider?: ApiVaultProviderId): string => {
-    const envVal = process.env[envKey]?.trim();
-    if (envVal) return envVal;
-    return vaultProvider ? devPlatformEngine.resolveProviderSecret(vaultProvider).value : '';
-  };
+  const resolveToken = (envKey: string): string => process.env[envKey]?.trim() || '';
 
-  const telegramOk = Boolean(resolveToken('TELEGRAM_BOT_TOKEN', 'telegram'));
-  const igOk = Boolean(resolveToken('META_IG_ACCESS_TOKEN', 'meta_ig'));
-  const fbOk = Boolean(resolveToken('META_FB_ACCESS_TOKEN', 'meta_fb'));
-  const ytOk = Boolean(resolveToken('YOUTUBE_ACCESS_TOKEN', 'youtube'));
-  const xOk = Boolean(resolveToken('X_ACCESS_TOKEN', 'twitter'));
-  const tiktokOk = Boolean(process.env.TIKTOK_ACCESS_TOKEN?.trim());
-  const snapOk = Boolean(process.env.SNAPCHAT_ACCESS_TOKEN?.trim());
+  const telegramOk = Boolean(resolveToken('TELEGRAM_BOT_TOKEN'));
+  const igOk = Boolean(resolveToken('META_IG_ACCESS_TOKEN'));
+  const fbOk = Boolean(resolveToken('META_FB_ACCESS_TOKEN'));
+  const ytOk = Boolean(resolveToken('YOUTUBE_ACCESS_TOKEN'));
+  const xOk = Boolean(resolveToken('X_ACCESS_TOKEN'));
+  const tiktokOk = Boolean(resolveToken('TIKTOK_ACCESS_TOKEN'));
+  const snapOk = Boolean(resolveToken('SNAPCHAT_ACCESS_TOKEN'));
 
   return [
     {
@@ -3584,7 +3318,7 @@ app.post('/api/social/publish', async (req, res) => {
       });
     }
 
-    const fbToken = process.env.META_FB_ACCESS_TOKEN?.trim() || devPlatformEngine.resolveProviderSecret('meta_fb').value;
+    const fbToken = process.env.META_FB_ACCESS_TOKEN?.trim() || '';
     if (target.platform === 'facebook' && fbToken) {
       const fbRes = await fetch(`https://graph.facebook.com/v19.0/me/feed`, {
         method: 'POST',
@@ -3604,7 +3338,7 @@ app.post('/api/social/publish', async (req, res) => {
       return res.json({ ok: true, draft: target, drafts });
     }
 
-    const tgToken = process.env.TELEGRAM_BOT_TOKEN?.trim() || devPlatformEngine.resolveProviderSecret('telegram').value;
+    const tgToken = process.env.TELEGRAM_BOT_TOKEN?.trim() || '';
     if (target.platform === 'telegram' && tgToken) {
       const chatId = String(targetChatId || process.env.TELEGRAM_CHAT_ID || '').trim();
       if (!chatId) {
@@ -3631,7 +3365,7 @@ app.post('/api/social/publish', async (req, res) => {
       return res.json({ ok: true, draft: target, drafts });
     }
 
-    const xToken = process.env.X_ACCESS_TOKEN?.trim() || devPlatformEngine.resolveProviderSecret('twitter').value;
+    const xToken = process.env.X_ACCESS_TOKEN?.trim() || '';
     if (target.platform === 'twitter' && xToken) {
       const xRes = await fetch(`https://api.twitter.com/2/tweets`, {
         method: 'POST',
@@ -3677,385 +3411,6 @@ app.delete('/api/social/drafts/:id', async (req, res) => {
   const next = drafts.filter((d) => d.id !== req.params.id);
   saveSocialDrafts(next);
   return res.json({ ok: true, drafts: next });
-});
-
-// ======================== CODING & DEV LAB (CODE GEN + WORKSPACE INSPECTOR) ========================
-app.post('/api/dev/generate', async (req, res) => {
-  try {
-    const {
-      targetStack = 'flutter',
-      prompt = '',
-      language = 'english',
-    } = req.body || {};
-
-    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
-      return res.status(400).json({ ok: false, error: 'Prompt is required for code generation.' });
-    }
-
-    const stackLabels: Record<string, string> = {
-      flutter: 'Flutter / Dart (Material 3 mobile app)',
-      kotlin: 'Android Kotlin / Jetpack Compose',
-      typescript: 'TypeScript / React / Node.js',
-      javascript: 'Modern JavaScript (ES2023+)',
-      python: 'Python 3.11+ (clean modular CLI/FastAPI)',
-      html_css: 'Responsive HTML5 + Tailwind / CSS3',
-    };
-    const chosen = stackLabels[String(targetStack).toLowerCase()] || stackLabels.typescript;
-
-    const result = await aiOrchestrator.orchestrateTextReply({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `Generate complete, clean, production-grade ${chosen} code for:\n${prompt.trim()}\n\nInclude:\n1. Brief folder/file layout\n2. Complete runnable code (no TODO placeholders)\n3. Concise setup/run instructions (${language}).`,
-            },
-          ],
-        },
-      ],
-      systemInstruction:
-        'You are Zara Coding Assistant (Senior Principal Engineer). Output clean, working, bug-free production code.',
-      latestUserText: prompt.trim(),
-      preferredBrain: 'maya_agentic_plan',
-    });
-
-    return res.json({
-      ok: Boolean(result.text),
-      targetStack,
-      codeAndGuide: result.text,
-      modelIdUsed: result.modelIdUsed,
-      providerUsed: result.providerUsed,
-      latencyMs: result.latencyMs,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'Code generation failed' });
-  }
-});
-
-app.get('/api/dev/analyze-workspace', (_req, res) => {
-  try {
-    const files = scanZaraProjectFiles();
-    const byCategory: Record<string, number> = {};
-    for (const f of files) {
-      byCategory[f.category] = (byCategory[f.category] || 0) + 1;
-    }
-    return res.json({
-      ok: true,
-      totalFiles: files.length,
-      categories: byCategory,
-      sampleFiles: files.slice(0, 60).map((f) => ({
-        path: f.path,
-        category: f.category,
-        lines: f.lines,
-        bytes: f.bytes,
-      })),
-    });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'Workspace scan failed' });
-  }
-});
-
-app.post('/api/dev/analyze-file', async (req, res) => {
-  try {
-    const { relPath = '', question = 'Explain architecture, risks, and improvements.' } = req.body || {};
-    const safeRel = String(relPath || '').replace(/^\/+/, '');
-    if (!safeRel || safeRel.includes('..') || safeRel.startsWith('.env')) {
-      return res.status(400).json({ ok: false, error: 'Valid non-secret project file path required.' });
-    }
-    const abs = path.resolve(__dirname, safeRel);
-    if (!abs.startsWith(__dirname) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
-      return res.status(404).json({ ok: false, error: 'File not found in workspace.' });
-    }
-    const raw = fs.readFileSync(abs, 'utf8').slice(0, 14000);
-    const out = await aiOrchestrator.orchestrateTextReply({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `Inspect file "${safeRel}" and answer: ${question}\n\n\`\`\`\n${raw}\n\`\`\``,
-            },
-          ],
-        },
-      ],
-      systemInstruction:
-        'You are Zara Coding Assistant. Inspect code honestly without inventing lines not present in the snippet.',
-      latestUserText: question,
-      preferredBrain: 'dimaag_llm',
-    });
-
-    return res.json({
-      ok: Boolean(out.text),
-      relPath: safeRel,
-      analysis: out.text,
-      modelIdUsed: out.modelIdUsed,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'File analysis failed' });
-  }
-});
-
-// ======================== ZARA UNIFIED AI APP BUILDER, API VAULT, 2D/3D STUDIO & TASK ENGINE ========================
-app.get('/api/dev-studio/projects', (_req, res) => {
-  try {
-    return res.json({ ok: true, projects: devPlatformEngine.listProjects() });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'Failed to list projects' });
-  }
-});
-
-app.post('/api/dev-studio/projects/create', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to create projects.' });
-    }
-    const { name = 'Zara App', template = 'react_ts' } = req.body || {};
-    const project = devPlatformEngine.createTemplateProject(String(name), template);
-    return res.json({ ok: true, project });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Project creation failed' });
-  }
-});
-
-app.post('/api/dev-studio/projects/upload-zip', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to import project ZIPs.' });
-    }
-    const { projectName = 'Imported App', zipBase64 = '' } = req.body || {};
-    if (!zipBase64 || typeof zipBase64 !== 'string') {
-      return res.status(400).json({ ok: false, error: 'zipBase64 payload is required.' });
-    }
-    const project = await devPlatformEngine.importProjectFromZipBase64(String(projectName), zipBase64);
-    return res.json({ ok: true, project });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'ZIP import failed' });
-  }
-});
-
-app.get('/api/dev-studio/projects/:id', (req, res) => {
-  try {
-    const project = devPlatformEngine.analyzeProject(req.params.id);
-    return res.json({ ok: true, project });
-  } catch (err: any) {
-    return res.status(404).json({ ok: false, error: err?.message || 'Project not found' });
-  }
-});
-
-app.get('/api/dev-studio/projects/:id/file', (req, res) => {
-  try {
-    const relPath = String(req.query.path || '').trim();
-    if (!relPath) return res.status(400).json({ ok: false, error: 'Query parameter path is required.' });
-    const fileData = devPlatformEngine.readProjectFile(req.params.id, relPath);
-    return res.json({
-      ok: true,
-      path: fileData.path,
-      language: fileData.language,
-      content: fileData.content,
-    });
-  } catch (err: any) {
-    return res.status(404).json({ ok: false, error: err?.message || 'File read failed' });
-  }
-});
-
-app.post('/api/dev-studio/projects/:id/file', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to modify project files.' });
-    }
-    const { relPath = '', content = '', createBackup = true } = req.body || {};
-    if (!relPath || typeof content !== 'string') {
-      return res.status(400).json({ ok: false, error: 'relPath and string content are required.' });
-    }
-    if (createBackup) {
-      devPlatformEngine.createProjectBackup(req.params.id, `Before edit: ${relPath}`);
-    }
-    const node = devPlatformEngine.writeProjectFile(req.params.id, String(relPath), content);
-    const project = devPlatformEngine.analyzeProject(req.params.id);
-    return res.json({ ok: true, file: node, project });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'File write failed' });
-  }
-});
-
-app.post('/api/dev-studio/projects/:id/ai-code', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required for AI code edits.' });
-    }
-    const { instruction = '', targetPath = '' } = req.body || {};
-    if (!instruction || typeof instruction !== 'string') {
-      return res.status(400).json({ ok: false, error: 'instruction is required.' });
-    }
-    const result = await devPlatformEngine.aiEditProjectFiles(
-      req.params.id,
-      instruction,
-      targetPath ? String(targetPath) : undefined
-    );
-    return res.json({ ...result, project: result.summary });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'AI code edit failed' });
-  }
-});
-
-app.post('/api/dev-studio/projects/:id/create-api', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to generate APIs.' });
-    }
-    const {
-      endpointPath = '/api/items',
-      method = 'GET',
-      description = 'CRUD endpoint',
-      backend = 'node_express',
-      database = 'sqlite',
-    } = req.body || {};
-    const result = await devPlatformEngine.createAndVerifyApiInProject(req.params.id, {
-      endpointPath: String(endpointPath),
-      method: String(method),
-      description: String(description),
-      backendTarget: backend === 'python_fastapi' ? 'python_fastapi' : 'node_express',
-      databaseKind:
-        database === 'postgres' || database === 'firestore'
-          ? database
-          : database === 'none' || database === 'json_store'
-          ? 'json_store'
-          : 'sqlite',
-    });
-    return res.json({ ...result, project: result.summary });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'API creation failed' });
-  }
-});
-
-app.post('/api/dev-studio/projects/:id/pipeline', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to run build & self-heal pipeline.' });
-    }
-    const result = await devPlatformEngine.runProjectBuildPipeline(req.params.id);
-    return res.json({ ok: true, pipeline: result });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Build pipeline error' });
-  }
-});
-
-app.get('/api/dev-studio/projects/:id/backups', (req, res) => {
-  try {
-    const backups = devPlatformEngine.listProjectBackups(req.params.id);
-    return res.json({ ok: true, backups });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Backup listing failed' });
-  }
-});
-
-app.post('/api/dev-studio/projects/:id/rollback', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to restore backups.' });
-    }
-    const { backupId = '', confirmed = false } = req.body || {};
-    if (confirmed !== true) {
-      return res.status(400).json({
-        ok: false,
-        requiresConfirmation: true,
-        error: 'Explicit confirmation required before rolling back project files.',
-      });
-    }
-    const project = devPlatformEngine.restoreProjectBackup(req.params.id, String(backupId));
-    return res.json({ ok: true, project });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Rollback failed' });
-  }
-});
-
-app.get('/api/dev-studio/projects/:id/download-zip', (req, res) => {
-  try {
-    const exported = devPlatformEngine.exportProjectZipBuffer(req.params.id);
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
-    res.setHeader('Content-Length', String(exported.buffer.length));
-    res.setHeader('Cache-Control', 'no-store');
-    return res.send(exported.buffer);
-  } catch (err: any) {
-    return res.status(404).json({ ok: false, error: err?.message || 'ZIP export failed' });
-  }
-});
-
-// Encrypted API Key Vault & Universal AI Tools
-app.get('/api/dev-studio/keys', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  return res.json({ ok: true, providers: devPlatformEngine.listVaultProviders() });
-});
-
-app.post('/api/dev-studio/keys', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Verified Owner sign-in required to modify API Key Vault.' });
-    }
-    const { provider, secret } = req.body || {};
-    if (!provider || typeof secret !== 'string' || !secret.trim()) {
-      return res.status(400).json({ ok: false, error: 'provider and non-empty secret are required.' });
-    }
-    const providers = devPlatformEngine.setVaultProviderKey(provider as ApiVaultProviderId, secret);
-    return res.json({ ok: true, providers });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Failed to save key' });
-  }
-});
-
-app.post('/api/dev-studio/keys/test', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to test vault keys.' });
-    }
-    const { provider } = req.body || {};
-    if (!provider) return res.status(400).json({ ok: false, error: 'provider is required.' });
-    const result = await devPlatformEngine.testVaultProvider(provider as ApiVaultProviderId);
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Provider test failed' });
-  }
-});
-
-app.delete('/api/dev-studio/keys/:provider', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    if (!ownerAuth.verified) {
-      return res.status(403).json({ ok: false, error: 'Owner verification required to remove vault keys.' });
-    }
-    const confirmed = req.query.confirmed === 'true' || req.body?.confirmed === true;
-    if (!confirmed) {
-      return res.status(400).json({ ok: false, requiresConfirmation: true, error: 'Confirm key removal.' });
-    }
-    const providers = devPlatformEngine.removeVaultProviderKey(req.params.provider as ApiVaultProviderId);
-    return res.json({ ok: true, providers });
-  } catch (err: any) {
-    return res.status(400).json({ ok: false, error: err?.message || 'Key removal failed' });
-  }
-});
-
-// Autonomous Multi-Step Task Planner & Executor
-app.post('/api/tasks/plan-execute', async (req, res) => {
-  try {
-    const { goal = '' } = req.body || {};
-    if (!goal || typeof goal !== 'string' || !goal.trim()) {
-      return res.status(400).json({ ok: false, error: 'Task goal is required.' });
-    }
-    const plan: AutonomousTaskPlan = await devPlatformEngine.planAndExecuteTask(goal.trim(), 'auto');
-    return res.json({ ok: true, plan });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'Task planner failed' });
-  }
 });
 
 // ======================== AI VIDEO SUMMARIZER & HONEST IMAGE GENERATOR ========================
@@ -4195,7 +3550,6 @@ app.get('/api/self-improve/audit', (req, res) => {
   const socialStatuses = getSocialAccountsStatus();
 
   const androidRequiredFiles = [
-    'android/AndroidManifest.xml',
     'android/app/src/main/AndroidManifest.xml',
     'android/app/build.gradle',
     'android/app/src/main/java/com/zara/ai/assistant/MainActivity.kt',
@@ -4204,7 +3558,6 @@ app.get('/api/self-improve/audit', (req, res) => {
     'android/app/src/main/java/com/zara/ai/assistant/ZaraForegroundVoiceService.kt',
     'android/app/src/main/java/com/zara/ai/assistant/ZaraWakeWordService.kt',
     'android/app/src/main/java/com/zara/ai/assistant/ZaraBootReceiver.kt',
-    'android/app/src/main/java/com/zara/ai/assistant/ZaraPlayBillingManager.kt',
   ];
   const androidPresent = androidRequiredFiles.filter((f) => fs.existsSync(path.join(__dirname, f)));
   const configuredSocialCount = socialStatuses.filter((s) => s.connected).length;
@@ -4223,10 +3576,10 @@ app.get('/api/self-improve/audit', (req, res) => {
         : undefined,
     },
     {
-      id: 'six_assistants',
-      name: '6 Specialized AI Assistants (AI-to-AI Switching)',
+      id: 'zara_personal_assistant',
+      name: 'Zara Unified Personal AI Assistant',
       status: 'working',
-      detail: 'Main Zara, Mother AI, Sister AI, Research AI, Coding AI & Business AI active with isolated contexts.',
+      detail: 'Single Zara Personal Assistant for voice calls, full Android phone control, YouTube song search/play & WhatsApp messaging.',
     },
     {
       id: 'universal_multilingual',
@@ -4244,21 +3597,15 @@ app.get('/api/self-improve/audit', (req, res) => {
       id: 'android_wrapper',
       name: 'Native Android Kotlin Wrapper, Accessibility & Wake-Word Services',
       status: androidPresent.length === androidRequiredFiles.length ? 'working' : 'partial',
-      detail: `${androidPresent.length}/${androidRequiredFiles.length} native Android Play Store source files verified.`,
-      recommendation: 'Compile in Android Studio (./gradlew bundleRelease) to sign .aab for Play Console.',
+      detail: `${androidPresent.length}/${androidRequiredFiles.length} native Android source files verified.`,
+      recommendation: 'Compile in Android Studio (./gradlew assembleRelease) or via GitHub Actions to generate the signed APK.',
     },
     {
       id: 'social_hub',
-      name: 'Social Media Hub (TikTok, Instagram, Facebook, Snapchat)',
+      name: 'Social Media Hub (WhatsApp, YouTube, Instagram, Facebook, TikTok, Snapchat, Telegram, X)',
       status: configuredSocialCount > 0 ? 'partial' : 'needs_key_or_permission',
-      detail: `${configuredSocialCount}/4 live publishing tokens configured; AI caption & post drafting is active with owner confirmation.`,
-      recommendation: 'Add META_FB_ACCESS_TOKEN, META_IG_ACCESS_TOKEN, TIKTOK_ACCESS_TOKEN, or SNAPCHAT_ACCESS_TOKEN in Secrets for live auto-publishing.',
-    },
-    {
-      id: 'pro_tier',
-      name: 'Zara Pro Tier & Play Billing Verification',
-      status: 'working',
-      detail: 'HMAC-signed X-Zara-Tier-Token verification & 7-day trial / Play Billing v7 bridge operational.',
+      detail: `${configuredSocialCount}/8 social platforms configured; WhatsApp confirmation messaging & YouTube song launch active.`,
+      recommendation: 'Add optional platform API tokens in Server Secrets if automated cloud publishing is needed.',
     },
   ];
 
@@ -4281,22 +3628,16 @@ app.get('/api/self-improve/audit', (req, res) => {
     detectedErrors: detectedErrors.slice(0, 12),
     recommendedUpgrades: [
       {
-        id: 'upgrade_pc_automation',
-        title: 'Connect Zara PC Companion Agent',
-        reason: activePcAgent ? 'PC agent connected' : 'Pair your Windows/Mac workstation for hands-free local file & terminal tasks.',
-        suggestedPrompt: 'Download Zara PC Companion script from Dev & PC Tools and pair this computer.',
-      },
-      {
         id: 'upgrade_social_tokens',
-        title: 'Configure Official Social Media API Tokens',
-        reason: `${4 - configuredSocialCount} social platform(s) currently draft-only until OAuth/Graph tokens are added.`,
-        suggestedPrompt: 'Guide me step-by-step to obtain official Meta Graph API and TikTok API tokens safely.',
+        title: 'Configure Optional Social Media API Tokens',
+        reason: `${Math.max(0, 7 - configuredSocialCount)} social platform(s) currently use Android deep links until API tokens are added.`,
+        suggestedPrompt: 'Show me how to launch social apps or configure Meta Graph / Telegram tokens.',
       },
       {
-        id: 'upgrade_play_console',
-        title: 'Build Signed Android .aab for Play Store',
-        reason: 'Compile the /android Kotlin wrapper with Android Studio to enable Play Billing & system Accessibility.',
-        suggestedPrompt: 'Show me the exact step-by-step Android Studio Release App Bundle (.aab) signing checklist.',
+        id: 'upgrade_android_apk',
+        title: 'Build Android APK in Android Studio / GitHub Actions',
+        reason: 'Run npm run build:android and compile /android in Android Studio or GitHub Actions to generate the installable APK.',
+        suggestedPrompt: 'Show me the Android APK build checklist.',
       },
     ],
   };
@@ -4408,11 +3749,11 @@ function buildZaraUpdateReport(): ZaraUpdateReport {
       status: 'installed',
     },
     {
-      id: 'feat_six_assistants',
+      id: 'feat_zara_unified',
       version: SERVER_BUILD_VERSION,
-      title: '6 AI Assistants + 7-Language Hunter Voice + AI Studio',
+      title: 'Unified Zara Personal AI Assistant + Voice & Phone Control',
       summaryHi:
-        `मुख्य ज़ारा, Mother, Sister, Research, Coding और Business असिस्टेंट (${configuredEngines}/${snap.systems.length} इंजन तैयार)।`,
+        `ایک متحد زارا اے آئی اسسٹنٹ: آڈیو کال، فون کنٹرول، یوٹیوب سونگ پلے اور واٹس ایپ میسجنگ (${configuredEngines}/${snap.systems.length} انجن تیار)۔`,
       category: 'voice',
       status: 'installed',
     },
@@ -5048,214 +4389,6 @@ app.get('/api/vault/restore', async (req, res) => {
   }
 });
 
-// ======================== REAL-TIME MOOD & HAND/HEAD GESTURE RECOGNITION API ========================
-app.post('/api/mood-gesture', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    const verifiedOwner = ownerAuth.verified;
-
-    const {
-      imageBase64,
-      textContext = '',
-      userNickname = 'Malaysia wala badshah',
-      voiceName = 'Zephyr',
-    } = req.body || {};
-
-    if (!imageBase64 && !textContext) {
-      return res.status(400).json({ error: 'Camera frame or text context required' });
-    }
-
-    const nick = verifiedOwner
-      ? !userNickname || userNickname === 'My Love'
-        ? 'میرے مالک'
-        : userNickname
-      : 'دوست';
-
-    if (!ai) {
-      const fallbackReply = verifiedOwner
-        ? `جی ${nick}! میں آپ کو دیکھ کر بہت خوش ہوں — آپ پرسکون اور شاندار لگ رہے ہیں!`
-        : `السلام علیکم دوست! آپ پرسکون اور اچھے لگ رہے ہیں!`;
-      return res.json({
-        mood: 'calm',
-        moodLabel: 'پرسکون / शांत',
-        gesture: 'none',
-        gestureLabel: 'No Gesture',
-        confidence: 88,
-        spokenReply: fallbackReply,
-        audio: null,
-      });
-    }
-
-    const parts: Array<any> = [];
-    if (imageBase64 && typeof imageBase64 === 'string') {
-      parts.push({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: imageBase64,
-        },
-      });
-    }
-
-    const analysisPrompt = `Analyze the user's current facial mood/emotion AND any visible hand/head gesture in this camera frame${
-      textContext ? ` (recent context: "${textContext}")` : ''
-    }.
-Address User As: "${nick}".
-Allowed "mood" values: "happy", "${verifiedOwner ? 'romantic' : 'calm'}", "stressed", "sad", "focused", "angry", "calm".
-Allowed "gesture" values:
-- "open_palm_stop" (open hand / palm raised facing camera to stop/pause)
-- "thumbs_up" (thumb up sign)
-- "peace_victory" (two fingers V / peace sign)
-- "wave_hello" (waving hand)
-- "heart_sign" (hand/finger heart gesture)
-- "nod_yes" (clear head nod or warm smile toward camera)
-- "none" (no specific hand gesture)
-
-Write "spokenReply" in 1-2 short, ${
-      verifiedOwner ? 'warm, affectionate' : 'polite, friendly, strictly non-romantic'
-    } spoken Urdu sentences from Zara addressing "${nick}", reacting directly to the detected mood and gesture!
-Return ONLY valid JSON:
-{"mood":"happy","moodLabel":"خوش / खुश","gesture":"none","gestureLabel":"No Gesture","confidence":95,"spokenReply":"..."}`;
-
-    parts.push({ text: analysisPrompt });
-
-    const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
-    for (const model of models) {
-      if (!isModelHealthy(model)) continue;
-      try {
-        const resp = await withTimeout(
-          ai.models.generateContent({
-            model,
-            contents: [{ role: 'user', parts }],
-            config: { temperature: 0.35 },
-          }),
-          7500,
-          `mood-gesture-${model}`
-        );
-        const raw = (resp.text || '').trim();
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          const rawReply =
-            String(parsed.spokenReply || '').trim() ||
-            `جی ${nick}! میں نے آپ کا موڈ اور اشارہ دیکھ لیا ہے!`;
-          const spokenReply = verifiedOwner ? rawReply : enforceGuestSafeOutput(rawReply);
-          const audio = await generateZaraAudio(spokenReply, voiceName, {
-            loveMode: verifiedOwner,
-            isOwnerVerified: verifiedOwner,
-          });
-          return res.json({
-            mood: parsed.mood || 'calm',
-            moodLabel: parsed.moodLabel || 'پرسکون',
-            gesture: parsed.gesture || 'none',
-            gestureLabel: parsed.gestureLabel || 'None',
-            confidence: Number(parsed.confidence) || 93,
-            spokenReply,
-            audio,
-          });
-        }
-      } catch (err: any) {
-        recordModelError(model, err);
-      }
-    }
-
-    const defaultReply = verifiedOwner
-      ? `جی ${nick}! میں آپ کے چہرے کی مسکراہٹ دیکھ رہی ہوں — آپ بہت پیارے لگ رہے ہیں!`
-      : `جی دوست! میں نے آپ کا موڈ اور اشارہ دیکھ لیا ہے!`;
-    const audio = await generateZaraAudio(defaultReply, voiceName, {
-      loveMode: verifiedOwner,
-      isOwnerVerified: verifiedOwner,
-    });
-    return res.json({
-      mood: 'happy',
-      moodLabel: 'خوش / खुश',
-      gesture: 'none',
-      gestureLabel: 'None',
-      confidence: 89,
-      spokenReply: defaultReply,
-      audio,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Mood & gesture recognition failed' });
-  }
-});
-
-// ======================== ZARA ADVANCED WORK STUDIO API ========================
-app.post('/api/advanced-work', async (req, res) => {
-  try {
-    const ownerAuth = await verifyOwnerRequest(req);
-    const verifiedOwner = ownerAuth.verified;
-
-    const {
-      workMode = 'action_plan',
-      prompt = '',
-      targetLanguage = 'Urdu + English',
-      userNickname = 'Malaysia wala badshah',
-      voiceName = 'Zephyr',
-    } = req.body || {};
-
-    if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({ error: 'Work prompt is required' });
-    }
-
-    const nick = verifiedOwner
-      ? !userNickname || userNickname === 'My Love'
-        ? 'میرے مالک'
-        : userNickname
-      : 'دوست';
-
-    const modeTitleMap: Record<string, string> = {
-      whatsapp_business: 'WhatsApp Business Ready Message',
-      email_proposal: 'Executive Email & Business Proposal',
-      translate: 'Professional Multi-Language Translation',
-      action_plan: 'Step-by-Step Smart Work Plan',
-      meeting_notes: 'Executive Summary & Action Items',
-      smart_calc: 'Invoice & Financial Breakdown',
-    };
-    const title = modeTitleMap[workMode] || 'Zara Advanced Work Output';
-
-    if (!ai) {
-      return res.json({
-        title,
-        output: prompt,
-        spokenSummary: `جی ${nick}! میں نے آپ کا کام نوٹ کر لیا ہے!`,
-        audio: null,
-      });
-    }
-
-    const systemPrompt = `You are Zara's Advanced Executive Work Engine assisting "${nick}".
-Produce clean, immediately usable, professional output in "${targetLanguage}" with zero filler.
-Mode: ${workMode} (${title}).
-- If whatsapp_business: write a polite, persuasive, ready-to-send WhatsApp message.
-- If email_proposal: include Subject line and crisp professional body.
-- If translate: provide accurate, natural translation.
-- If action_plan: provide numbered, practical, high-impact execution steps.
-- If meeting_notes: extract key takeaways and clear next actions.
-- If smart_calc: compute exact step-by-step totals, taxes/discounts, and final amount accurately.`;
-
-    const output = await generateZaraTextReply(
-      [{ role: 'user', parts: [{ text: prompt }] }],
-      systemPrompt,
-      false
-    );
-
-    const finalOutput = output || prompt;
-    const spokenSummary = `جی ${nick}! میں نے آپ کے کام کے لیے بہترین ${title} تیار کر دیا ہے — آپ ایک ٹیپ میں کاپی یا واٹس ایپ پر سینڈ کر سکتے ہیں!`;
-    const audio = await generateZaraAudio(spokenSummary, voiceName, {
-      loveMode: false,
-      isOwnerVerified: verifiedOwner,
-    });
-
-    return res.json({
-      title,
-      output: finalOutput,
-      spokenSummary,
-      audio,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Advanced work processing failed' });
-  }
-});
-
 // Real-time Multi-Mobile Install Link Health Checker (detects if ais-pre-... is 404 or LIVE 200/302!)
 app.get('/api/install-link-status', async (req, res) => {
   try {
@@ -5841,33 +4974,25 @@ const FILE_ROLE_DESCRIPTIONS_HI: Record<string, string> = {
   'src/main.tsx': 'React 19 फ्रंटएंड बूटस्ट्रैप और Service Worker रजिस्ट्रेशन',
   'src/index.css': 'Tailwind CSS 4 और ग्लोबल मोबाइल स्टाइलिंग',
   'src/types.ts': 'पूरी ऐप के TypeScript डेटा मॉडल्स और इंटरफ़ेस',
-  'src/App.tsx': 'ज़ारा का मुख्य कंट्रोलर — स्क्रीन-ऑफ वॉयस, लिविंग बैकग्राउंड, फंक्शन बार, व्हाट्सएप और सभी मोड्स का संचालन',
-  'src/hooks/usePWAInstall.ts': 'किसी भी मोबाइल (Android/iOS/WhatsApp Browser) में इंस्टॉल और पब्लिक लिंक चेकर हुक',
-  'src/data/zaraPortraits.ts': 'ज़ारा के फुल-बॉडी पोर्ट्रेट और विज़ुअल असेट डेटा',
-  'src/services/alwaysOnFloatService.ts': 'Screen-ON व Screen-OFF में लगातार आवाज़ सुनने वाला इंजन, इको-शील्ड (Echo Shield) और नॉइज़ फिल्टर',
-  'src/services/audioService.ts': 'ज़ारा की मीठी आवाज़ (Neural WAV + Lock-Screen HTML5 Audio) और लिप-सिंक ऑडियो इंजन',
-  'src/services/voiceCaptureService.ts': 'डायरेक्ट माइक से 16kHz RIFF WAV वॉयस रिकॉर्डर',
-  'src/services/visionAndControlService.ts': 'कैमरा विज़न, स्क्रीन शेयरिंग और मोबाइल ऐप्स (Open/Close/Back) कंट्रोलर',
-  'src/services/ownerSecurityAndBuilderService.ts': 'मालिक (Malaysia wala badshah) सुरक्षा, एंटी-टच सायरन, व्हाट्सएप मैसेज/कॉल और AI ऐप/गेम बिल्डर सर्विस',
-  'src/services/scheduleAndMemoryService.ts': '100+ दिन की परमानेंट मेमोरी वॉल्ट और डेली अलार्म/काम शेड्यूलर',
-  'src/components/hud3d/ZaraSciFi3DHudDashboard.tsx': 'ज़ारा का मुख्य रॉयल-वॉयलेट डैशबोर्ड, 2D पोर्ट्रेट स्टेज और टूल हब',
-  'src/components/VoiceCallModal.tsx': 'रियल-टाइम टू-वे लाइव फोन कॉल स्क्रीन',
-  'src/components/ChatDrawer.tsx': 'वॉयस और टेक्स्ट चैट ड्रॉअर',
-  'src/components/SettingsModal.tsx': 'ज़ारा का पूरा कंट्रोल पैनल (प्रोफाइल, व्हाट्सएप, सिक्योरिटी, शेड्यूल, मेमोरी, ऐप बिल्डर)',
-  'src/components/ZaraProjectExportModal.tsx': 'शुरू से अब तक की सभी फाइलें, कोड और A-to-Z टूल जानकारी डाउनलोड व शेयर करने का पैनल',
-  'src/components/PWAInstallModal.tsx': 'यूनिवर्सल मोबाइल इंस्टॉलर और लिंक शेयरिंग मोडल',
-  'src/components/MobileControlModal.tsx': 'ज़ारा परमिशन, विज़न, सिक्योरिटी और ऐप कंट्रोल हब',
-  'src/components/SecurityShieldOverlay.tsx': 'फेस-स्कैन वेरिफिकेशन और एंटी-टच इंट्रूडर लॉक स्क्रीन',
-  'src/components/BuiltAppPreviewModal.tsx': 'ज़ारा द्वारा बनाए गए गेम्स और ऐप्स चलाने का प्लेयर',
-  'src/components/MemoriesModal.tsx': 'यादें और वादे देखने/जोड़ने का मोडल',
-  'src/components/SoulModal.tsx': 'ज़ारा का स्वभाव, प्यार और बोलने का अंदाज़ सेट करने का मोडल',
-  'src/components/NotificationsModal.tsx': 'नोटिफिकेशन और रिमाइंडर मोडल',
-  'src/components/ZaraPortrait4D.tsx': '2D पोर्ट्रेट और लाइव कैमरा PIP कंपोनेंट',
-  'src/services/selfHealAndMacroService.ts': 'ज़ारा का खुद-ब-खुद अपडेट, इशू क्लियर और मैक्रो ऑटो-कम्प्लीट इंजन',
-  'src/services/emotionMoodEngine.ts': 'लड़की का गुस्सा, लड़ाई-झगड़ा, गहरी इमोशनल बातचीत और खुद बात करने वाला प्रैक्टिव इंजन',
-  'src/services/moodAndGestureService.ts': 'रियल-टाइम मूड पहचान, बिना छुए हाथ के जेस्चर (Touchless Gesture) और एडवांस्ड वर्क इंजन',
-  'src/services/androidAssistantBridgeService.ts': 'Android Foreground Service सिंक, कन्फर्मेशन के साथ वॉयस कॉल व SMS/WhatsApp डिक्टेशन, इनकमिंग कॉल/मैसेज अनाउंसर और Kotlin Companion ब्रिज',
-  'src/components/MoodGestureWorkModal.tsx': 'मूड व जेस्चर स्कैनर, फोकस टाइमर और AI एडवांस्ड वर्क स्टूडियो पैनल',
+  'src/App.tsx': 'Zara Personal AI Assistant main controller and dashboard layout',
+  'src/data/zaraPortraits.ts': 'Zara portrait assets metadata',
+  'src/services/alwaysOnFloatService.ts': 'Background wake-word listener, echo shield, and noise filter',
+  'src/services/audioService.ts': 'Neural TTS WAV engine, speaker audio routing, and Web Speech fallback',
+  'src/services/voiceCaptureService.ts': '16kHz RIFF WAV microphone capture and Audio Call stream manager',
+  'src/services/visionAndControlService.ts': 'Camera vision, screen sharing, YouTube song search/play, and mobile app control',
+  'src/services/ownerSecurityAndBuilderService.ts': 'Security, diagnostics, and WhatsApp/call command parsing',
+  'src/services/scheduleAndMemoryService.ts': 'Persistent memories and daily alarms/schedule engine',
+  'src/components/hud3d/ZaraSciFi3DHudDashboard.tsx': 'Zara main 3D HUD dashboard with single Audio Call button',
+  'src/components/VoiceCallModal.tsx': 'Real-time two-way Audio Call screen',
+  'src/components/ChatDrawer.tsx': 'Voice and text chat drawer',
+  'src/components/SettingsModal.tsx': 'Zara settings, WhatsApp contacts, voice/TTS, alarms, and memories panel',
+  'src/components/MobileControlModal.tsx': 'Mobile permissions, vision, security, and app control hub',
+  'src/components/MemoriesModal.tsx': 'Saved memories and promises vault modal',
+  'src/components/NotificationsModal.tsx': 'Spoken alerts, portraits, and Android companion settings modal',
+  'src/components/ZaraPortrait4D.tsx': 'Interactive animated Zara portrait and camera PIP component',
+  'src/services/selfHealAndMacroService.ts': 'Diagnostics self-check and multi-step macro helper',
+  'src/services/emotionMoodEngine.ts': 'Conversational mood and context engine',
+  'src/services/androidAssistantBridgeService.ts': 'Android Foreground Service wake-word sync, WhatsApp confirmation, and accessibility bridge',
 };
 
 const ZARA_TECH_STACK_A_TO_Z = [
@@ -6612,392 +5737,9 @@ ${langGuide.instruction}`;
   }
 });
 
-// ======================== AUTHORIZED COMPUTER CONTROL BRIDGE ========================
-const PC_TOKEN_FILE = path.join(__dirname, '.zara-pc-token');
-
-function getOrCreatePcPairingToken(): string {
-  if (process.env.ZARA_PC_PAIRING_TOKEN && process.env.ZARA_PC_PAIRING_TOKEN.length >= 16) {
-    return process.env.ZARA_PC_PAIRING_TOKEN;
-  }
-  try {
-    if (fs.existsSync(PC_TOKEN_FILE)) {
-      const existing = fs.readFileSync(PC_TOKEN_FILE, 'utf-8').trim();
-      if (existing.length >= 24) return existing;
-    }
-  } catch {}
-  const fresh = crypto.randomBytes(24).toString('hex');
-  try {
-    fs.writeFileSync(PC_TOKEN_FILE, fresh, { mode: 0o600 });
-  } catch {}
-  return fresh;
-}
-
-let pcPairingToken = getOrCreatePcPairingToken();
-
-interface ActivePcAgentSession {
-  ws: WebSocket;
-  hostname: string;
-  platform: string;
-  arch: string;
-  authorizedRoot: string;
-  connectedAtMs: number;
-  lastHeartbeatMs: number;
-}
-
-let activePcAgent: ActivePcAgentSession | null = null;
-const pendingPcRpc = new Map<
-  string,
-  {
-    resolve: (res: { ok: boolean; output?: string; data?: any; error?: string }) => void;
-    timer: NodeJS.Timeout;
-  }
->();
-
-const ALLOWED_PC_ACTIONS = new Set([
-  'system_info',
-  'list_dir',
-  'read_file',
-  'open_url',
-  'open_app',
-  'media_play_pause',
-  'volume_up',
-  'volume_down',
-  'lock_screen',
-]);
-
-app.get('/api/computer/status', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const ownerAuth = await verifyOwnerRequest(req);
-  if (!ownerAuth.verified) {
-    return res.status(403).json({
-      connected: false,
-      error: 'Owner Google Sign-In required for computer control status.',
-    });
-  }
-  const live = Boolean(activePcAgent && activePcAgent.ws.readyState === WebSocket.OPEN);
-  return res.json({
-    connected: live,
-    hostname: live ? activePcAgent!.hostname : undefined,
-    platform: live ? activePcAgent!.platform : undefined,
-    arch: live ? activePcAgent!.arch : undefined,
-    authorizedRoot: live ? activePcAgent!.authorizedRoot : undefined,
-    connectedAtMs: live ? activePcAgent!.connectedAtMs : undefined,
-    lastHeartbeatMs: live ? activePcAgent!.lastHeartbeatMs : undefined,
-    pairingTokenPreview: `${pcPairingToken.slice(0, 6)}...${pcPairingToken.slice(-4)}`,
-  });
-});
-
-app.post('/api/computer/token', async (req, res) => {
-  const ownerAuth = await verifyOwnerRequest(req);
-  if (!ownerAuth.verified) {
-    return res.status(403).json({ error: 'Owner verification required to rotate PC pairing token.' });
-  }
-  pcPairingToken = crypto.randomBytes(24).toString('hex');
-  try {
-    fs.writeFileSync(PC_TOKEN_FILE, pcPairingToken, { mode: 0o600 });
-  } catch {}
-  if (activePcAgent) {
-    try {
-      activePcAgent.ws.close(4001, 'Pairing token rotated by owner');
-    } catch {}
-    activePcAgent = null;
-  }
-  return res.json({ ok: true, token: pcPairingToken });
-});
-
-app.get('/api/computer/agent-script', async (req, res) => {
-  const ownerAuth = await verifyOwnerRequest(req);
-  if (!ownerAuth.verified) {
-    return res.status(403).json({ error: 'Owner verification required to download paired PC Agent.' });
-  }
-  const forwardedProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
-  const wsProto = forwardedProto === 'https' ? 'wss' : 'ws';
-  const host = req.headers.host || `localhost:${activePort}`;
-  const defaultWsUrl = `${wsProto}://${host}/api/computer-bridge`;
-
-  const agentScript = `#!/usr/bin/env node
-/**
- * Zara Authorized PC Companion Agent (zara-pc-agent.mjs)
- * Requires Node.js 22+ (for built-in global WebSocket) OR \`npm install ws\` on Node 18/20.
- *
- * Usage:
- *   node zara-pc-agent.mjs --root "/path/to/authorized/folder"
- *   node zara-pc-agent.mjs --url "${defaultWsUrl}" --root "$HOME/Documents"
- */
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { execFile } from 'child_process';
-
-const args = process.argv.slice(2);
-function getArg(flag, fallback) {
-  const idx = args.indexOf(flag);
-  return idx >= 0 && args[idx + 1] ? args[idx + 1] : fallback;
-}
-
-const PAIRING_TOKEN = ${JSON.stringify(pcPairingToken)};
-const BRIDGE_URL = getArg('--url', process.env.ZARA_BRIDGE_URL || ${JSON.stringify(defaultWsUrl)});
-const AUTHORIZED_ROOT = path.resolve(getArg('--root', process.env.ZARA_PC_ROOT || os.homedir()));
-
-if (!fs.existsSync(AUTHORIZED_ROOT) || !fs.statSync(AUTHORIZED_ROOT).isDirectory()) {
-  console.error('[Zara PC Agent] Authorized root folder does not exist:', AUTHORIZED_ROOT);
-  process.exit(1);
-}
-
-let WebSocketImpl = globalThis.WebSocket;
-if (!WebSocketImpl) {
-  try {
-    const wsMod = await import('ws');
-    WebSocketImpl = wsMod.default || wsMod.WebSocket;
-  } catch {
-    console.error('[Zara PC Agent] Use Node.js 22+ or install ws: npm install ws');
-    process.exit(1);
-  }
-}
-
-function safeResolveInRoot(relPath = '') {
-  const cleanRel = String(relPath || '').replace(/^[/\\\\]+/, '');
-  const resolved = path.resolve(AUTHORIZED_ROOT, cleanRel);
-  const rel = path.relative(AUTHORIZED_ROOT, resolved);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new Error('Access denied: path escapes --root directory ' + AUTHORIZED_ROOT);
-  }
-  return resolved;
-}
-
-function runOsCmd(cmd, cmdArgs) {
-  return new Promise((resolve) => {
-    execFile(cmd, cmdArgs, { timeout: 8000 }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, error: stderr?.trim() || err.message });
-      } else {
-        resolve({ ok: true, output: (stdout || '').trim() });
-      }
-    });
-  });
-}
-
-async function handleAction(action, params = {}) {
-  const platform = os.platform();
-  switch (action) {
-    case 'system_info': {
-      const totalGb = (os.totalmem() / (1024 ** 3)).toFixed(2);
-      const freeGb = (os.freemem() / (1024 ** 3)).toFixed(2);
-      const cpus = os.cpus();
-      return {
-        ok: true,
-        output: \`Host: \${os.hostname()} (\${platform}/\${os.arch()}) | RAM Free: \${freeGb}/\${totalGb} GB | CPU: \${cpus[0]?.model || 'Unknown'} (\${cpus.length} cores) | Uptime: \${Math.round(os.uptime() / 60)}m\`,
-        data: { hostname: os.hostname(), platform, arch: os.arch(), totalGb, freeGb, cores: cpus.length, authorizedRoot: AUTHORIZED_ROOT },
-      };
-    }
-    case 'list_dir': {
-      const targetDir = safeResolveInRoot(params.subpath || '');
-      const entries = fs.readdirSync(targetDir, { withFileTypes: true }).slice(0, 80);
-      const formatted = entries.map((e) => \`\${e.isDirectory() ? '[DIR] ' : '[FILE]'} \${e.name}\`);
-      return {
-        ok: true,
-        output: \`Directory (\${targetDir}):\\n\${formatted.join('\\n') || '(empty)'}\`,
-        data: { path: targetDir, entries: entries.map((e) => ({ name: e.name, isDir: e.isDirectory() })) },
-      };
-    }
-    case 'read_file': {
-      if (!params.subpath) return { ok: false, error: 'Missing file subpath.' };
-      const filePath = safeResolveInRoot(params.subpath);
-      const st = fs.statSync(filePath);
-      if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
-      if (st.size > 256 * 1024) return { ok: false, error: 'File exceeds 256 KB safe read limit.' };
-      const content = fs.readFileSync(filePath, 'utf-8');
-      return { ok: true, output: content.slice(0, 12000), data: { path: filePath, bytes: st.size } };
-    }
-    case 'open_url': {
-      const rawUrl = String(params.url || '');
-      let parsed;
-      try { parsed = new URL(rawUrl); } catch { return { ok: false, error: 'Invalid URL.' }; }
-      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-        return { ok: false, error: 'Only http/https URLs allowed.' };
-      }
-      if (platform === 'win32') return await runOsCmd('cmd', ['/c', 'start', '', parsed.toString()]);
-      if (platform === 'darwin') return await runOsCmd('open', [parsed.toString()]);
-      return await runOsCmd('xdg-open', [parsed.toString()]);
-    }
-    case 'open_app': {
-      const appKey = String(params.app || '').toLowerCase().trim();
-      const SAFE_APPS = {
-        notepad: { win32: ['notepad.exe', []], darwin: ['open', ['-a', 'TextEdit']], linux: ['gedit', []] },
-        calculator: { win32: ['calc.exe', []], darwin: ['open', ['-a', 'Calculator']], linux: ['gnome-calculator', []] },
-        chrome: { win32: ['cmd', ['/c', 'start', 'chrome']], darwin: ['open', ['-a', 'Google Chrome']], linux: ['google-chrome', []] },
-        vscode: { win32: ['cmd', ['/c', 'start', 'code']], darwin: ['open', ['-a', 'Visual Studio Code']], linux: ['code', []] },
-        terminal: { win32: ['cmd', ['/c', 'start', 'cmd']], darwin: ['open', ['-a', 'Terminal']], linux: ['x-terminal-emulator', []] },
-        explorer: { win32: ['explorer.exe', [AUTHORIZED_ROOT]], darwin: ['open', [AUTHORIZED_ROOT]], linux: ['xdg-open', [AUTHORIZED_ROOT]] },
-      };
-      const entry = SAFE_APPS[appKey]?.[platform];
-      if (!entry) {
-        return { ok: false, error: \`App "\${appKey}" is not in the companion safety allowlist for \${platform}. Allowed: \${Object.keys(SAFE_APPS).join(', ')}\` };
-      }
-      const r = await runOsCmd(entry[0], entry[1]);
-      return r.ok ? { ok: true, output: \`Launched \${appKey} on \${os.hostname()}\` } : r;
-    }
-    case 'volume_up':
-    case 'volume_down':
-    case 'media_play_pause': {
-      if (platform === 'win32') {
-        const keyCode = action === 'volume_up' ? '0xAF' : action === 'volume_down' ? '0xAE' : '0xB3';
-        return await runOsCmd('powershell', ['-NoProfile', '-Command', \`(New-Object -ComObject WScript.Shell).SendKeys([char]\${Number(keyCode)})\`]);
-      }
-      if (platform === 'darwin') {
-        if (action === 'volume_up') return await runOsCmd('osascript', ['-e', 'set volume output volume ((output volume of (get volume settings)) + 10)']);
-        if (action === 'volume_down') return await runOsCmd('osascript', ['-e', 'set volume output volume ((output volume of (get volume settings)) - 10)']);
-        return await runOsCmd('osascript', ['-e', 'tell application "System Events" to key code 16']);
-      }
-      if (action === 'volume_up') return await runOsCmd('pactl', ['set-sink-volume', '@DEFAULT_SINK@', '+10%']);
-      if (action === 'volume_down') return await runOsCmd('pactl', ['set-sink-volume', '@DEFAULT_SINK@', '-10%']);
-      return await runOsCmd('playerctl', ['play-pause']);
-    }
-    case 'lock_screen': {
-      if (platform === 'win32') return await runOsCmd('rundll32.exe', ['user32.dll,LockWorkStation']);
-      if (platform === 'darwin') return await runOsCmd('pmset', ['displaysleepnow']);
-      return await runOsCmd('loginctl', ['lock-session']);
-    }
-    default:
-      return { ok: false, error: 'Unsupported action: ' + action };
-  }
-}
-
-function connect() {
-  const url = \`\${BRIDGE_URL}?token=\${encodeURIComponent(PAIRING_TOKEN)}\`;
-  console.log('[Zara PC Agent] Connecting to', BRIDGE_URL, '| Root:', AUTHORIZED_ROOT);
-  const ws = new WebSocketImpl(url);
-
-  const sendObj = (obj) => {
-    if (ws.readyState === 1) ws.send(JSON.stringify(obj));
-  };
-
-  ws.onopen = () => {
-    console.log('[Zara PC Agent] Connected & Authenticated.');
-    sendObj({
-      type: 'register',
-      hostname: os.hostname(),
-      platform: os.platform(),
-      arch: os.arch(),
-      authorizedRoot: AUTHORIZED_ROOT,
-    });
-  };
-
-  const hb = setInterval(() => sendObj({ type: 'heartbeat' }), 20000);
-
-  ws.onmessage = async (event) => {
-    try {
-      const raw = typeof event.data === 'string' ? event.data : event.data.toString();
-      const msg = JSON.parse(raw);
-      if (msg.type === 'rpc' && msg.id) {
-        let result;
-        try {
-          result = await handleAction(msg.action, msg.params || {});
-        } catch (err) {
-          result = { ok: false, error: err?.message || String(err) };
-        }
-        sendObj({ type: 'rpc_result', id: msg.id, ...result });
-      }
-    } catch (e) {
-      console.warn('[Zara PC Agent] Bad message:', e?.message || e);
-    }
-  };
-
-  ws.onclose = (ev) => {
-    clearInterval(hb);
-    console.log('[Zara PC Agent] Disconnected (code', ev.code, ') — reconnecting in 5s...');
-    setTimeout(connect, 5000);
-  };
-
-  ws.onerror = (err) => {
-    console.warn('[Zara PC Agent] Socket error:', err?.message || 'connection failed');
-  };
-}
-
-connect();
-`;
-
-  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="zara-pc-agent.mjs"');
-  res.setHeader('Cache-Control', 'no-store');
-  return res.send(agentScript);
-});
-
-app.post('/api/computer/command', async (req, res) => {
-  const ownerAuth = await verifyOwnerRequest(req);
-  if (!ownerAuth.verified) {
-    return res.status(403).json({
-      ok: false,
-      connected: false,
-      error: 'Owner verification is required for computer control commands.',
-    });
-  }
-
-  const { action, params = {}, explicitConfirm = false } = req.body || {};
-  if (typeof action !== 'string' || !ALLOWED_PC_ACTIONS.has(action)) {
-    return res.status(400).json({
-      ok: false,
-      connected: Boolean(activePcAgent && activePcAgent.ws.readyState === WebSocket.OPEN),
-      error: 'Unsupported computer action.',
-    });
-  }
-
-  if (action === 'lock_screen' && !explicitConfirm) {
-    return res.status(400).json({
-      ok: false,
-      connected: Boolean(activePcAgent && activePcAgent.ws.readyState === WebSocket.OPEN),
-      error: 'Explicit user confirmation is required before locking the PC screen.',
-    });
-  }
-
-  if (!activePcAgent || activePcAgent.ws.readyState !== WebSocket.OPEN) {
-    return res.status(409).json({
-      ok: false,
-      connected: false,
-      error: 'No authorized PC Companion Agent is currently connected. Download and run zara-pc-agent.mjs on your computer first.',
-    });
-  }
-
-  const rpcId = `rpc-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-  try {
-    const result = await new Promise<{ ok: boolean; output?: string; data?: any; error?: string }>(
-      (resolve) => {
-        const timer = setTimeout(() => {
-          pendingPcRpc.delete(rpcId);
-          resolve({ ok: false, error: 'PC Companion Agent timed out after 10 seconds.' });
-        }, 10000);
-        pendingPcRpc.set(rpcId, { resolve, timer });
-        activePcAgent!.ws.send(
-          JSON.stringify({
-            type: 'rpc',
-            id: rpcId,
-            action,
-            params,
-          })
-        );
-      }
-    );
-
-    return res.json({
-      ok: Boolean(result.ok),
-      connected: true,
-      output: result.output || '',
-      data: result.data,
-      error: result.error,
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      ok: false,
-      connected: false,
-      error: err?.message || 'Failed to dispatch PC command.',
-    });
-  }
-});
-
-// Attach Real-Time Gemini 3.8 Live Voice Call (/api/live-call) + Authorized PC Bridge (/api/computer-bridge)
+// Attach Real-Time Gemini 3.8 Live Voice Call (/api/live-call)
 function attachLiveCallWebSocket(server: http.Server) {
   const wss = new WebSocketServer({ noServer: true });
-  const pcWss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
     try {
@@ -7006,84 +5748,11 @@ function attachLiveCallWebSocket(server: http.Server) {
         wss.handleUpgrade(request, socket, head, (ws) => {
           wss.emit('connection', ws, request);
         });
-      } else if (reqUrl.pathname === '/api/computer-bridge') {
-        const suppliedToken = reqUrl.searchParams.get('token') || '';
-        const tokenBuf = Buffer.from(suppliedToken);
-        const expectedBuf = Buffer.from(pcPairingToken);
-        const valid =
-          tokenBuf.length === expectedBuf.length &&
-          tokenBuf.length > 0 &&
-          crypto.timingSafeEqual(tokenBuf, expectedBuf);
-        if (!valid) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-        pcWss.handleUpgrade(request, socket, head, (ws) => {
-          pcWss.emit('connection', ws, request);
-        });
       }
       // Leave other upgrade paths (e.g. Vite) untouched
     } catch {
       // ignore malformed upgrade URLs
     }
-  });
-
-  pcWss.on('connection', (agentWs: WebSocket) => {
-    if (activePcAgent && activePcAgent.ws !== agentWs) {
-      try {
-        activePcAgent.ws.close(4000, 'Replaced by new PC Companion connection');
-      } catch {}
-    }
-    const session: ActivePcAgentSession = {
-      ws: agentWs,
-      hostname: 'Paired PC',
-      platform: 'unknown',
-      arch: 'unknown',
-      authorizedRoot: '~',
-      connectedAtMs: Date.now(),
-      lastHeartbeatMs: Date.now(),
-    };
-    activePcAgent = session;
-
-    agentWs.on('message', (raw) => {
-      try {
-        const msg = JSON.parse(raw.toString());
-        if (msg.type === 'register') {
-          session.hostname = String(msg.hostname || 'Paired PC').slice(0, 80);
-          session.platform = String(msg.platform || 'unknown').slice(0, 32);
-          session.arch = String(msg.arch || 'unknown').slice(0, 32);
-          session.authorizedRoot = String(msg.authorizedRoot || '~').slice(0, 260);
-          session.lastHeartbeatMs = Date.now();
-          return;
-        }
-        if (msg.type === 'heartbeat') {
-          session.lastHeartbeatMs = Date.now();
-          return;
-        }
-        if (msg.type === 'rpc_result' && msg.id) {
-          const pending = pendingPcRpc.get(String(msg.id));
-          if (pending) {
-            clearTimeout(pending.timer);
-            pendingPcRpc.delete(String(msg.id));
-            pending.resolve({
-              ok: Boolean(msg.ok),
-              output: typeof msg.output === 'string' ? msg.output : undefined,
-              data: msg.data,
-              error: typeof msg.error === 'string' ? msg.error : undefined,
-            });
-          }
-        }
-      } catch {}
-    });
-
-    const cleanupAgent = () => {
-      if (activePcAgent?.ws === agentWs) {
-        activePcAgent = null;
-      }
-    };
-    agentWs.on('close', cleanupAgent);
-    agentWs.on('error', cleanupAgent);
   });
 
   wss.on('connection', (clientWs: WebSocket) => {

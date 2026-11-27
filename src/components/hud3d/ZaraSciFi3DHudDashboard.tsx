@@ -4,11 +4,7 @@ import {
   Calendar,
   ChevronRight,
   CloudRain,
-  Code2,
-  Compass,
-  Download,
   ExternalLink,
-  FolderOpen,
   Globe,
   Heart,
   History,
@@ -19,17 +15,14 @@ import {
   Menu,
   MessageCircle,
   MessageSquare,
-  Mic,
   MonitorUp,
   Paperclip,
   Phone,
   Play,
   Radar,
-  Radio,
   Send,
   Settings,
   ShieldCheck,
-  SkipForward,
   Smartphone,
   Sparkles,
   Sun,
@@ -40,6 +33,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { audioService } from '../../services/audioService';
+import { launchYouTubeSong } from '../../services/visionAndControlService';
 import {
   DEFAULT_ZARA_HOME_PORTRAIT_ID,
   getAllZaraPortraits,
@@ -70,13 +64,10 @@ interface ZaraSciFi3DHudDashboardProps {
   onUpdateConfig: (updates: Partial<PersonalityConfig>) => void;
   onSendMessage: (text: string, attachedImageDataUrl?: string) => Promise<string>;
   onSendAudioWav?: (wavBase64: string, mimeType?: string) => Promise<void>;
-  onToggleMic: () => void;
-  onSkipVoiceTurn?: () => void;
   onEnableAllFunctions?: () => Promise<void>;
   allFunctionsActive?: boolean;
   isAudioCallOpen?: boolean;
   onOpenAudioCall?: () => void;
-  onStartLiveMode?: () => void;
   onOpenSettings: () => void;
   onOpenNotifications?: () => void;
   unreadNotificationsCount?: number;
@@ -86,14 +77,10 @@ interface ZaraSciFi3DHudDashboardProps {
   onOpenSecurity?: () => void;
   onOpenPermissions?: () => void;
   onOpenChat?: () => void;
-  onOpenAiStudio?: (tab?: any) => void;
   onLockPhoneNow?: () => void;
   onGrantAllPermissions?: () => Promise<void>;
-  antiTouchArmed?: boolean;
   onOpenMemories?: () => void;
-  onOpenSkills?: () => void;
   onOpenCharacter?: () => void;
-  onSwitchToStudioMode?: () => void;
   onSelectLanguage?: (lang: Language) => void;
   userNickname?: string;
   visionMode?: 'off' | 'camera' | 'screen';
@@ -101,16 +88,10 @@ interface ZaraSciFi3DHudDashboardProps {
   onStartCamera?: () => void;
   onStopCamera?: () => void;
   onToggleScreenShare?: () => void;
-  onOpenDriverMode?: () => void;
-  onOpenFileManager?: () => void;
   batteryTelemetry?: { pct: number | null; tempC: number | null; charging: boolean | null };
   onScanSurroundings?: () => void;
-  onOpenWhatsAppDigest?: () => void;
   onOpenWhatsAppQuick?: () => void;
   onOpenMobileControl?: () => void;
-  onOpenMoodWork?: () => void;
-  onOpenProjectFiles?: () => void;
-  onOpenInstall?: () => void;
 }
 
 interface WeatherSummary {
@@ -135,8 +116,8 @@ const EMOTION_CARDS: Record<ZaraEmotionMode, { title: string; emoji: string }> =
 
 const QUICK_STARTERS = [
   { label: 'السلام علیکم زارا، آج کا موسم کیسا ہے؟', caption: 'Urdu' },
-  { label: 'ज़ारा, मेरी स्क्रीन या सवाल का जवाब बोलकर बताओ', caption: 'Hindi' },
-  { label: 'Build a complete Android app or help me today', caption: 'English' },
+  { label: 'YouTube pe koi accha sa Urdu ya Punjabi song play karo', caption: 'Music' },
+  { label: 'WhatsApp open karke message bhejne mein madad karo', caption: 'WhatsApp' },
 ];
 
 const WAVE_BAR_RATIOS = [0.22, 0.42, 0.65, 0.38, 0.85, 0.55, 0.98, 0.62, 0.45, 0.72, 0.3];
@@ -172,20 +153,15 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
   config,
   onUpdateConfig,
   onSendMessage,
-  onToggleMic,
-  onSkipVoiceTurn,
   onEnableAllFunctions,
   allFunctionsActive = false,
   isAudioCallOpen = false,
   onOpenAudioCall,
-  onStartLiveMode,
   onOpenSettings,
   onOpenNotifications,
   unreadNotificationsCount = 0,
-  isOwnerVerified = false,
   language = 'auto',
   onOpenChat,
-  onOpenAiStudio,
   onOpenMemories,
   onOpenCharacter,
   onSelectLanguage,
@@ -193,23 +169,19 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
   onStartCamera,
   onStopCamera,
   onToggleScreenShare,
-  onOpenDriverMode,
-  onOpenFileManager,
   batteryTelemetry,
   onScanSurroundings,
-  onOpenWhatsAppDigest,
   onOpenWhatsAppQuick,
   onOpenMobileControl,
-  onOpenMoodWork,
-  onOpenProjectFiles,
-  onOpenInstall,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isEnablingAll, setIsEnablingAll] = useState(false);
   const [showMobileTypeBox, setShowMobileTypeBox] = useState(false);
+  const [showYouTubeSearch, setShowYouTubeSearch] = useState(false);
+  const [youtubeSongQuery, setYoutubeSongQuery] = useState('');
   const [showMoreDrawer, setShowMoreDrawer] = useState(false);
-  const [activeNav, setActiveNav] = useState<'home' | 'memories' | 'studio' | 'chat' | 'more'>('home');
+  const [activeNav, setActiveNav] = useState<'home' | 'memories' | 'chat' | 'more'>('home');
   const [nowDate, setNowDate] = useState<Date>(() => new Date());
   const [weather, setWeather] = useState<WeatherSummary>({
     tempC: 25,
@@ -392,9 +364,10 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
     }
   };
 
-  const handleCenterCallVoiceToggle = () => {
+  const handleSingleAudioCallAction = () => {
     audioService.unlock();
-    onToggleMic();
+    audioService.playChime('activate');
+    onOpenAudioCall?.();
   };
 
   const handleWhatsAppAction = () => {
@@ -407,15 +380,28 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
     }
   };
 
-  const handlePlayMusicAction = async () => {
+  const handlePlayYouTubeSong = (customQuery?: string) => {
+    const query = (customQuery ?? youtubeSongQuery).trim();
     audioService.unlock();
     audioService.playChime('activate');
-    setIsSending(true);
-    try {
-      await onSendMessage('Zara play soothing music for me on Spotify or YouTube Music');
-    } finally {
-      setIsSending(false);
+    if (!query) {
+      setShowYouTubeSearch((prev) => !prev);
+      return;
     }
+    setShowYouTubeSearch(false);
+    setYoutubeSongQuery('');
+    launchYouTubeSong(query);
+    audioService.speakText(
+      language === 'english'
+        ? `Playing ${query} on YouTube.`
+        : `جی، یوٹیوب پر ${query} پلے کر رہی ہوں۔`,
+      {
+        language,
+        voiceName: config.voiceName || 'Zephyr',
+        loveMode: config.loveMode,
+        emotionMode: activeEmotion,
+      }
+    );
   };
 
   const handleWeatherTap = () => {
@@ -539,7 +525,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                 micVolume={micVolume}
                 visionMode={visionMode}
                 showQuickCycle={false}
-                onTapZara={handleCenterCallVoiceToggle}
+                onTapZara={handleSingleAudioCallAction}
               />
               {/* Bottom Feather Fade into ZX Verification Banner */}
               <div
@@ -617,37 +603,8 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
             <ChevronRight className="w-5 h-5 text-white/85 shrink-0" />
           </button>
 
-          {/* 4. CENTRAL "TAP TO TALK" GLASS WAVEFORM DECK */}
+          {/* 4. SINGLE AUDIO CALL WAVEFORM DECK (ONLY ONE AUDIO CALL BUTTON) */}
           <div className="relative z-20 rounded-[26px] bg-[#1a0a3d]/72 backdrop-blur-md border border-purple-300/35 shadow-[0_0_38px_rgba(168,85,247,0.34)] px-3.5 py-3.5 flex flex-col items-center">
-            {/* Direct 1-Tap Live Mode Trigger in Top-Left Corner */}
-            <button
-              type="button"
-              onClick={() => {
-                audioService.unlock();
-                audioService.playChime('activate');
-                if (onStartLiveMode) {
-                  onStartLiveMode();
-                } else {
-                  onOpenAudioCall?.();
-                }
-              }}
-              className={`absolute top-2.5 left-2.5 h-8 px-2.5 rounded-full border flex items-center gap-1.5 text-[11px] font-extrabold tracking-wide cursor-pointer transition-all active:scale-95 ${
-                isAudioCallOpen
-                  ? 'bg-emerald-500/25 border-emerald-400/80 text-emerald-200 shadow-[0_0_16px_rgba(16,185,129,0.55)]'
-                  : 'bg-gradient-to-r from-fuchsia-600/85 to-purple-700/85 hover:brightness-115 border-fuchsia-300/60 text-white shadow-[0_0_16px_rgba(217,70,239,0.45)]'
-              }`}
-              aria-label="Start Live Voice Mode with Zara"
-              title="One-tap Live Voice Mode"
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isAudioCallOpen ? 'bg-emerald-400 animate-ping' : 'bg-rose-400 animate-pulse'
-                }`}
-              />
-              <Radio className="w-3.5 h-3.5 shrink-0" />
-              <span>{isAudioCallOpen ? 'Live ON' : 'Live'}</span>
-            </button>
-
             {/* Optional Keyboard Toggle in Corner so Text Typing is 1-Tap Away */}
             <button
               type="button"
@@ -659,7 +616,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
               <Keyboard className="w-4 h-4" />
             </button>
 
-            {/* Symmetric Left Wave + Glowing Center Mic + Right Wave */}
+            {/* Symmetric Left Wave + Single Glowing Audio Call Button + Right Wave */}
             <div className="w-full flex items-center justify-center gap-3 sm:gap-4">
               {/* Left Waveform Bars */}
               <div aria-hidden="true" className="flex items-center gap-[3.5px] h-14">
@@ -670,7 +627,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                       key={`l-${idx}`}
                       style={{ height: `${hPx}px` }}
                       className={`w-[3px] rounded-full transition-all duration-100 ${
-                        isListening
+                        isAudioCallOpen || isListening
                           ? 'bg-gradient-to-t from-emerald-400 to-cyan-200'
                           : isSpeaking
                           ? 'bg-gradient-to-t from-fuchsia-400 to-white'
@@ -681,23 +638,21 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                 })}
               </div>
 
-              {/* Central Glowing Circular Mic Button */}
+              {/* ONLY ONE MAIN AUDIO CALL BUTTON */}
               <button
                 type="button"
-                onClick={handleCenterCallVoiceToggle}
-                aria-label={isCallActive ? 'Stop talking with Zara' : 'Tap to Talk with Zara'}
-                className={`relative w-[76px] h-[76px] sm:w-[82px] sm:h-[82px] rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 ${
-                  isListening
-                    ? 'bg-gradient-to-b from-emerald-400 via-teal-600 to-emerald-900 ring-4 ring-emerald-300/65 shadow-[0_0_34px_rgba(16,185,129,0.85)]'
+                onClick={handleSingleAudioCallAction}
+                aria-label={isAudioCallOpen ? 'Open Active Audio Call' : 'Audio Call Zara'}
+                className={`relative w-[78px] h-[78px] sm:w-[84px] sm:h-[84px] rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 ${
+                  isAudioCallOpen
+                    ? 'bg-gradient-to-b from-emerald-400 via-teal-600 to-emerald-900 ring-4 ring-emerald-300/70 shadow-[0_0_34px_rgba(16,185,129,0.85)]'
                     : isSpeaking
                     ? 'bg-gradient-to-b from-fuchsia-400 via-purple-600 to-indigo-900 ring-4 ring-fuchsia-300/75 shadow-[0_0_36px_rgba(232,121,249,0.9)]'
-                    : isThinking
-                    ? 'bg-gradient-to-b from-amber-400 via-orange-600 to-purple-900 ring-4 ring-amber-300/65 shadow-[0_0_32px_rgba(251,191,36,0.8)]'
-                    : 'bg-gradient-to-b from-[#d946ef] via-[#7e22ce] to-[#3b0764] ring-[3px] ring-purple-200/80 shadow-[0_0_34px_rgba(192,132,252,0.85)]'
+                    : 'bg-gradient-to-b from-emerald-400 via-fuchsia-600 to-[#3b0764] ring-[3px] ring-purple-200/85 shadow-[0_0_36px_rgba(192,132,252,0.85)]'
                 }`}
               >
-                <span className="w-[62px] h-[62px] sm:w-[68px] sm:h-[68px] rounded-full bg-gradient-to-b from-[#7c3aed]/70 to-[#2e1065]/95 border border-white/30 flex items-center justify-center shadow-inner">
-                  <Mic className="w-8 h-8 text-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.65)]" />
+                <span className="w-[64px] h-[64px] sm:w-[70px] sm:h-[70px] rounded-full bg-gradient-to-b from-[#6d28d9]/80 to-[#2e1065]/95 border border-white/30 flex items-center justify-center shadow-inner">
+                  <Phone className="w-8 h-8 text-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.65)]" />
                 </span>
               </button>
 
@@ -710,7 +665,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                       key={`r-${idx}`}
                       style={{ height: `${hPx}px` }}
                       className={`w-[3px] rounded-full transition-all duration-100 ${
-                        isListening
+                        isAudioCallOpen || isListening
                           ? 'bg-gradient-to-t from-emerald-400 to-cyan-200'
                           : isSpeaking
                           ? 'bg-gradient-to-t from-fuchsia-400 to-white'
@@ -722,43 +677,25 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
               </div>
             </div>
 
-            {/* Tap to Talk Heading & Live Status */}
+            {/* Audio Call Heading & Live Status */}
             <div className="mt-1.5 text-center space-y-0.5 max-w-full">
               <div className="flex items-center justify-center gap-2">
                 <span className="text-[17px] font-bold text-white tracking-tight">
-                  {isThinking
+                  {isAudioCallOpen
+                    ? 'Audio Call Active'
+                    : isThinking
                     ? 'Thinking...'
                     : isSpeaking
                     ? 'Zara Speaking'
-                    : isListening
-                    ? 'Listening...'
-                    : 'Tap to Talk'}
+                    : 'Audio Call Zara'}
                 </span>
-                {(isListening || isSpeaking || isThinking) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioService.unlock();
-                      if (onSkipVoiceTurn) {
-                        onSkipVoiceTurn();
-                      } else {
-                        audioService.stopAudio(true);
-                      }
-                    }}
-                    className="min-h-[26px] px-2.5 rounded-full bg-purple-500/35 hover:bg-purple-500/50 border border-purple-200/40 text-[10px] font-bold text-white flex items-center gap-1 cursor-pointer"
-                    aria-label="Skip current voice turn"
-                  >
-                    <SkipForward className="w-3 h-3" />
-                    <span>Skip</span>
-                  </button>
-                )}
               </div>
               <p className="text-xs font-medium text-purple-200/85 truncate max-w-[290px]">
                 {interimTranscript
                   ? interimTranscript
-                  : isListening
-                  ? 'Voice ON — Speak naturally anytime'
-                  : 'Speak with Zara'}
+                  : isAudioCallOpen
+                  ? 'Tap to open call controls or End Call'
+                  : '1-Tap Voice Conversation & Speaker Reply'}
               </p>
             </div>
 
@@ -814,24 +751,57 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
             )}
           </div>
 
+          {/* Inline YouTube Song Search & Play Bar */}
+          {showYouTubeSearch && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handlePlayYouTubeSong();
+              }}
+              className="relative z-20 rounded-2xl bg-[#1a0a3d]/90 border border-pink-400/45 p-2.5 flex items-center gap-2 shadow-[0_8px_24px_rgba(236,72,153,0.28)]"
+            >
+              <Play className="w-4 h-4 text-pink-400 shrink-0 ml-1" />
+              <input
+                type="text"
+                value={youtubeSongQuery}
+                onChange={(e) => setYoutubeSongQuery(e.target.value)}
+                placeholder="Type song name to search & play on YouTube..."
+                autoFocus
+                className="flex-1 min-w-0 bg-transparent text-xs text-white placeholder:text-purple-200/60 focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="min-h-[34px] px-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-600 text-white text-[11px] font-extrabold cursor-pointer shrink-0"
+              >
+                Play
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowYouTubeSearch(false)}
+                className="w-8 h-8 rounded-lg bg-white/10 text-purple-200 flex items-center justify-center cursor-pointer shrink-0"
+                aria-label="Close YouTube search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          )}
+
           {/* 5. FOUR COLORED QUICK-ACTION GLASS TILES ROW */}
           <div className="relative z-20 grid grid-cols-4 gap-2">
-            {/* Audio Call (Teal/Emerald) */}
+            {/* Play Song on YouTube (Magenta/Rose) */}
             <button
               type="button"
-              onClick={() => {
-                audioService.unlock();
-                onOpenAudioCall?.();
-              }}
-              className="min-h-[82px] p-2 rounded-[20px] bg-gradient-to-b from-emerald-400/75 via-emerald-700/80 to-teal-950/90 hover:brightness-110 border border-emerald-300/55 shadow-[0_8px_22px_rgba(16,185,129,0.28)] flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-transform active:scale-95"
+              onClick={() => handlePlayYouTubeSong()}
+              disabled={isSending}
+              className="min-h-[82px] p-2 rounded-[20px] bg-gradient-to-b from-pink-500/85 via-fuchsia-600/85 to-rose-950/90 hover:brightness-110 border border-pink-300/60 shadow-[0_8px_22px_rgba(236,72,153,0.32)] flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-transform active:scale-95"
             >
               <span className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
-                <Phone className="w-5 h-5 text-amber-300 fill-amber-300" />
+                <Play className="w-5 h-5 text-white fill-white ml-0.5" />
               </span>
               <span className="text-[11px] font-bold text-white leading-[1.15]">
-                Audio
+                YouTube
                 <br />
-                Call
+                Song
               </span>
             </button>
 
@@ -870,20 +840,23 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
               </span>
             </button>
 
-            {/* Play Music (Magenta/Rose) */}
+            {/* Phone & Social Apps (Teal/Emerald) */}
             <button
               type="button"
-              onClick={handlePlayMusicAction}
-              disabled={isSending}
-              className="min-h-[82px] p-2 rounded-[20px] bg-gradient-to-b from-pink-500/85 via-fuchsia-600/85 to-rose-950/90 hover:brightness-110 border border-pink-300/60 shadow-[0_8px_22px_rgba(236,72,153,0.32)] flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-transform active:scale-95"
+              onClick={() => {
+                audioService.unlock();
+                audioService.playChime('tap');
+                onOpenMobileControl ? onOpenMobileControl() : onOpenSettings();
+              }}
+              className="min-h-[82px] p-2 rounded-[20px] bg-gradient-to-b from-emerald-400/75 via-emerald-700/80 to-teal-950/90 hover:brightness-110 border border-emerald-300/55 shadow-[0_8px_22px_rgba(16,185,129,0.28)] flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-transform active:scale-95"
             >
               <span className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
-                <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                <Smartphone className="w-5 h-5 text-amber-200" />
               </span>
               <span className="text-[11px] font-bold text-white leading-[1.15]">
-                Play
+                Phone &amp;
                 <br />
-                Music
+                Social
               </span>
             </button>
           </div>
@@ -936,7 +909,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
               type="button"
               onClick={() => {
                 audioService.playChime('tap');
-                onOpenCharacter ? onOpenCharacter() : onOpenMoodWork?.();
+                onOpenCharacter ? onOpenCharacter() : onOpenSettings();
               }}
               className="min-h-[68px] p-2.5 rounded-2xl bg-[#190939]/78 hover:bg-[#240e50]/85 backdrop-blur-md border border-purple-300/25 flex flex-col justify-between text-left cursor-pointer transition-transform active:scale-[0.98]"
               title="Tap to change Zara Mood & Personality"
@@ -951,12 +924,12 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
             </button>
           </div>
 
-          {/* 7. CURVED 5-SLOT BOTTOM NAVIGATION BAR */}
+          {/* 7. CLEAN 4-SLOT BOTTOM NAVIGATION BAR */}
           <nav
             aria-label="Primary Navigation"
             className="fixed bottom-2.5 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-1.25rem)] max-w-[440px] lg:static lg:translate-x-0 lg:w-full lg:max-w-full lg:mt-1"
           >
-            <div className="relative h-[68px] rounded-[30px] bg-gradient-to-b from-[#230e4d]/95 to-[#13062c]/98 backdrop-blur-xl shadow-[0_-6px_30px_rgba(147,51,234,0.35),0_12px_30px_rgba(0,0,0,0.65)] border border-purple-300/30 px-2 grid grid-cols-5 items-center">
+            <div className="relative h-[64px] rounded-[30px] bg-gradient-to-b from-[#230e4d]/95 to-[#13062c]/98 backdrop-blur-xl shadow-[0_-6px_30px_rgba(147,51,234,0.35),0_12px_30px_rgba(0,0,0,0.65)] border border-purple-300/30 px-2 grid grid-cols-4 items-center">
               {/* Tab 1: Home */}
               <button
                 type="button"
@@ -994,41 +967,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                 <span className="text-[10px] font-semibold leading-none">Memories</span>
               </button>
 
-              {/* Tab 3 (CENTER ELEVATED): GLOWING PURPLE STAR -> AI STUDIO & BUILDER */}
-              <div className="relative flex flex-col items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveNav('studio');
-                    audioService.unlock();
-                    audioService.playChime('activate');
-                    onOpenAiStudio ? onOpenAiStudio('office') : onOpenSettings();
-                  }}
-                  aria-label="Open Zara AI Studio & App Builder"
-                  title="Zara AI Studio & App Builder"
-                  className="-mt-6 w-[66px] h-[66px] rounded-full bg-gradient-to-b from-[#c084fc] via-[#7e22ce] to-[#3b0764] ring-[3.5px] ring-purple-200/75 shadow-[0_0_32px_rgba(192,132,252,0.9)] flex items-center justify-center cursor-pointer transition-transform active:scale-95"
-                >
-                  {/* Radiant Gold Star SVG */}
-                  <svg aria-hidden="true" viewBox="0 0 36 36" className="w-9 h-9 drop-shadow-[0_2px_10px_rgba(250,204,21,0.85)]">
-                    <defs>
-                      <linearGradient id="zaraDockStar" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#fef9c3" />
-                        <stop offset="45%" stopColor="#fde047" />
-                        <stop offset="100%" stopColor="#f59e0b" />
-                      </linearGradient>
-                    </defs>
-                    <path
-                      d="M18 3.5l4.4 9 9.9 1.4-7.2 7 1.7 9.9L18 26.1l-8.8 4.7 1.7-9.9-7.2-7 9.9-1.4z"
-                      fill="url(#zaraDockStar)"
-                      stroke="#fffbeb"
-                      strokeWidth="1.1"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Tab 4: Chat */}
+              {/* Tab 3: Chat */}
               <button
                 type="button"
                 onClick={() => {
@@ -1044,7 +983,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                 <span className="text-[10px] font-semibold leading-none">Chat</span>
               </button>
 
-              {/* Tab 5: More */}
+              {/* Tab 4: More */}
               <button
                 type="button"
                 onClick={() => {
@@ -1070,7 +1009,7 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.85)] shrink-0" />
               <span className="text-sm font-extrabold text-white truncate">
-                Zara Conversation &amp; Live Command Center
+                Zara Personal Assistant &amp; Command Center
               </span>
               <span className="text-xs font-semibold text-purple-300 tabular-nums">
                 · {messages.length}
@@ -1090,28 +1029,6 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                   }`}
                 />
                 <span>{allFunctionsActive ? 'All Systems ON ✓' : 'Activate All'}</span>
-              </button>
-
-              {onOpenWhatsAppDigest && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    audioService.unlock();
-                    onOpenWhatsAppDigest();
-                  }}
-                  className="min-h-[34px] px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-xs font-bold text-emerald-200 cursor-pointer"
-                >
-                  30s Digest
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => onOpenAiStudio?.('devlab')}
-                className="min-h-[34px] px-3 rounded-xl bg-fuchsia-500/25 hover:bg-fuchsia-500/40 border border-fuchsia-300/40 text-xs font-bold text-fuchsia-100 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>App Builder</span>
               </button>
             </div>
           </div>
@@ -1404,38 +1321,8 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                 </div>
               </div>
 
-              {/* All Feature Shortcuts Grid */}
+              {/* Core Assistant Shortcuts Grid */}
               <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowMoreDrawer(false);
-                    onOpenAiStudio?.('devlab');
-                  }}
-                  className="min-h-[56px] p-3 rounded-2xl bg-white/8 hover:bg-white/15 border border-purple-300/25 text-left flex items-center gap-2.5 cursor-pointer"
-                >
-                  <Code2 className="w-5 h-5 text-fuchsia-300 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">AI App Builder</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">ZIP, Kotlin &amp; APK</div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowMoreDrawer(false);
-                    onOpenAiStudio?.('social');
-                  }}
-                  className="min-h-[56px] p-3 rounded-2xl bg-white/8 hover:bg-white/15 border border-purple-300/25 text-left flex items-center gap-2.5 cursor-pointer"
-                >
-                  <Globe className="w-5 h-5 text-sky-300 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">Social &amp; Vault</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">8 Platforms &amp; Keys</div>
-                  </div>
-                </button>
-
                 <button
                   type="button"
                   onClick={() => {
@@ -1478,8 +1365,8 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                 >
                   <Smartphone className="w-5 h-5 text-purple-300 shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">Mobile Hub</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">Permissions &amp; Security</div>
+                    <div className="text-xs font-bold text-white truncate">Phone &amp; Social</div>
+                    <div className="text-[10px] text-purple-200/75 truncate">Apps &amp; Permissions</div>
                   </div>
                 </button>
 
@@ -1487,14 +1374,14 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                   type="button"
                   onClick={() => {
                     setShowMoreDrawer(false);
-                    onOpenMoodWork?.();
+                    onOpenMemories ? onOpenMemories() : onOpenSettings();
                   }}
                   className="min-h-[56px] p-3 rounded-2xl bg-white/8 hover:bg-white/15 border border-purple-300/25 text-left flex items-center gap-2.5 cursor-pointer"
                 >
-                  <Heart className="w-5 h-5 text-pink-400 shrink-0" />
+                  <History className="w-5 h-5 text-fuchsia-300 shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">Mood &amp; Tasks</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">Gestures &amp; Work</div>
+                    <div className="text-xs font-bold text-white truncate">Memories</div>
+                    <div className="text-[10px] text-purple-200/75 truncate">Saved Personal Info</div>
                   </div>
                 </button>
 
@@ -1502,14 +1389,14 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                   type="button"
                   onClick={() => {
                     setShowMoreDrawer(false);
-                    onOpenDriverMode?.();
+                    handleWhatsAppAction();
                   }}
                   className="min-h-[56px] p-3 rounded-2xl bg-white/8 hover:bg-white/15 border border-purple-300/25 text-left flex items-center gap-2.5 cursor-pointer"
                 >
-                  <Compass className="w-5 h-5 text-amber-300 shrink-0" />
+                  <MessageCircle className="w-5 h-5 text-emerald-400 shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">Driver Mode</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">Hands-Free Voice</div>
+                    <div className="text-xs font-bold text-white truncate">WhatsApp</div>
+                    <div className="text-[10px] text-purple-200/75 truncate">Message &amp; Call</div>
                   </div>
                 </button>
 
@@ -1517,29 +1404,14 @@ export const ZaraSciFi3DHudDashboard: React.FC<ZaraSciFi3DHudDashboardProps> = R
                   type="button"
                   onClick={() => {
                     setShowMoreDrawer(false);
-                    onOpenFileManager?.();
+                    onOpenSettings();
                   }}
                   className="min-h-[56px] p-3 rounded-2xl bg-white/8 hover:bg-white/15 border border-purple-300/25 text-left flex items-center gap-2.5 cursor-pointer"
                 >
-                  <FolderOpen className="w-5 h-5 text-indigo-300 shrink-0" />
+                  <Globe className="w-5 h-5 text-sky-300 shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">Files &amp; Vault</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">Saved Documents</div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowMoreDrawer(false);
-                    onOpenProjectFiles ? onOpenProjectFiles() : onOpenInstall?.();
-                  }}
-                  className="min-h-[56px] p-3 rounded-2xl bg-white/8 hover:bg-white/15 border border-purple-300/25 text-left flex items-center gap-2.5 cursor-pointer"
-                >
-                  <Download className="w-5 h-5 text-emerald-300 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">Export / Install</div>
-                    <div className="text-[10px] text-purple-200/75 truncate">APK &amp; PWA</div>
+                    <div className="text-xs font-bold text-white truncate">Voice &amp; Settings</div>
+                    <div className="text-[10px] text-purple-200/75 truncate">Wake-Word &amp; Speaker</div>
                   </div>
                 </button>
               </div>

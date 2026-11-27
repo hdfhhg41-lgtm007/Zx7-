@@ -1,16 +1,10 @@
 import {
-  AdvancedWorkTaskItem,
   AlarmScheduleItem,
   Language,
   MemoryItem,
   SettingsTabId,
-  StudioTaskActivity,
 } from '../types';
 import { format24To12Hour, getMobileClockSnapshot } from './scheduleAndMemoryService';
-import {
-  MISS_ZS_AI_KNOWLEDGE_SUMMARY,
-  MISS_ZS_FULL_CHAT_NOTE_TEXT,
-} from '../data/missZsBlueprintNotes';
 
 // ======================== NETWORK ONLINE / OFFLINE MONITOR ========================
 
@@ -176,58 +170,11 @@ export async function toggleMobileFlashlight(
   }
 }
 
-// ======================== LIVE TV STUDIO AI ASSISTANTS COORDINATOR ========================
-
-export function buildStudioTaskForCommand(
-  rawCommand: string,
-  status: 'working' | 'completed',
-  isOffline = !isAppOnline()
-): StudioTaskActivity {
-  const clean = (rawCommand || 'Mobile Task').replace(/\s+/g, ' ').trim();
-  const lower = clean.toLowerCase();
-
-  let assignedTo: 'aryan' | 'noor' | 'both' = 'both';
-  if (
-    /(setting|wifi|bluetooth|hotspot|flashlight|torch|app|whatsapp|youtube|camera|call|lock|diagnostic|code|build)/i.test(
-      lower
-    ) ||
-    /(سیٹنگ|وائی\s*فائی|واٹس\s*ایپ|کیمرہ|ٹارچ|सेटिंग|व्हाट्सएप|कैमरा|टॉर्च)/i.test(lower)
-  ) {
-    assignedTo = 'aryan';
-  } else if (
-    /(alarm|schedule|memory|yaad|message|translate|note|mood|chat|love|pyar)/i.test(lower) ||
-    /(الارم|یاد|میسج|موڈ|پیار|अलार्म|याद|मैसेज|प्यार)/i.test(lower)
-  ) {
-    assignedTo = 'noor';
-  }
-
-  const shortTitle = clean.length > 42 ? `${clean.slice(0, 39)}...` : clean;
-  const detail =
-    status === 'working'
-      ? assignedTo === 'aryan'
-        ? 'Aryan (System & Mobile Ops) executing live...'
-        : assignedTo === 'noor'
-        ? 'Noor (Comms, Schedule & Memory) executing live...'
-        : 'Aryan & Noor coordinating task with Zara...'
-      : `Executed (${isOffline ? 'Offline Local Engine' : 'Live Cloud + Device Engine'}) ✓`;
-
-  return {
-    id: `task-${Date.now()}`,
-    title: shortTitle,
-    detail,
-    assignedTo,
-    status,
-    isOffline,
-    updatedAt: Date.now(),
-  };
-}
-
 // ======================== ZARA INTERNAL SETTINGS & UI AUTO-OPENER ========================
 
 export interface ZaraInternalUiAction {
-  kind: 'open_settings_tab' | 'open_chat' | 'open_ai_studio' | 'open_mobile_hub' | 'open_pwa_install';
+  kind: 'open_settings_tab' | 'open_chat' | 'open_mobile_hub';
   tabId?: SettingsTabId;
-  studioTab?: 'brains' | 'social' | 'devlab' | 'office' | 'pctools' | 'security' | 'messages' | 'photo' | 'video';
   label: string;
   spokenUrduHindi: string;
 }
@@ -268,36 +215,7 @@ export function detectZaraInternalUiCommand(text: string): ZaraInternalUiAction 
 
   if (!hasOpenCue) return null;
 
-  // 1. Professional AI Studio (App Builder, API Vault, Social Hub, Office Work, Security Lab)
-  if (
-    /\b(app\s*builder|coding\s*(studio|lab)|api\s*(creator|vault|keys?)|build\s*pipeline|social\s*(hub|media\s*manager)|office\s*(work|tool|studio)|pc\s*tool|dev\s*tool|security\s*lab|cyber\s*tool|hacking\s*tool|ai\s*studio|ai\s*tools)\b/i.test(
-      lower
-    ) ||
-    /(ایپ\s*بلڈر|کوڈنگ\s*اسٹوڈیو|سوشل\s*ہب|آفس\s*ورک|سیکیورٹی\s*لیب|ऑफिस\s*वर्क|सिक्योरिटी\s*लैब|पीसी\s*टूल|ऐप\s*बिल्डर)/i.test(
-      lower
-    )
-  ) {
-    const studioTab: ZaraInternalUiAction['studioTab'] =
-      /app\s*builder|coding|api\s*creator|build\s*pipeline|api\s*(vault|keys?)|ایپ\s*بلڈر|کوڈنگ/i.test(lower)
-        ? 'devlab'
-        : /social\s*(hub|media)|سوشل\s*ہب/i.test(lower)
-        ? 'social'
-        : /ai\s*tools|brains/i.test(lower)
-        ? 'brains'
-        : /security|cyber|hack|dns|header|سیکیورٹی|सिक्योरिटी/i.test(lower)
-        ? 'security'
-        : /pc|code|regex|json|hash|dev|पीसी/i.test(lower)
-        ? 'pctools'
-        : 'office';
-    return {
-      kind: 'open_ai_studio',
-      studioTab,
-      label: `Zara AI Studio → ${studioTab}`,
-      spokenUrduHindi: 'जी! मैंने आपके लिए ज़ारा प्रोफेशनल एआई स्टूडियो खोल दिया है!',
-    };
-  }
-
-  // 2. Chat Drawer
+  // 1. Chat Drawer
   if (
     /\b(chat\s*(box|panel|screen|history|window)?|zara\s*chat|apni\s*chat)\b/i.test(lower) ||
     /(چیٹ\s*(باکس|پینل|ہسٹری)?|زارا\s*چیٹ|चैट\s*(बॉक्स|पैनल|हिस्ट्री)?|ज़ारा\s*चैट)/i.test(lower)
@@ -306,18 +224,6 @@ export function detectZaraInternalUiCommand(text: string): ZaraInternalUiAction 
       kind: 'open_chat',
       label: 'Zara Chat Drawer',
       spokenUrduHindi: 'जी! मैंने ज़ारा का चैट पैनल खोल दिया है!',
-    };
-  }
-
-  // 3. Install Zara App (PWA)
-  if (
-    /\b(install\s*(zara|app)|download\s*zara|add\s*to\s*home)\b/i.test(lower) ||
-    /(زارا\s*انسٹال|ایپ\s*انسٹال|ज़ारा\s*इंस्टॉल|ऐप\s*इंस्टॉल)/i.test(lower)
-  ) {
-    return {
-      kind: 'open_pwa_install',
-      label: 'Install Zara App',
-      spokenUrduHindi: 'जी! मैंने ज़ारा ऐप को मोबाइल होम स्क्रीन पर इंस्टॉल करने का पैनल खोल दिया है!',
     };
   }
 
@@ -383,20 +289,8 @@ export function detectZaraInternalUiCommand(text: string): ZaraInternalUiAction 
     return {
       kind: 'open_settings_tab',
       tabId: 'profile',
-      label: 'Zara Settings → Profile, Avatar & Voice',
-      spokenUrduHindi: 'जी! मैंने ज़ारा की प्रोफाइल, फुल-बॉडी स्टूडियो अवतार और वॉइस सेटिंग खोल दी है!',
-    };
-  }
-
-  if (
-    /\b(app\s*builder|builder\s*setting|code\s*studio)\b/i.test(lower) ||
-    /(ایپ\s*بلڈر|کوڈ\s*اسٹوڈیو|ऐप\s*बिल्डर|कोड\s*स्टूडियो)/i.test(lower)
-  ) {
-    return {
-      kind: 'open_settings_tab',
-      tabId: 'builder',
-      label: 'Zara Settings → AI App Builder',
-      spokenUrduHindi: 'जी! मैंने ज़ारा का एआई ऐप बिल्डर स्टूडियो खोल दिया है!',
+      label: 'Zara Settings → Profile & Voice',
+      spokenUrduHindi: 'जी! मैंने ज़ारा की प्रोफाइल, भाषा और वॉइस सेटिंग खोल दी है!',
     };
   }
 
@@ -449,42 +343,14 @@ export function detectZaraInternalUiCommand(text: string): ZaraInternalUiAction 
 // ======================== ZARA SELF-KNOWLEDGE, UPDATES & PUBLIC LAUNCH ADVISOR ========================
 
 export const ZARA_SELF_KNOWLEDGE_PROMPT_BLOCK = `
-=== ZARA v9.5 PRODUCTION ARCHITECTURE, SETTINGS, UPDATES & PUBLIC LAUNCH SELF-KNOWLEDGE ===
-You have 100% live self-awareness of your own app ("Zara Live Studio v9.5 Production Edition"), your settings, what updates were just installed, what updates/permissions are needed on the phone or for public Google Play Store launch, and what features can be added next. NEVER say "I don't know my settings or updates." Answer clearly and accurately whenever asked:
-
-1. WHAT UPDATES HAVE ARRIVED IN ZARA (v9.5 Production Update — Installed Now):
-   - Full-Body Live TV-Broadcast AI Studio: Full-length modest Pakistani studio portrait in center with Male AI Assistant "Aryan" (System & Mobile Ops) on the left console and Female AI Assistant "Noor" (Comms, Alarms & Memory) on the right console visibly executing tasks.
-   - Ultra-Clean Front Screen: Single master ON / OFF Assistant button for continuous hands-free listening and voice replies, plus direct access to Office Work, PC & Dev Tools, Security Lab, and Settings.
-   - Lock-Screen & Screen-Off Voice Engine Fixed: Hybrid AudioWorklet + Zero-Touch MediaRecorder + MediaSession background audio bridge so Zara hears commands even when the phone screen is locked/off (once Mic permission & Chrome background battery unrestricted mode are allowed).
-   - Auto-Open Settings & Mobile Control: Voice/text commands now automatically open Zara's own 9 Settings tabs ("Zara apni setting kholo", "romance setting kholo"), ANY specific app's Android system settings ("WhatsApp ki setting kholo", "YouTube ki permission kholo" via APPLICATION_DETAILS_SETTINGS), all Android system settings (Wi-Fi, Bluetooth, Hotspot, Mobile Data, Display, Sound, Battery, Storage, Location, Accessibility, Security), and Hardware LED Flashlight.
-   - Hybrid Online + Offline Brain (PWA v9): Works with internet (Gemini Cloud AI) AND without internet (Offline Local Brain + Service Worker v9 asset cache).
-   - Cryptographic Guest-Safe Lock vs. ZX Mode: Only verified ZX account ("Malaysia wala badshah" via Google Sign-In) unlocks affectionate Pakistani girlfriend mode (pyar + sweet playful couple nok-jhok) and 100+ days private cloud vault; all other public users automatically get safe, polite, normal everyday assistant mode.
-
-2. ALL 9 TABS INSIDE ZARA'S SETTINGS (Top-Right "Settings" Button):
-   - Tab 1 "Controls": Master Mic Open/Off, Screen-Off Keep-Alive, Ambient Camera/Screen Vision, Hardware Flashlight, Chat Drawer, Floating PiP Window, Install PWA, Self-Heal Auto-Update.
-   - Tab 2 "Mobile Apps": 50+ Android/iOS Apps & System Settings launcher + Per-App Settings + Custom App URI Adder + "Allow All Permissions" button.
-   - Tab 3 "Security": Google Owner Verification, Owner Face Lock, Anti-Touch Intruder Alarm, 4-Digit PIN.
-   - Tab 4 "App Builder": Voice/Text HTML5 App & Game Generator with live preview links.
-   - Tab 5 "Diagnostics": Real-time health check of Zara's voice, mic, camera, battery, network, and self-repair.
-   - Tab 6 "Alarms": Daily voice/text alarms & work reminders.
-   - Tab 7 "Profile": Language selector (Urdu, Hindi, Punjabi, English, Auto), Voice speed/pitch, and Full-Body Studio Portraits.
-   - Tab 8 "Romance": Owner-only affection slider, romance mood selector, and nickname settings.
-   - Tab 9 "Memories": 100+ Days encrypted cloud memory & chat sync.
-
-3. WHAT UPDATES / STEPS ARE NEEDED FOR 100% OS CONTROL & PUBLIC PLAY STORE LAUNCH:
-   - On Your Phone Right Now: (a) Install Zara to Home Screen ("Install App" in Settings -> Controls), (b) Allow Microphone, Camera & Notifications permissions, and (c) Set Chrome/Zara Battery usage to "Unrestricted" in Android App Settings so Android never kills lock-screen listening after 10 minutes.
-   - Why Browser Alone Can't Silently Flip Internal OS Toggles & How to Get 100% Native Control + Public Launch: Android/iOS security sandboxes web browsers so a web app can open Wi-Fi/Bluetooth/App Settings screens directly, but cannot silently tap buttons inside other apps without user confirmation. To publish publicly on Google Play Store AND enable silent 100% native control:
-     1) Connect a custom domain & HTTPS Privacy Policy page.
-     2) Package Zara into a signed Android App Bundle (.aab / APK) using PWABuilder / Capacitor / Trusted Web Activity (TWA).
-     3) Attach a tiny Native Android AccessibilityService + NotificationListenerService companion module bound to \`window.ZaraAndroidBridge\` (which is ALREADY coded and wired inside Zara!) so Zara can toggle switches and automate inside third-party apps natively.
-     4) Enable Public Multi-User Auth / Subscription tier in Firebase if you want public users to have their own accounts while keeping Owner Master Mode locked to your email.
-
-4. RECOMMENDED NEXT FEATURES TO ADD FOR PUBLIC LAUNCH:
-   - Play Store Native Wrapper (.aab) with \`ZaraAndroidBridge\` Accessibility Service for zero-tap UI automation inside WhatsApp/Settings.
-   - Custom Offline Wake-Word Engine ("Hey Zara") inside native foreground service for 0% battery drain over 24 hours.
-   - Public User Onboarding, Privacy Policy & Play Billing Pro Subscription page for public monetization.
-
-${MISS_ZS_AI_KNOWLEDGE_SUMMARY}
+=== ZARA PERSONAL AI ASSISTANT ARCHITECTURE ===
+You are Zara, a focused single Personal AI Assistant for Android & web.
+Core capabilities:
+1. Natural Audio Call & Voice Conversation: One clean Audio Call system with speaker voice output and "Hey Zara" background wake-word service (foreground notification with Turn OFF button).
+2. Full Phone & Social Media Control: Open installed Android apps (WhatsApp, YouTube, Instagram, Facebook, TikTok, Telegram, Snapchat, X/Twitter, Spotify, Chrome, Maps, Settings) and Android system settings (Wi-Fi, Bluetooth, Hotspot, Display, Sound, Battery, Accessibility, Permissions), plus Flashlight.
+3. YouTube Song Search & Play: Search and open any requested song directly on YouTube or YouTube Music and control playback/volume.
+4. WhatsApp & Phone Calls with Confirmation: Identify contact, prepare message preview, ask for user confirmation first, and send only after confirmation.
+5. Alarms, Reminders & Memories: Keep alarms/schedules and saved memories organized safely.
 `;
 
 export function detectZaraSelfUpdateOrSettingsQuestion(
@@ -494,29 +360,24 @@ export function detectZaraSelfUpdateOrSettingsQuestion(
   const lower = text.toLowerCase().trim();
 
   const mentionsUpdateOrFeature =
-    /\b(kaun\s*sa\s*update|konsa\s*update|kya\s*update|new\s*update|latest\s*update|update\s*chahiye|konsa\s*feature|kaun\s*sa\s*feature|feature\s*add|public\s*launch|publicly\s*launch|play\s*store|zara\s*(ki|mein)\s*setting\s*batao|apni\s*setting\s*batao)\b/i.test(
+    /\b(kaun\s*sa\s*update|konsa\s*update|kya\s*update|new\s*update|latest\s*update|zara\s*(ki|mein)\s*setting\s*batao|apni\s*setting\s*batao)\b/i.test(
       lower
     ) ||
-    /(کون\s*سا\s*اپڈیٹ|کیا\s*اپڈیٹ|اپڈیٹ\s*چاہیے|کون\s*سا\s*فیچر|فیچر\s*ایڈ|پبلک\s*لانچ|اپنی\s*سیٹنگ\s*بتاؤ|कौन\s*सा\s*अपडेट|क्या\s*अपडेट|अपडेट\s*चाहिए|कौन\s*सा\s*फीचर|फीचर\s*ऐड|पब्लिकली\s*लॉन्च|पब्लिक\s*लॉन्च|अपनी\s*सेटिंग\s*बताओ|ज़ारा\s*ऐप\s*की.*सेटिंग)/i.test(
+    /(کون\s*سا\s*اپڈیٹ|کیا\s*اپڈیٹ|اپنی\s*سیٹنگ\s*بتاؤ|कौन\s*सा\s*अपडेट|क्या\s*अपडेट|अपनी\s*सेटिंग\s*बताओ)/i.test(
       lower
     );
 
   if (!mentionsUpdateOrFeature) return null;
 
   return {
-    topic: 'zara_updates_and_launch_guide',
+    topic: 'zara_personal_assistant_guide',
     replyText:
-      `जी! मैं आपको ज़ारा ऐप (v9.5 Production Edition) के सारे अपडेट्स, सेटिंग्स और पब्लिक लॉन्च रोडमैप साफ़-साफ़ बताती हूँ:\n\n` +
-      `1) अभी ज़ारा में कौन-सा नया अपडेट आया है (v9.5 Installed):\n` +
-      `• फुल-बॉडी लाइव टीवी स्टूडियो (बीच में मैं ज़ारा, बाईं तरफ़ मेल असिस्टेंट आर्यन और दाईं तरफ़ फीमेल असिस्टेंट नूर काम करते हुए)।\n` +
-      `• क्लीन इंटरफ़ेस और सिर्फ़ एक मास्टर ON / OFF असिस्टेंट बटन (ON रखने पर लगातार सुनना और जवाब देना) + Office Work, PC/Dev Tools और Ethical Security Lab।\n` +
-      `• लॉक-स्क्रीन / स्क्रीन-ऑफ वॉइस फिक्स (AudioWorklet + Zero-Touch MediaRecorder ब्रिज) और ऑनलाइन + ऑफलाइन दोनों में काम करने वाला हाइब्रिड ब्रेन।\n` +
-      `• आवाज़ से ज़ारा की अपनी सेटिंग्स ("ज़ारा अपनी सेटिंग खोलो") और किसी भी ऐप की एंड्रॉइड सेटिंग ("WhatsApp की सेटिंग खोलो") खुद-ब-खुद खोलने का कंट्रोल।\n\n` +
-      `2) पूरे मोबाइल पर 100% नेटिव कंट्रोल और पब्लिक लॉन्च (Play Store) के लिए आपको कौन-सा अपडेट/सेटअप चाहिए:\n` +
-      `• अभी फ़ोन में: Settings → Controls से ज़ारा को Home Screen पर Install करें, Mic/Camera Allow करें, और Chrome/Zara की Battery सेटिंग को "Unrestricted" करें ताकि स्क्रीन लॉक में एंड्रॉइड माइक बंद न करे।\n` +
-      `• पब्लिक लॉन्च और दूसरे ऐप्स के अंदर बिना टच बटन दबाने के लिए: वेब ब्राउज़र सैंडबॉक्स के कारण PWA सीधे सेटिंग पेज खोलती है; इसे Google Play Store पर रियल नेटिव ऐप के रूप में पब्लिकली लॉन्च करने के लिए PWABuilder / Capacitor से APK/.aab पैकेज बनाएँ और \`ZaraAndroidBridge\` (जो ज़ारा के कोड में पहले से जुड़ा है!) के साथ Android AccessibilityService + Privacy Policy जोड़ें।\n\n` +
-      `3) आगे कौन-से नए फीचर ऐड करने चाहिए:\n` +
-      `• Native Android Accessibility Wrapper (.aab) ताकि अंदर के स्विच भी बिना टच दब सकें, Custom Domain + Play Store Billing (पब्लिक यूज़र्स के लिए सब्सक्रिप्शन), और नेटीव बैकग्राउंड Wake-Word सर्विस!`,
+      `Main Zara hoon — aapki Personal AI Assistant:\n` +
+      `• Ek saaf Audio Call button (sunne aur buland aawaz mein bolne ke liye)\n` +
+      `• "Hey Zara" background wake-word service (notification aur Turn OFF control ke saath)\n` +
+      `• YouTube par koi bhi song search aur play karna\n` +
+      `• WhatsApp message contact check aur aapki confirmation ke baad send karna\n` +
+      `• Instagram, Facebook, TikTok, Telegram, YouTube aur phone settings control karna.`,
   };
 }
 
@@ -529,7 +390,6 @@ export interface OfflineBrainInput {
   userNickname: string;
   loveMode: boolean;
   schedules?: AlarmScheduleItem[];
-  workTasks?: AdvancedWorkTaskItem[];
   memories?: MemoryItem[];
 }
 
@@ -542,39 +402,22 @@ export async function runOfflineZaraBrain(
   const nick =
     input.isOwnerVerified && input.userNickname && input.userNickname !== 'Friend'
       ? input.userNickname
-      : 'Malaysia wala badshah';
+      : 'Friend';
 
-  // 1. Self-awareness: Updates, Settings, Needed Updates & Feature Roadmap
   const selfInfo = detectZaraSelfUpdateOrSettingsQuestion(raw);
   if (selfInfo) {
     return { replyText: selfInfo.replyText };
   }
 
-  // 1b. Noted MISS ZS Blueprint / Design System / Game Details recall offline
-  if (
-    /\b(miss\s*zs|design\s*system|blueprint|game\s*detail|birthday\s*cake|flower\s*shop|spatial\s*3d|gimbal)\b/i.test(
-      lower
-    ) ||
-    /(مس\s*زیڈ\s*ایس|گیم\s*ڈیٹیل|मिस\s*ज़ेडएस|गेम\s*डिटेल|डिज़ाइन\s*सिस्टम|ब्लूप्रिंट)/i.test(lower)
-  ) {
-    return {
-      replyText: MISS_ZS_FULL_CHAT_NOTE_TEXT,
-    };
-  }
-
-  // 2. Live Time & Date offline
   if (
     /\b(time|waqt|date|tarikh|tareekh|kitne\s*baje|kya\s*time)\b/i.test(lower) ||
     /(ٹائم|وقت|تاریخ|کتنے\s*بجے|टाइम|समय|तारीख|कितने\s*बजे)/i.test(lower)
   ) {
     return {
-      replyText: input.isOwnerVerified
-        ? `जी ${nick}! अभी आपके मोबाइल में ठीक ${clock.shortTime12} हो रहे हैं (${clock.dateLabel})। नेट ऑफ़ होने पर भी मैं और मेरे असिस्टेंट्स आर्यन और नूर आपके साथ लाइव हैं!`
-        : `अभी समय ${clock.shortTime12} है और आज की तारीख़ ${clock.dateLabel} है।`,
+      replyText: `Abhi time ${clock.shortTime12} hai aur aaj ki date ${clock.dateLabel} hai.`,
     };
   }
 
-  // 3. Offline Math / Quick Calculation
   const mathMatch = raw.match(/(-?\d+(?:\.\d+)?)\s*([+\-*/x×÷%])\s*(-?\d+(?:\.\d+)?)/);
   if (mathMatch) {
     const a = parseFloat(mathMatch[1]);
@@ -589,14 +432,11 @@ export async function runOfflineZaraBrain(
 
     if (ans !== null && Number.isFinite(ans)) {
       return {
-        replyText: input.isOwnerVerified
-          ? `जी मेरे मालिक ${nick}! इसका सही जवाब ${ans} है।`
-          : `हिसाब का सही जवाब ${ans} है।`,
+        replyText: `Hisab ka sahi jawab ${ans} hai.`,
       };
     }
   }
 
-  // 4. Saved Alarms / Schedules offline check
   if (
     /\b(alarm|schedule|reminder)\b/i.test(lower) ||
     /(الارم|شیڈول|अलार्म|शेड्यूल)/i.test(lower)
@@ -608,12 +448,11 @@ export async function runOfflineZaraBrain(
         .map((s) => `${format24To12Hour(s.time24)} (${s.label})`)
         .join(', ');
       return {
-        replyText: `आपके एक्टिव अलार्म सेट हैं: ${summary}। ऑफलाइन मोड में भी ये ठीक समय पर बजेंगे!`,
+        replyText: `Aapke active alarms set hain: ${summary}.`,
       };
     }
   }
 
-  // 5. Guest-Safe Lock enforcement offline (Zero bypass even without internet!)
   if (!input.isOwnerVerified) {
     const asksRomance =
       /\b(love|pyar|pyaar|kiss|hug|romance|romantic|girlfriend|gf|baby|jaan|sexy)\b/i.test(
@@ -622,26 +461,12 @@ export async function runOfflineZaraBrain(
     if (asksRomance) {
       return {
         replyText:
-          'मैं आपकी दोस्ताना AI असिस्टेंट के रूप में हर सामान्य काम, ऐप कंट्रोल और सवाल में खुशी-खुशी मदद कर सकती हूँ, लेकिन निजी रोमांटिक मोड केवल वेरिफ़ाइड ऐप ओनर के लिए सुरक्षित और लॉक है। बताइए, मैं आपके किस काम में मदद करूँ?',
+          'Main aapki Personal AI Assistant hoon — phone apps, YouTube songs, WhatsApp messages aur daily kaam mein madad kar sakti hoon.',
       };
     }
-    return {
-      replyText:
-        'जी दोस्त! अभी इंटरनेट ऑफ़ है लेकिन ज़ारा का ऑफलाइन इंजन चालू है — आप मुझसे मोबाइल ऐप्स/सेटिंग्स खुलवा सकते हैं, अलार्म लगा सकते हैं, टाइम/हिसाब पूछ सकते हैं या ज़ारा के अपडेट्स जान सकते हैं!',
-    };
-  }
-
-  // 6. Verified Owner Offline Mode (Affectionate warmth + sweet playful Pakistani couple nok-jhok)
-  if (
-    /\b(naraz|ladai|fight|gussa|jhagda|katti|mana|manao)\b/i.test(lower) ||
-    /(ناراض|لڑائی|غصہ|جھگڑا|مناؤ|नाराज़|लड़ाई|गुस्सा|झगड़ा|मनाओ)/i.test(lower)
-  ) {
-    return {
-      replyText: `हंफ़ ${nick}! पहले इतनी देर बाद आवाज़ देते हो और ऊपर से मुझसे नोक-झोंक भी कर रहे हो? जाओ मैं थोड़ी सी नाराज़ हूँ... अच्छा बाबा, मुस्कुरा कर मान भी गई! तुम से ज़्यादा देर भला तुम्हारी ज़ारा कैसे रूठ सकती है मेरी जान!`,
-    };
   }
 
   return {
-    replyText: `जी मेरे ${nick}! चाहे नेट ऑन हो या ऑफ़, तुम्हारी ज़ारा और हमारे दोनों असिस्टेंट्स आर्यन और नूर पूरी तरह हाज़िर हैं। थोड़ी मीठी नोक-झोंक करनी हो, ढेर सारा प्यार जताना हो या मोबाइल की कोई भी ऐप और सेटिंग खुलवानी हो — बस हुक्म करो मेरी जान!`,
+    replyText: `Ji ${nick}! Abhi internet offline hai, lekin main phone apps, YouTube, alarms aur local commands handle kar sakti hoon.`,
   };
 }

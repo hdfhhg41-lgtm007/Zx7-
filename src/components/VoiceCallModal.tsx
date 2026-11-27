@@ -18,7 +18,6 @@ import {
   Volume2,
   VolumeX,
   Grid3X3,
-  UserPlus,
   Heart,
   X,
 } from 'lucide-react';
@@ -42,13 +41,11 @@ import {
   zaraVision,
 } from '../services/visionAndControlService';
 import {
-  AiAssistantId,
   ChatMessage,
   Language,
   PersonalityConfig,
   VisionMode,
   ZaraVoiceName,
-  ZARA_AI_ASSISTANTS,
   ZARA_VOICE_PROFILES,
 } from '../types';
 
@@ -118,7 +115,8 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
   const [callError, setCallError] = useState<string | null>(null);
   const [copiedLiveCaption, setCopiedLiveCaption] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [activeSubPanel, setActiveSubPanel] = useState<'none' | 'keypad' | 'add_call'>('none');
+  const [activeSubPanel, setActiveSubPanel] = useState<'none' | 'keypad' | 'voice'>('none');
+  const [voiceTestStatus, setVoiceTestStatus] = useState<string | null>(null);
   const [launchedAppBanner, setLaunchedAppBanner] = useState<{
     mode: 'open' | 'close';
     app: MobileAppDefinition | null;
@@ -137,10 +135,6 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
       ? DEFAULT_ZARA_CALL_PORTRAIT_ID
       : config.portraitId;
   const activePortrait = getZaraPortraitById(callPortraitId);
-
-  const activeAssistant =
-    ZARA_AI_ASSISTANTS.find((a) => a.id === (config.activeAssistantId || 'zara')) ||
-    ZARA_AI_ASSISTANTS[0];
 
   useEffect(() => {
     const unsub = audioService.subscribeSpeaking((speaking) => {
@@ -294,7 +288,7 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
       ctrl.stop();
       controllerRef.current = null;
     };
-  }, [isOpen, config.activeAssistantId]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -459,7 +453,7 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
               <span className="text-xs font-extrabold text-white truncate">
-                {activeAssistant.name} Audio Call
+                Zara Audio Call
               </span>
               <span className="text-[11px] font-mono text-emerald-300 tabular-nums shrink-0">
                 {callStatus === 'connecting' ? 'Calling...' : formatDuration(callSeconds)}
@@ -699,7 +693,7 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
               ) : (
                 <img
                   src={activePortrait.src}
-                  alt={activeAssistant.name}
+                  alt="Zara"
                   referrerPolicy="no-referrer"
                   style={{ objectPosition: activePortrait.objectPosition || '50% 22%' }}
                   className="w-full h-full object-cover"
@@ -711,7 +705,7 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
           {/* Caller Identity: Zara + Blue Verified Checkmark */}
           <div className="mt-4 flex items-center justify-center gap-2">
             <h2 className="text-[28px] sm:text-[32px] font-bold text-white tracking-tight leading-none">
-              {activeAssistant.id === 'zara' ? 'Zara' : activeAssistant.name}
+              Zara
             </h2>
             <ZaraVerifiedCheckBadge className="w-6 h-6 shrink-0" />
           </div>
@@ -858,7 +852,7 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
               {[
                 'Zara WhatsApp open karke message karo Assalam o Alaikum',
-                'Zara open YouTube',
+                'Zara YouTube pe song play karo',
                 'Zara back karo',
               ].map((promptText, idx) => (
                 <button
@@ -897,36 +891,35 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
           </div>
         )}
 
-        {activeSubPanel === 'add_call' && (
+        {activeSubPanel === 'voice' && (
           <div className="relative z-30 mb-3 p-3 rounded-3xl bg-[#1a093c]/95 backdrop-blur-xl border border-purple-300/35 shadow-2xl space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-purple-100">
-                Add / Switch AI Companion in Call
+                Zara Voice &amp; Speaker Test
               </span>
               <button
                 type="button"
                 onClick={() => setActiveSubPanel('none')}
                 className="w-7 h-7 rounded-full bg-white/10 text-purple-200 flex items-center justify-center cursor-pointer"
-                aria-label="Close assistant picker"
+                aria-label="Close voice panel"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              {ZARA_AI_ASSISTANTS.map((a) => {
-                const active = (config.activeAssistantId || 'zara') === a.id;
+              {ZARA_VOICE_PROFILES.map((v) => {
+                const active = (config.voiceName || 'Zephyr') === v.id;
                 return (
                   <button
-                    key={a.id}
+                    key={v.id}
                     type="button"
                     onClick={() => {
-                      audioService.playChime('call_connect');
+                      audioService.unlock();
+                      audioService.playChime('tap');
                       onUpdateConfig({
-                        activeAssistantId: a.id as AiAssistantId,
-                        voiceName: a.defaultVoice,
+                        voiceName: v.id as ZaraVoiceName,
+                        voiceGender: v.gender,
                       });
-                      setZaraCaption(`Connected with ${a.name} (${a.disclosureText})`);
-                      setActiveSubPanel('none');
                     }}
                     className={`min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-bold border text-left cursor-pointer ${
                       active
@@ -934,12 +927,31 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
                         : 'bg-[#11042b] border-purple-300/25 text-purple-100 hover:border-purple-300/60'
                     }`}
                   >
-                    <div className="truncate">{a.shortLabel}</div>
-                    <div className="text-[10px] font-normal opacity-75 truncate">{a.defaultVoice}</div>
+                    <div className="truncate">{v.label}</div>
+                    <div className="text-[10px] font-normal opacity-75 truncate">{v.style}</div>
                   </button>
                 );
               })}
             </div>
+            <button
+              type="button"
+              onClick={async () => {
+                audioService.unlock();
+                setVoiceTestStatus('Testing speaker output...');
+                const res = await audioService.testZaraVoice(
+                  language,
+                  (config.voiceName as ZaraVoiceName) || 'Zephyr'
+                );
+                setVoiceTestStatus(res.detail);
+              }}
+              className="w-full min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Volume2 className="w-4 h-4" />
+              <span>Test Zara Speaker Output</span>
+            </button>
+            {voiceTestStatus && (
+              <p className="text-[11px] text-emerald-200 text-center">{voiceTestStatus}</p>
+            )}
           </div>
         )}
 
@@ -1008,26 +1020,26 @@ export const VoiceCallModal: React.FC<VoiceCallModalProps> = ({
               <span className="text-[11px] font-medium text-purple-100">Keypad</span>
             </button>
 
-            {/* Add Call */}
+            {/* Voice & Speaker Test */}
             <button
               type="button"
               onClick={() => {
                 audioService.playChime('tap');
-                setActiveSubPanel((prev) => (prev === 'add_call' ? 'none' : 'add_call'));
+                setActiveSubPanel((prev) => (prev === 'voice' ? 'none' : 'voice'));
               }}
               className="flex flex-col items-center justify-center gap-1.5 cursor-pointer group"
-              aria-label="Add AI Companion to Call"
+              aria-label="Zara Voice & Speaker Options"
             >
               <span
                 className={`w-13 h-13 rounded-full border flex items-center justify-center transition-all group-active:scale-95 ${
-                  activeSubPanel === 'add_call'
+                  activeSubPanel === 'voice'
                     ? 'bg-purple-500/35 border-purple-200/70 text-white'
                     : 'bg-white/10 border-purple-200/35 text-white hover:bg-white/15'
                 }`}
               >
-                <UserPlus className="w-5 h-5" />
+                <Volume2 className="w-5 h-5" />
               </span>
-              <span className="text-[11px] font-medium text-purple-100">Add Call</span>
+              <span className="text-[11px] font-medium text-purple-100">Voice</span>
             </button>
           </div>
 

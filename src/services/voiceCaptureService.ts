@@ -12,7 +12,6 @@ import {
   getOwnerIdTokenOrNull,
 } from './ownerAuthService';
 import { isAppOnline, runOfflineZaraBrain } from './offlineBrainService';
-import { getTierRequestHeaders } from './proTierService';
 import { resolveNativeWsUrl } from './nativeApiBridge';
 import { ChatMessage, Language, PersonalityConfig } from '../types';
 
@@ -344,6 +343,8 @@ export class DirectMicSession {
   }): Promise<boolean> {
     this.stopAndDiscard();
     try {
+      window.ZaraAndroidBridge?.pauseWakeWordTemporarily?.();
+      window.ZaraAndroidBridge?.ensureSpeakerAudioRoute?.();
       const stream = await acquireMicrophoneStreamSafe();
       const tracks = stream.getAudioTracks();
       if (tracks.length === 0 || tracks.every((t) => t.readyState !== 'live')) {
@@ -479,6 +480,10 @@ export class DirectMicSession {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
     }
+    try {
+      window.ZaraAndroidBridge?.resumeWakeWord?.();
+      window.ZaraAndroidBridge?.ensureSpeakerAudioRoute?.();
+    } catch {}
   }
 }
 
@@ -576,6 +581,10 @@ export class LivePhoneCallController {
     this.useFallbackMode = false;
     this.cb.onStatusChange('connecting');
     audioService.unlock();
+    try {
+      window.ZaraAndroidBridge?.pauseWakeWordTemporarily?.();
+      window.ZaraAndroidBridge?.ensureSpeakerAudioRoute?.();
+    } catch {}
 
     try {
       const stream = await acquireMicrophoneStreamSafe();
@@ -1026,11 +1035,10 @@ export class LivePhoneCallController {
           headers: {
             'Content-Type': 'application/json',
             ...authHeaders,
-            ...getTierRequestHeaders(),
           },
           body: JSON.stringify({
             ...payload,
-            assistantId: this.config.activeAssistantId || 'zara',
+            assistantId: 'zara',
             preferredReplyLanguage: this.config.preferredReplyLanguage || '',
             imageBase64: frame?.base64,
             visionSource: frame?.source,
@@ -1108,7 +1116,6 @@ export class LivePhoneCallController {
         userNickname: isOwnerVerified ? this.config.userNickname : 'Friend',
         loveMode: isOwnerVerified ? this.config.loveMode : false,
         schedules: [],
-        workTasks: [],
         memories: [],
       });
       if (!this.isRunning || this.fallbackTurnToken !== myToken) return;
@@ -1162,5 +1169,10 @@ export class LivePhoneCallController {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
     }
+
+    try {
+      window.ZaraAndroidBridge?.resumeWakeWord?.();
+      window.ZaraAndroidBridge?.ensureSpeakerAudioRoute?.();
+    } catch {}
   }
 }

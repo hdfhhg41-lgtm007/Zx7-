@@ -9,13 +9,7 @@ export type Language =
   | 'arabic'
   | 'auto';
 
-export type AiAssistantId =
-  | 'zara'
-  | 'mother'
-  | 'sister'
-  | 'research'
-  | 'coding'
-  | 'business';
+export type AiAssistantId = 'zara';
 
 export interface AiAssistantProfile {
   id: AiAssistantId;
@@ -32,69 +26,14 @@ export interface AiAssistantProfile {
 export const ZARA_AI_ASSISTANTS: AiAssistantProfile[] = [
   {
     id: 'zara',
-    name: 'Main Zara Assistant',
+    name: 'Zara AI Assistant',
     shortLabel: 'Zara',
-    tagline: 'Central AI Brain & Personal OS',
-    description: 'General intelligence, warm caring conversation, mobile control & orchestration.',
+    tagline: 'Personal Voice, Phone, Social & Music OS',
+    description: 'Natural voice assistant for phone control, YouTube songs, WhatsApp messaging & social apps.',
     defaultVoice: 'Zephyr',
     accentColor: 'rose',
     isAiPersona: true,
-    disclosureText: 'AI Personal Assistant (Simulated Persona)',
-  },
-  {
-    id: 'mother',
-    name: 'Mother Assistant',
-    shortLabel: 'Mother AI',
-    tagline: 'Caring & Affectionate Maternal AI',
-    description: 'Gentle, loving, protective maternal conversational AI for comfort & daily check-ins.',
-    defaultVoice: 'Aoede',
-    accentColor: 'amber',
-    isAiPersona: true,
-    disclosureText: 'Mother AI Persona — Simulated AI assistant, not a real person.',
-  },
-  {
-    id: 'sister',
-    name: 'Sister Assistant',
-    shortLabel: 'Sister AI',
-    tagline: 'Friendly, Lively & Supportive AI',
-    description: 'Warm, lighthearted, natural sisterly conversation partner.',
-    defaultVoice: 'Kore',
-    accentColor: 'pink',
-    isAiPersona: true,
-    disclosureText: 'Sister AI Persona — Simulated AI assistant, not a real person.',
-  },
-  {
-    id: 'research',
-    name: 'Research Assistant',
-    shortLabel: 'Research AI',
-    tagline: 'Live Internet News & World Affairs',
-    description: 'Real-time Google Search grounded news (Pakistan, Malaysia, World), citations & links.',
-    defaultVoice: 'Charon',
-    accentColor: 'cyan',
-    isAiPersona: true,
-    disclosureText: 'Research AI Persona — Verified live web citations.',
-  },
-  {
-    id: 'coding',
-    name: 'Coding Assistant',
-    shortLabel: 'Coding AI',
-    tagline: 'Flutter, Android, TS, Python & Debug',
-    description: 'Production code generation, project scaffolding, debugging & architecture review.',
-    defaultVoice: 'Orus',
-    accentColor: 'emerald',
-    isAiPersona: true,
-    disclosureText: 'Coding AI Persona — Developer & Debugging Specialist.',
-  },
-  {
-    id: 'business',
-    name: 'Business Assistant',
-    shortLabel: 'Business AI',
-    tagline: 'Planning, Finance & Operations',
-    description: 'Business strategy, client proposals, workflow automation & productivity planning.',
-    defaultVoice: 'Fenrir',
-    accentColor: 'sky',
-    isAiPersona: true,
-    disclosureText: 'Business AI Persona — Executive & Productivity Advisor.',
+    disclosureText: 'Zara Personal AI Assistant',
   },
 ];
 
@@ -120,13 +59,6 @@ export interface ChatMessage {
   imageUrl?: string;
   isFavorite?: boolean;
   actionTriggered?: string;
-  builtApp?: {
-    id: string;
-    slug: string;
-    title: string;
-    url: string;
-    category: string;
-  };
 }
 
 export type MemoryCategory =
@@ -280,18 +212,6 @@ export interface IntruderAlertEvent {
   locationLabel?: string;
 }
 
-export interface BuiltAppItem {
-  id: string;
-  slug: string;
-  title: string;
-  category: 'game' | 'app' | 'station' | 'utility';
-  prompt: string;
-  description: string;
-  htmlCode: string;
-  url: string;
-  createdAt: string;
-}
-
 export interface DiagnosticCheckItem {
   id: string;
   target: 'zara' | 'mobile';
@@ -314,7 +234,6 @@ export type SettingsTabId =
   | 'controls'
   | 'apps'
   | 'security'
-  | 'builder'
   | 'diagnostics'
   | 'schedule'
   | 'profile'
@@ -375,41 +294,6 @@ export interface PersonalityConfig {
   sttEngine?: SttEngineId;
   ttsEngine?: TtsEngineId;
   enabledAiEngines?: Record<string, boolean>;
-}
-
-export type DetectedUserMood =
-  | 'happy'
-  | 'romantic'
-  | 'stressed'
-  | 'sad'
-  | 'focused'
-  | 'angry'
-  | 'calm';
-
-export type DetectedHandGesture =
-  | 'thumbs_up'
-  | 'open_palm_stop'
-  | 'wave_hello'
-  | 'peace_victory'
-  | 'heart_sign'
-  | 'nod_yes'
-  | 'none';
-
-export type AdvancedWorkMode =
-  | 'whatsapp_business'
-  | 'email_proposal'
-  | 'translate'
-  | 'action_plan'
-  | 'meeting_notes'
-  | 'smart_calc';
-
-export interface AdvancedWorkTaskItem {
-  id: string;
-  title: string;
-  priority: 'urgent' | 'today' | 'normal';
-  completed: boolean;
-  aiNotes?: string;
-  createdAtMs: number;
 }
 
 export type MessagingAppTarget =
@@ -481,22 +365,6 @@ export interface SurroundingsSnapshot {
   localDateStr?: string;
   timezone?: string;
   capturedAtIso: string;
-}
-
-export type AuthorizedFileFolder = 'Work' | 'Documents' | 'Notes' | 'Code' | 'Media' | 'Other';
-
-export interface AuthorizedFileItem {
-  id: string;
-  name: string;
-  folder: AuthorizedFileFolder;
-  mimeType: string;
-  sizeBytes: number;
-  textContent?: string;
-  imagePreviewDataUrl?: string;
-  sourceKind: 'picker' | 'fs_handle' | 'created_note';
-  addedAtMs: number;
-  updatedAtMs: number;
-  aiSummary?: string;
 }
 
 export type AiBrainEngineId =
@@ -576,45 +444,6 @@ export interface AiOrchestratorTestResult {
   detail: string;
   sampleOutput?: string;
   audioBytes?: number;
-}
-
-export interface PcCompanionStatus {
-  connected: boolean;
-  hostname?: string;
-  platform?: string;
-  arch?: string;
-  authorizedRoot?: string;
-  connectedAtMs?: number;
-  lastHeartbeatMs?: number;
-  pairingTokenPreview?: string;
-  error?: string;
-}
-
-export interface PcCommandResult {
-  ok: boolean;
-  connected: boolean;
-  action: string;
-  output?: string;
-  data?: Record<string, any>;
-  error?: string;
-  executedAtMs: number;
-}
-
-export type ZaraTierPlan = 'standard' | 'pro';
-
-export interface ProTierEntitlement {
-  plan: ZaraTierPlan;
-  source: 'standard' | 'trial_7d' | 'play_billing' | 'owner_master';
-  active: boolean;
-  sku?: string;
-  expiresAtIso?: string;
-  features: {
-    priorityBrains: boolean;
-    ultraPremiumTts: boolean;
-    androidAutomation: boolean;
-    customWakeWordNative: boolean;
-    unlimitedResearchAndDev: boolean;
-  };
 }
 
 export type SocialPlatformId =
@@ -702,115 +531,6 @@ export interface ZaraUpdateReport {
   spokenReportHi: string;
 }
 
-// ======================== UNIFIED AI DEV PLATFORM, 2D/3D STUDIO & TASK AUTOMATION ========================
-
-export interface DevProjectFileNode {
-  path: string;
-  bytes: number;
-  lines: number;
-  language: string;
-  isBinary?: boolean;
-}
-
-export interface DevProjectSummary {
-  id: string;
-  name: string;
-  template: string;
-  createdAtIso: string;
-  updatedAtIso: string;
-  detectedLanguages: string[];
-  detectedFrameworks: string[];
-  entryPoints: string[];
-  missingConfigs: string[];
-  totalFiles: number;
-  totalBytes: number;
-  toolchainSupport: {
-    localNodeCheck: boolean;
-    localTypeScriptCheck: boolean;
-    localPythonCheck: boolean;
-    localGradleSdk: boolean;
-    localFlutterSdk: boolean;
-  };
-  files: DevProjectFileNode[];
-}
-
-export type DevBuildStageId =
-  | 'upload'
-  | 'analyze'
-  | 'code'
-  | 'api'
-  | 'dependencies'
-  | 'test'
-  | 'fix'
-  | 'build'
-  | 'verify'
-  | 'download';
-
-export type DevPipelineStepStatus = 'pending' | 'running' | 'passed' | 'repaired' | 'blocked' | 'skipped';
-
-export interface DevPipelineStageResult {
-  stage: DevBuildStageId;
-  label: string;
-  status: DevPipelineStepStatus;
-  detail: string;
-  durationMs: number;
-}
-
-export interface DevBackupSnapshot {
-  backupId: string;
-  reason: string;
-  createdAtIso: string;
-  fileCount: number;
-}
-
-export interface DevPipelineRunResult {
-  ok: boolean;
-  projectId: string;
-  startedAtIso: string;
-  finishedAtIso: string;
-  stages: DevPipelineStageResult[];
-  healAttempts: number;
-  repairedFiles: string[];
-  errors: string[];
-  warnings: string[];
-  honestBuildNote: string;
-  downloadZipUrl: string;
-  termuxBuildReady: boolean;
-  githubActionsReady: boolean;
-  backupCreated?: DevBackupSnapshot | null;
-}
-
-export type ApiVaultProviderId =
-  | 'gemini'
-  | 'openai'
-  | 'groq'
-  | 'huggingface'
-  | 'ollama'
-  | 'openrouter'
-  | 'elevenlabs'
-  | 'replicate'
-  | 'github'
-  | 'telegram'
-  | 'youtube'
-  | 'twitter'
-  | 'meta_fb'
-  | 'meta_ig';
-
-export interface ApiVaultProviderStatus {
-  provider: ApiVaultProviderId;
-  name: string;
-  category: 'llm' | 'voice' | 'image_video' | 'social' | 'devtools';
-  configured: boolean;
-  source: 'env' | 'vault' | 'none';
-  maskedPreview: string;
-  pricingTier: 'free_tier' | 'free_local' | 'freemium' | 'paid';
-  freeLimitsNote: string;
-  freeAlternative: string;
-  docsHint: string;
-  lastTestOk?: boolean;
-  lastTestMessage?: string;
-}
-
 export type MusicControlAction =
   | 'play'
   | 'pause'
@@ -825,35 +545,4 @@ export interface MusicControlCommand {
   action: MusicControlAction;
   query?: string;
   provider?: 'yt_music' | 'spotify' | 'youtube' | 'system';
-}
-
-export interface AutonomousTaskStep {
-  id: string;
-  stepNumber: number;
-  title: string;
-  tool:
-    | 'dev_create'
-    | 'dev_api'
-    | 'dev_heal'
-    | 'social_draft'
-    | 'music_control'
-    | 'phone_control'
-    | 'whatsapp_action'
-    | 'research'
-    | 'chat_answer';
-  status: 'completed' | 'needs_device_or_confirm' | 'blocked' | 'failed';
-  retries: number;
-  detail: string;
-  requiresConfirmation?: boolean;
-  clientAction?: Record<string, any>;
-}
-
-export interface AutonomousTaskPlan {
-  ok: boolean;
-  goal: string;
-  language: string;
-  summary: string;
-  steps: AutonomousTaskStep[];
-  completedCount: number;
-  blockedOrPendingCount: number;
 }
