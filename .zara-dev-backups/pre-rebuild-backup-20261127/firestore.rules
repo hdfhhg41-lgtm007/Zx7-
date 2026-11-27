@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model (Synchronized with firebase-blueprint.json)
+    // ===============================================================
+    //
+    // Collection: /ownerVault/{userId}
+    // Document ID: {userId} (must match request.auth.uid)
+    // Fields:
+    //   - ownerUid: string (required, length 1..128, immutable, must equal request.auth.uid)
+    //   - ownerEmail: string (required, length 5..120, immutable, matches ^hdfhhg41@gmail\.com$)
+    //   - updatedAt: string (required, length 10..64, ISO timestamp)
+    //   - messagesJson: string (required, length 2..600000, serialized private chat messages)
+    //   - memoriesJson: string (required, length 2..250000, serialized private memories)
+    //
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSoleVerifiedAppOwner(userId) {
+      return isAuthenticated()
+        && request.auth.uid == userId
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('^hdfhhg41@gmail\\.com$');
+    }
+
+    function hasExactOwnerVaultKeys(data) {
+      return data.keys().hasAll([
+          'ownerUid',
+          'ownerEmail',
+          'updatedAt',
+          'messagesJson',
+          'memoriesJson'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid',
+          'ownerEmail',
+          'updatedAt',
+          'messagesJson',
+          'memoriesJson'
+        ]);
+    }
+
+    function isValidOwnerVaultPayload(data, userId) {
+      return hasExactOwnerVaultKeys(data)
+        && data.ownerUid is string
+        && data.ownerUid == userId
+        && data.ownerUid.size() >= 1
+        && data.ownerUid.size() <= 128
+        && data.ownerEmail is string
+        && data.ownerEmail.size() >= 5
+        && data.ownerEmail.size() <= 120
+        && data.ownerEmail.matches('^hdfhhg41@gmail\\.com$')
+        && data.updatedAt is string
+        && data.updatedAt.size() >= 10
+        && data.updatedAt.size() <= 64
+        && data.messagesJson is string
+        && data.messagesJson.size() >= 2
+        && data.messagesJson.size() <= 600000
+        && data.memoriesJson is string
+        && data.memoriesJson.size() >= 2
+        && data.memoriesJson.size() <= 250000;
+    }
+
+    match /ownerVault/{userId} {
+      allow get: if isSoleVerifiedAppOwner(userId);
+      allow list: if false;
+      allow create: if isSoleVerifiedAppOwner(userId)
+        && isValidOwnerVaultPayload(request.resource.data, userId);
+      allow update: if isSoleVerifiedAppOwner(userId)
+        && isValidOwnerVaultPayload(request.resource.data, userId)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.ownerEmail == resource.data.ownerEmail;
+      allow delete: if isSoleVerifiedAppOwner(userId);
+    }
+
+    // Default deny on all other paths (including /test/connection probe)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

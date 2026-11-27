@@ -1,0 +1,85 @@
+name: Build Zara AI Android APK & Play Store AAB
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/sync-android-assets.mjs'
+      - 'index.html'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'android/**'
+      - '.github/workflows/build-android-apk.yml'
+
+jobs:
+  build-android:
+    name: Build Signed APK & AAB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Build & Bundle Native Android Web Assets
+        run: |
+          npm install
+          npm run build:android
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+
+      - name: Generate release keystore if absent
+        working-directory: android
+        run: |
+          if [ ! -f "app/zara-release.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore app/zara-release.keystore \
+              -alias "${{ secrets.ZARA_KEY_ALIAS || 'zara_release' }}" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "${{ secrets.ZARA_KEYSTORE_PASSWORD || 'zara_ai_2026_secure' }}" \
+              -keypass "${{ secrets.ZARA_KEY_PASSWORD || 'zara_ai_2026_secure' }}" \
+              -dname "CN=Zara AI, OU=AI Studio, O=Zara Systems, L=Kuala Lumpur, ST=Federal Territory, C=MY"
+          fi
+
+      - name: Build Debug & Signed Release APK + Play Store AAB
+        working-directory: android
+        env:
+          ZARA_KEY_ALIAS: ${{ secrets.ZARA_KEY_ALIAS || 'zara_release' }}
+          ZARA_KEYSTORE_PASSWORD: ${{ secrets.ZARA_KEYSTORE_PASSWORD || 'zara_ai_2026_secure' }}
+          ZARA_KEY_PASSWORD: ${{ secrets.ZARA_KEY_PASSWORD || 'zara_ai_2026_secure' }}
+        run: |
+          gradle --no-daemon --max-workers=2 assembleDebug
+          gradle --no-daemon --max-workers=2 assembleRelease
+          gradle --no-daemon --max-workers=2 bundleRelease
+          ls -lh app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release.apk app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload Zara Android APK & AAB Artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: zara-android-builds
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab

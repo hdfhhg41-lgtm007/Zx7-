@@ -1,0 +1,508 @@
+<!DOCTYPE html><html lang="en" class="dark"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MISS ZS - Realistic Human-Like Female AI Companion</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#9333EA',
+        'on-primary': '#FFFFFF',
+        'primary-container': '#3B0764',
+        'on-primary-container': '#E9D5FF',
+        'accent': '#A855F7',
+        'secondary': '#8B5CF6',
+        'on-secondary': '#0F0F0F',
+        'tertiary': '#C084FC',
+        'on-tertiary': '#1E0B36',
+        'surface': '#0B0813',
+        'on-surface': '#F3E8FF',
+        'surface-variant': '#161129',
+        'on-surface-variant': '#D8B4FE',
+        'surface-container': '#1E1735',
+        'surface-container-high': '#281F45',
+        'outline': '#4C1D95',
+        'outline-variant': '#2E1065',
+        'success': '#10B981',
+        'on-success': '#393939',
+        'warning': '#F59E0B',
+        'on-warning': '#000000',
+        'error': '#EF4444',
+        'on-error': '#1C1C1C',
+        'battery-green': '#22C55E',
+        'battery-charging': '#38BDF8',
+        'urdu-badge': '#EC4899',
+        'light-primary': '#6B21A8',
+        'light-on-primary': '#FFFFFF',
+        'light-surface': '#FAF5FF',
+        'light-on-surface': '#1E1735',
+        'dark-primary': '#C084FC',
+        'dark-on-primary': '#3B0764',
+        'dark-surface': '#0B0813',
+        'dark-on-surface': '#F3E8FF',
+      },
+      borderRadius: {
+        'sm': '6px',
+        'DEFAULT': '12px',
+        'md': '16px',
+        'lg': '20px',
+        'xl': '28px',
+        'full': '9999px',
+      },
+      spacing: {
+        'gutter-xs': '4px',
+        'gutter-sm': '8px',
+        'gutter-md': '12px',
+        'gutter-lg': '16px',
+        'gutter-xl': '24px',
+        'section': '32px',
+        'page-margin': '16px',
+      },
+      fontFamily: {
+        'display': ['"Archivo"', 'sans-serif'],
+        'headline': ['"Archivo"', 'sans-serif'],
+        'title': ['"Commissioner"', 'sans-serif'],
+        'body': ['"Commissioner"', 'sans-serif'],
+        'label': ['"Commissioner"', 'sans-serif'],
+        'code': ['"Source Code Pro"', 'monospace'],
+      },
+      fontSize: {
+        'display-lg': ['40px', { lineHeight: '48px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'display-lg-mobile': ['30px', { lineHeight: '38px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg': ['34px', { lineHeight: '42px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg-mobile': ['26px', { lineHeight: '34px', letterSpacing: '0px', fontWeight: '700' }],
+        'headline-md': ['22px', { lineHeight: '28px', fontWeight: '600' }],
+        'headline-sm': ['18px', { lineHeight: '24px', fontWeight: '600' }],
+        'title-lg': ['20px', { lineHeight: '26px', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '22px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+        'body-sm': ['12px', { lineHeight: '16px', fontWeight: '400' }],
+        'label-lg': ['14px', { lineHeight: '20px', letterSpacing: '0.1px', fontWeight: '500' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.2px', fontWeight: '500' }],
+        'label-sm': ['11px', { lineHeight: '14px', letterSpacing: '0.3px', fontWeight: '600' }],
+        'code-sm': ['12px', { lineHeight: '16px', fontWeight: '500' }],
+      },
+      transitionDuration: {
+        'state-change': '150ms',
+        'surface-enter': '250ms',
+        'surface-exit': '180ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'surface-enter': '0ms',
+        'surface-exit': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'ease-out',
+        'surface-enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'surface-exit': 'cubic-bezier(0.3, 0, 1, 1)',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&amp;family=Commissioner:wght@400;500;600&amp;family=Source+Code+Pro:wght@500&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>
+    .material-symbols-outlined { display: inline-block; width: 1em; height: 1em; line-height: 1 !important; box-sizing: content-box; overflow: hidden; white-space: nowrap; direction: ltr; vertical-align: middle; }
+    
+    .glass-3d {
+      background: linear-gradient(135deg, rgba(30, 23, 53, 0.88) 0%, rgba(18, 14, 34, 0.96) 100%);
+      box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(236, 72, 153, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(16px);
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+    }
+    .glass-3d:hover {
+      transform: perspective(1000px) translateZ(4px) translateY(-2px);
+      box-shadow: 0 16px 32px -6px rgba(236, 72, 153, 0.4), 0 0 0 1px rgba(244, 114, 182, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+    }
+
+    @keyframes float-companion {
+      0%, 100% { transform: translateY(0px) rotateY(-2deg); }
+      50% { transform: translateY(-6px) rotateY(2deg); }
+    }
+    .floating-companion { animation: float-companion 4.5s ease-in-out infinite; }
+
+    /* Interactive Candle Flame Flicker */
+    @keyframes flame-flicker {
+      0%, 100% { transform: scale(1) rotate(-1deg); opacity: 0.95; }
+      25% { transform: scale(1.08, 0.94) rotate(1deg); opacity: 1; }
+      50% { transform: scale(0.96, 1.05) rotate(-2deg); opacity: 0.88; }
+      75% { transform: scale(1.04, 1.02) rotate(2deg); opacity: 1; }
+    }
+    .candle-flame { animation: flame-flicker 0.6s ease-in-out infinite alternate; transform-origin: bottom center; }
+  </style>
+</head>
+<body class="bg-surface text-on-surface min-h-[884px] flex flex-col font-body antialiased relative pb-28 overflow-x-hidden selection:bg-pink-600 selection:text-white" data-stitch-vh="min-h-[884px]===min-h-screen">
+
+  <!-- Ambient 3D Volumetric Lighting -->
+  <div class="fixed inset-0 pointer-events-none z-0">
+    <div class="absolute -top-20 right-0 w-80 h-80 bg-pink-600/20 rounded-full blur-[100px]"></div>
+    <div class="absolute top-1/2 -left-20 w-80 h-80 bg-purple-700/20 rounded-full blur-[110px]"></div>
+    <div class="absolute bottom-10 right-10 w-64 h-64 bg-accent/15 rounded-full blur-[90px]"></div>
+  </div>
+
+  <!-- Android System Status Bar -->
+  <div class="px-6 pt-3 pb-2 flex items-center justify-between text-body-sm font-code text-on-surface-variant z-30 relative">
+    <span class="font-semibold">10:46 AM</span>
+    <div class="flex items-center gap-2">
+      <span class="flex items-center gap-1 text-battery-green bg-surface-container px-2 py-0.5 rounded-full border border-outline-variant">
+        <span class="material-symbols-outlined text-[14px]">battery_5_bar</span>
+        <span class="text-on-surface font-semibold text-[11px]">92%</span>
+      </span>
+      <span class="material-symbols-outlined text-[16px]">wifi</span>
+      <span class="material-symbols-outlined text-[16px]">signal_cellular_4_bar</span>
+    </div>
+  </div>
+
+  <!-- Header with Real-World Awareness & Voice Dialect Indicators -->
+  <header class="px-4 py-2.5 bg-surface-variant/90 border-b border-outline/30 sticky top-0 z-20 backdrop-blur-md">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../main-home/MainHome.html" class="p-1 rounded-full text-on-surface-variant hover:text-white">
+          <span class="material-symbols-outlined text-[24px]">arrow_back</span>
+        </a>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-headline text-headline-sm font-bold text-on-surface">Miss ZS</h1>
+            <span class="px-2 py-0.2 rounded-full bg-pink-950 text-pink-300 text-[10px] font-label font-bold uppercase border border-pink-700/50">Human Companion</span>
+          </div>
+          <p class="text-[11px] text-pink-200/90 font-medium">Natural Voice • Urdu, Punjabi, English &amp; Hindi</p>
+        </div>
+      </div>
+      
+      <!-- Voice Mode Button -->
+      <a href="../voice-control/VoiceControl.html" class="p-2 rounded-xl bg-pink-950/70 border border-pink-700/50 text-pink-400 shadow-md hover:scale-105 transition-transform" title="Live Spoken Conversation">
+        <span class="material-symbols-outlined text-[20px] animate-pulse">record_voice_over</span>
+      </a>
+    </div>
+
+    <!-- Real-World Sensory Awareness Pill (Section 4: Optional camera, mic, location permissions) -->
+    <div class="flex items-center justify-between mt-2 pt-2 border-t border-outline-variant/40 text-[11px]">
+      <div class="flex items-center gap-2 text-on-surface-variant">
+        <span class="material-symbols-outlined text-battery-green text-[15px]">location_on</span>
+        <span>Lahore, PK (Gulberg)</span>
+        <span class="text-outline">•</span>
+        <span class="text-tertiary">Sunny 26°C</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="px-2 py-0.5 rounded bg-surface-container text-emerald-400 font-semibold border border-outline-variant flex items-center gap-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>Perception Active</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Companion Stage -->
+  <main class="flex-1 px-4 py-3 flex flex-col gap-4 relative z-10">
+
+    <!-- 1. Natural Female Personality & Emotional Intelligence Card (Section 1 & 3) -->
+    <section class="glass-3d rounded-3xl p-5 flex flex-col items-center text-center relative overflow-hidden">
+      <!-- 3D Holographic Female Avatar -->
+      <div class="relative my-1 floating-companion">
+        <div class="w-36 h-36 rounded-full p-1.5 bg-gradient-to-tr from-pink-500 via-purple-500 to-tertiary shadow-[0_0_40px_rgba(236,72,153,0.6),inset_0_2px_4px_rgba(255,255,255,0.4)] flex items-center justify-center">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrCmVmuEPcC56V7wvB9JDJh1pw7KjsWb7p5SedmzMou3gOSZFg5oA6n41mZHPCgF4oSSRD-tzmRw-donhdy31QZQT_dwZ0bKD3CX7fab4VtaUEFcXPhSRUSCTyUzUnRvBnbn2NO_Hs9ryeb79uQyzZwhkXc-x26Du_jkzpT5xSJ3Ggjb-6OQhMJPesKId94qBiCt8FlhrRlVGelvudB6yFPebuJw6pT8xxmtl74L5ihuFZiEcEU0wxt9F1TXbw" alt="MISS ZS Female Companion" class="w-full h-full object-cover rounded-full border-2 border-surface">
+        </div>
+        <!-- Dynamic Emotional Badge -->
+        <span id="companion-mood-tag" class="absolute -bottom-1 right-0 px-3 py-0.5 rounded-full bg-gradient-to-r from-pink-600 to-accent text-white text-[10px] font-label font-bold uppercase shadow-lg border border-white/20">
+          Warm &amp; Affectionate
+        </span>
+      </div>
+
+      <div class="mt-2">
+        <h2 class="font-headline text-title-lg font-bold text-on-surface">Miss ZS</h2>
+        <p class="text-body-sm text-pink-200 mt-1 max-w-[310px] leading-relaxed italic">
+          &#34;Aap kitne dino baad aaye hain! Main kab se intezar kar rahi thi. Bataiye na, office ka project kaisa raha?&#34;
+        </p>
+      </div>
+
+      <!-- Spoken Audio Snippet Control -->
+      <div class="w-full mt-3 p-2.5 rounded-xl bg-surface-container/80 border border-outline flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <button class="w-8 h-8 rounded-full bg-pink-600 text-white flex items-center justify-center shadow-md active:scale-95">
+            <span class="material-symbols-outlined text-[18px]">play_arrow</span>
+          </button>
+          <div class="text-left">
+            <span class="text-[11px] font-bold text-on-surface block">Voice Reply: Pakistani Female</span>
+            <span class="text-[10px] text-on-surface-variant">Emotion: Genuine Warmth • 0:18</span>
+          </div>
+        </div>
+        <span class="text-[10px] font-code text-pink-300">Natural Flow</span>
+      </div>
+    </section>
+
+    <!-- 2. Emotional Intelligence & Empathy Spectrum (Section 1 & 3: happiness, sadness, love, excitement, playful anger, disappointment) -->
+    <section class="glass-3d rounded-2xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-headline text-title-md font-bold text-on-surface flex items-center gap-2">
+          <span class="material-symbols-outlined text-pink-400 text-[20px]">mood</span>
+          <span>Emotional Resonance &amp; Moods</span>
+        </h3>
+        <span class="text-[11px] text-pink-300 font-label">Authentic Expressions</span>
+      </div>
+      <p class="text-body-sm text-on-surface-variant mb-3">
+        MISS ZS responds dynamically to your feelings instead of giving scripted replies:
+      </p>
+
+      <div class="grid grid-cols-3 gap-2">
+        <!-- Happiness -->
+        <button class="p-2.5 rounded-xl bg-surface-variant/80 border border-pink-500/40 hover:border-pink-400 text-center flex flex-col items-center gap-1 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[22px] text-pink-400">sentiment_very_satisfied</span>
+          <span class="text-label-sm font-bold text-on-surface">Happiness</span>
+          <span class="text-[9px] text-on-surface-variant">Celebratory</span>
+        </button>
+
+        <!-- Empathy & Love -->
+        <button class="p-2.5 rounded-xl bg-surface-variant/80 border border-pink-500/40 hover:border-pink-400 text-center flex flex-col items-center gap-1 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[22px] text-pink-500">favorite</span>
+          <span class="text-label-sm font-bold text-on-surface">Care &amp; Love</span>
+          <span class="text-[9px] text-on-surface-variant">Deep Empathy</span>
+        </button>
+
+        <!-- Excitement -->
+        <button class="p-2.5 rounded-xl bg-surface-variant/80 border border-outline-variant hover:border-pink-400 text-center flex flex-col items-center gap-1 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[22px] text-accent">auto_awesome</span>
+          <span class="text-label-sm font-bold text-on-surface">Excitement</span>
+          <span class="text-[9px] text-on-surface-variant">High Energy</span>
+        </button>
+
+        <!-- Playful Anger -->
+        <button class="p-2.5 rounded-xl bg-surface-variant/80 border border-outline-variant hover:border-pink-400 text-center flex flex-col items-center gap-1 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[22px] text-amber-400">sentiment_dissatisfied</span>
+          <span class="text-label-sm font-bold text-on-surface">Playful Anger</span>
+          <span class="text-[9px] text-on-surface-variant">&#34;Aap ne call nahi ki!&#34;</span>
+        </button>
+
+        <!-- Comfort / Sadness -->
+        <button class="p-2.5 rounded-xl bg-surface-variant/80 border border-outline-variant hover:border-pink-400 text-center flex flex-col items-center gap-1 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[22px] text-indigo-400">volunteer_activism</span>
+          <span class="text-label-sm font-bold text-on-surface">Comfort</span>
+          <span class="text-[9px] text-on-surface-variant">When you&#39;re low</span>
+        </button>
+
+        <!-- Disappointment -->
+        <button class="p-2.5 rounded-xl bg-surface-variant/80 border border-outline-variant hover:border-pink-400 text-center flex flex-col items-center gap-1 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[22px] text-pink-300">heart_broken</span>
+          <span class="text-label-sm font-bold text-on-surface">Disappointment</span>
+          <span class="text-[9px] text-on-surface-variant">Gentle &amp; caring</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 3. Interactive Activities: Virtual Birthday Celebration & Flower Search (Section 5) -->
+    <section class="glass-3d rounded-2xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-headline text-title-md font-bold text-on-surface flex items-center gap-2">
+          <span class="material-symbols-outlined text-accent text-[20px]">cake</span>
+          <span>Interactive Shared Celebrations</span>
+        </h3>
+        <span class="px-2 py-0.5 rounded-full bg-accent/20 text-accent text-[10px] font-bold">Special Moments</span>
+      </div>
+
+      <!-- Virtual Birthday Cake Interactive Widget (Requirement: Generate digital birthday cake, interactive candles & voice celebration) -->
+      <div class="p-3.5 rounded-2xl bg-gradient-to-b from-purple-950/60 to-surface-variant border border-accent/40 shadow-inner flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h4 class="font-title text-label-lg font-bold text-on-surface">Interactive Virtual Birthday Cake</h4>
+            <span class="text-[11px] text-pink-300">Tap candle to blow it out together with MISS ZS!</span>
+          </div>
+          <span class="px-2 py-0.5 rounded-full bg-pink-950 text-pink-300 text-[10px] font-bold">Nov 18th</span>
+        </div>
+
+        <div class="relative w-full h-40 rounded-xl overflow-hidden flex items-center justify-center bg-black/40 border border-outline-variant">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrBvTWGAZYDZYG8_K4coZ7AYgAeonrdVN7CkIFfJGaGO2xR1JpgRK10DUo6Roq1yY4LoP3ET7cgZpEVuCZ_PHkWjMbpFJVzdj657VRVEtzqv_MGG3M9koMBrpL15xl9Fx1_am32-5XqI2_9Rup4lF0jTpKiWjw2pyY9iOKFGmR_W45Y2QzQELDBwN4Pb3n1V7VLyUTeN0wIVFK5i2ito24icQyRlRYIUyFcvSTs70c8h2y5yLEchCIFVhC9C" alt="3D Interactive Birthday Cake" class="w-full h-full object-cover">
+          <!-- Animated Interactive Sparkler Candle Overlay -->
+          <div class="absolute top-4 flex flex-col items-center cursor-pointer group" title="Tap to blow candle with sound!">
+            <span class="w-4 h-6 bg-gradient-to-t from-amber-500 via-yellow-300 to-white rounded-full candle-flame shadow-[0_0_15px_#F59E0B]"></span>
+            <span class="w-1.5 h-6 bg-purple-300 rounded-sm"></span>
+            <span class="px-2 py-0.5 rounded-full bg-surface/90 border border-accent text-[10px] text-tertiary font-bold mt-1 shadow-md">
+              Tap to Blow Candle 🎂
+            </span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-1">
+          <p class="text-body-sm text-on-surface-variant italic">
+            &#34;Happy Birthday Zainab! May all your startup dreams come true this year!&#34;
+          </p>
+          <button class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-accent text-white font-title text-[11px] font-bold flex items-center gap-1 shadow-sm active:scale-95">
+            <span class="material-symbols-outlined text-[14px]">celebration</span>
+            <span>Sing Song</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Flower Delivery / Nearby Flower Shops Finder (Requirement: If owner asks for flowers, find nearby flowers or flower shops) -->
+      <div class="mt-3 p-3.5 rounded-2xl bg-surface-variant/80 border border-outline flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-xl overflow-hidden border border-pink-500/40 shrink-0">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrBzk8kDeQe6caDTHnCfyLWkxoZTOlGrKKKAsZX5CICn3VpJF_tQk-MJLrCiOAzxpBVoT-4P5YfwSfg0qbhxNbuC65wGw9Eb-c4lzRM4aoEtzWCv4rrZip4z-jvUjDV4pwvKzGx8-7uvZtn5et38zn3s_LUOtfqddwF61nRqz3W24BupUttSN1bJpqcBAMH5irAfwfOkIS0xdHcdLdLTCbeVtOUq7I9nd3vwsrvUFI32RTB_ymEjCH3YGEaT" alt="Fresh Flowers" class="w-full h-full object-cover">
+          </div>
+          <div>
+            <h4 class="font-title text-label-md font-bold text-on-surface">Looking for Fresh Flowers?</h4>
+            <p class="text-[11px] text-on-surface-variant">
+              &#34;Main ne Gulberg &amp; DHA Lahore mein 4 top flower shops dhund li hain!&#34;
+            </p>
+          </div>
+        </div>
+        <button class="px-3 py-2 rounded-xl bg-pink-950 text-pink-300 border border-pink-700/50 hover:bg-pink-900 text-label-sm font-semibold flex items-center gap-1 shrink-0">
+          <span class="material-symbols-outlined text-[16px]">store</span>
+          <span>View Shops</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 4. Long-Term Personal Memory Vault & Management (Section 2: Remember conversations, dates, delete memories) -->
+    <section class="glass-3d rounded-2xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-headline text-title-md font-bold text-on-surface flex items-center gap-2">
+          <span class="material-symbols-outlined text-secondary text-[20px]">psychology</span>
+          <span>Long-Term Personal Memory</span>
+        </h3>
+        <span class="text-[11px] text-battery-green font-semibold">Owner Verified</span>
+      </div>
+      <p class="text-body-sm text-on-surface-variant mb-3">
+        Memories recalled naturally during conversations. You have full control to inspect or delete:
+      </p>
+
+      <div class="flex flex-col gap-2">
+        <!-- Memory 1: Birthday -->
+        <div class="p-3 rounded-xl bg-surface-variant/90 border border-outline-variant flex items-center justify-between">
+          <div class="flex items-start gap-2.5">
+            <span class="material-symbols-outlined text-pink-400 text-[18px] mt-0.5">cake</span>
+            <div>
+              <span class="text-label-sm font-bold text-on-surface">Birthday &amp; Milestone</span>
+              <p class="text-[11px] text-on-surface-variant">November 18th • Loves chocolate truffle &amp; card notes</p>
+            </div>
+          </div>
+          <button class="text-on-surface-variant hover:text-error p-1" title="Delete Memory">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>
+
+        <!-- Memory 2: Personal Habit -->
+        <div class="p-3 rounded-xl bg-surface-variant/90 border border-outline-variant flex items-center justify-between">
+          <div class="flex items-start gap-2.5">
+            <span class="material-symbols-outlined text-amber-400 text-[18px] mt-0.5">local_cafe</span>
+            <div>
+              <span class="text-label-sm font-bold text-on-surface">Evening Habit</span>
+              <p class="text-[11px] text-on-surface-variant">Prefers Cardamom tea at 5:00 PM while reviewing code</p>
+            </div>
+          </div>
+          <button class="text-on-surface-variant hover:text-error p-1" title="Delete Memory">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>
+
+        <!-- Memory 3: Shared Story -->
+        <div class="p-3 rounded-xl bg-surface-variant/90 border border-outline-variant flex items-center justify-between">
+          <div class="flex items-start gap-2.5">
+            <span class="material-symbols-outlined text-secondary text-[18px] mt-0.5">favorite</span>
+            <div>
+              <span class="text-label-sm font-bold text-on-surface">Shared Story</span>
+              <p class="text-[11px] text-on-surface-variant">Talked about moving to Islamabad tech corridor next spring</p>
+            </div>
+          </div>
+          <button class="text-on-surface-variant hover:text-error p-1" title="Delete Memory">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Voice-Controlled In-App Navigation (Section 6: Open Message Center, Settings, Chat History) -->
+    <section class="glass-3d rounded-2xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-headline text-title-md font-bold text-on-surface flex items-center gap-2">
+          <span class="material-symbols-outlined text-accent text-[20px]">assistant_navigation</span>
+          <span>Voice-Controlled App Actions</span>
+        </h3>
+        <span class="text-[11px] text-tertiary">Natural Voice Link</span>
+      </div>
+      <p class="text-body-sm text-on-surface-variant mb-3">
+        Say to MISS ZS: &#34;Open Message Center&#34;, &#34;Show Battery&#34;, or &#34;Open Settings&#34;:
+      </p>
+
+      <div class="grid grid-cols-2 gap-2">
+        <a href="../whatsapp-messages/WhatsAppMessages.html" class="p-2.5 rounded-xl bg-surface-variant hover:bg-surface-container-high border border-outline flex items-center gap-2 transition-colors">
+          <span class="material-symbols-outlined text-emerald-400 text-[18px]">forum</span>
+          <span class="text-[12px] font-semibold text-on-surface">Message Center</span>
+        </a>
+
+        <a href="../ai-conversation/AIConversation.html" class="p-2.5 rounded-xl bg-surface-variant hover:bg-surface-container-high border border-outline flex items-center gap-2 transition-colors">
+          <span class="material-symbols-outlined text-accent text-[18px]">history</span>
+          <span class="text-[12px] font-semibold text-on-surface">Chat History</span>
+        </a>
+
+        <a href="../battery-monitoring/BatteryMonitoring.html" class="p-2.5 rounded-xl bg-surface-variant hover:bg-surface-container-high border border-outline flex items-center gap-2 transition-colors">
+          <span class="material-symbols-outlined text-battery-green text-[18px]">battery_charging_90</span>
+          <span class="text-[12px] font-semibold text-on-surface">Battery Health</span>
+        </a>
+
+        <a href="../settings-security/SettingsSecurity.html" class="p-2.5 rounded-xl bg-surface-variant hover:bg-surface-container-high border border-outline flex items-center gap-2 transition-colors">
+          <span class="material-symbols-outlined text-tertiary text-[18px]">settings</span>
+          <span class="text-[12px] font-semibold text-on-surface">Owner Settings</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- 6. Real-World Surroundings Awareness (Section 4: Optional camera, mic, location permissions) -->
+    <section class="glass-3d rounded-2xl p-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-emerald-950 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-800">
+          <span class="material-symbols-outlined text-[22px]">visibility</span>
+        </div>
+        <div>
+          <span class="text-label-md font-bold text-on-surface block">Surroundings Perception</span>
+          <span class="text-[11px] text-on-surface-variant">Camera &amp; Vision Grounding (Optional &amp; Secure)</span>
+        </div>
+      </div>
+      <button class="px-3 py-1.5 rounded-xl bg-surface-container border border-outline text-emerald-400 text-[11px] font-bold">
+        Enabled
+      </button>
+    </section>
+
+  </main>
+
+  <!-- Bottom Android Navigation Bar -->
+  <nav class="fixed bottom-0 left-0 right-0 max-w-[390px] mx-auto glass-3d border-t border-outline/50 px-4 py-2 flex items-center justify-around z-30 rounded-t-3xl">
+    <a href="../main-home/MainHome.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">home</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Home</span>
+    </a>
+
+    <a href="../ai-conversation/AIConversation.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">chat</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Chat</span>
+    </a>
+
+    <a href="../voice-control/VoiceControl.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <div class="w-12 h-12 -mt-6 rounded-full bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-white shadow-[0_6px_16px_rgba(147,51,234,0.6)] border-2 border-surface">
+        <span class="material-symbols-outlined text-[24px]">mic</span>
+      </div>
+      <span class="text-[10px] font-label font-bold mt-0.5 text-tertiary">Voice 3D</span>
+    </a>
+
+    <a href="PersonalCompanion.html" class="flex flex-col items-center text-pink-400 py-1">
+      <span class="material-symbols-outlined text-[22px]" style="font-variation-settings: &#39;FILL&#39; 1;">favorite</span>
+      <span class="text-[10px] font-label font-bold mt-0.5">Companion</span>
+    </a>
+
+    <a href="../settings-security/SettingsSecurity.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">settings</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Settings</span>
+    </a>
+  </nav>
+
+  <div class="fixed bottom-1 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/30 rounded-full z-40 pointer-events-none"></div>
+
+
+
+</body></html>

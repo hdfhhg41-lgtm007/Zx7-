@@ -1,0 +1,287 @@
+<!DOCTYPE html><html lang="en" class="dark"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MISS ZS - Phone Calling</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#9333EA',
+        'on-primary': '#FFFFFF',
+        'primary-container': '#3B0764',
+        'on-primary-container': '#E9D5FF',
+        'accent': '#A855F7',
+        'secondary': '#8B5CF6',
+        'on-secondary': '#0F0F0F',
+        'tertiary': '#C084FC',
+        'on-tertiary': '#1E0B36',
+        'surface': '#0B0813',
+        'on-surface': '#F3E8FF',
+        'surface-variant': '#161129',
+        'on-surface-variant': '#D8B4FE',
+        'surface-container': '#1E1735',
+        'surface-container-high': '#281F45',
+        'outline': '#4C1D95',
+        'outline-variant': '#2E1065',
+        'success': '#10B981',
+        'on-success': '#393939',
+        'warning': '#F59E0B',
+        'on-warning': '#000000',
+        'error': '#EF4444',
+        'on-error': '#1C1C1C',
+        'battery-green': '#22C55E',
+        'battery-charging': '#38BDF8',
+        'urdu-badge': '#EC4899',
+        'light-primary': '#6B21A8',
+        'light-on-primary': '#FFFFFF',
+        'light-surface': '#FAF5FF',
+        'light-on-surface': '#1E1735',
+        'dark-primary': '#C084FC',
+        'dark-on-primary': '#3B0764',
+        'dark-surface': '#0B0813',
+        'dark-on-surface': '#F3E8FF',
+      },
+      borderRadius: {
+        'sm': '6px',
+        'DEFAULT': '12px',
+        'md': '16px',
+        'lg': '20px',
+        'xl': '28px',
+        'full': '9999px',
+      },
+      spacing: {
+        'gutter-xs': '4px',
+        'gutter-sm': '8px',
+        'gutter-md': '12px',
+        'gutter-lg': '16px',
+        'gutter-xl': '24px',
+        'section': '32px',
+        'page-margin': '16px',
+      },
+      fontFamily: {
+        'display': ['"Archivo"', 'sans-serif'],
+        'headline': ['"Archivo"', 'sans-serif'],
+        'title': ['"Commissioner"', 'sans-serif'],
+        'body': ['"Commissioner"', 'sans-serif'],
+        'label': ['"Commissioner"', 'sans-serif'],
+        'code': ['"Source Code Pro"', 'monospace'],
+      },
+      fontSize: {
+        'display-lg': ['40px', { lineHeight: '48px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'display-lg-mobile': ['30px', { lineHeight: '38px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg': ['34px', { lineHeight: '42px', letterSpacing: '-0.25px', fontWeight: '700' }],
+        'headline-lg-mobile': ['26px', { lineHeight: '34px', letterSpacing: '0px', fontWeight: '700' }],
+        'headline-md': ['22px', { lineHeight: '28px', fontWeight: '600' }],
+        'headline-sm': ['18px', { lineHeight: '24px', fontWeight: '600' }],
+        'title-lg': ['20px', { lineHeight: '26px', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '22px', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '24px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+        'body-sm': ['12px', { lineHeight: '16px', fontWeight: '400' }],
+        'label-lg': ['14px', { lineHeight: '20px', letterSpacing: '0.1px', fontWeight: '500' }],
+        'label-md': ['12px', { lineHeight: '16px', letterSpacing: '0.2px', fontWeight: '500' }],
+        'label-sm': ['11px', { lineHeight: '14px', letterSpacing: '0.3px', fontWeight: '600' }],
+        'code-sm': ['12px', { lineHeight: '16px', fontWeight: '500' }],
+      },
+      transitionDuration: {
+        'state-change': '150ms',
+        'surface-enter': '250ms',
+        'surface-exit': '180ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'surface-enter': '0ms',
+        'surface-exit': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'ease-out',
+        'surface-enter': 'cubic-bezier(0.2, 0, 0, 1)',
+        'surface-exit': 'cubic-bezier(0.3, 0, 1, 1)',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&amp;family=Commissioner:wght@400;500;600&amp;family=Source+Code+Pro:wght@500&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>
+    .material-symbols-outlined { display: inline-block; width: 1em; height: 1em; line-height: 1 !important; box-sizing: content-box; overflow: hidden; white-space: nowrap; direction: ltr; vertical-align: middle; }
+  </style>
+</head>
+<body class="bg-surface text-on-surface min-h-[884px] flex flex-col font-body antialiased relative pb-24" data-stitch-vh="min-h-[884px]===min-h-screen">
+
+  <!-- Android System Status Bar -->
+  <div class="px-6 pt-3 pb-2 flex items-center justify-between text-body-sm font-code text-on-surface-variant z-30">
+    <span>10:51 AM</span>
+    <div class="flex items-center gap-2">
+      <span class="flex items-center gap-1 text-battery-green">
+        <span class="material-symbols-outlined text-[14px]">battery_5_bar</span>
+        <span class="text-on-surface font-semibold">91%</span>
+      </span>
+      <span class="material-symbols-outlined text-[16px]">wifi</span>
+      <span class="material-symbols-outlined text-[16px]">signal_cellular_4_bar</span>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="px-4 py-3 bg-surface-variant/90 border-b border-outline/30 sticky top-0 z-20 backdrop-blur-md">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <a href="../main-home/MainHome.html" class="p-1 rounded-full text-on-surface-variant hover:text-white">
+          <span class="material-symbols-outlined text-[24px]">arrow_back</span>
+        </a>
+        <div>
+          <h1 class="font-headline text-headline-sm font-bold text-on-surface">Phone Calling</h1>
+          <p class="text-body-sm text-secondary">Verified Owner Authorization</p>
+        </div>
+      </div>
+      <div class="p-2 rounded-lg bg-blue-950/70 border border-blue-700/50 text-blue-400">
+        <span class="material-symbols-outlined text-[20px]">call</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 px-4 py-4 flex flex-col gap-4">
+
+    <!-- Active Call Confirmation Prompt (Feature 10: Phone calling with owner confirmation strictly enforced) -->
+    <section class="bg-gradient-to-b from-surface-container via-surface-variant to-surface rounded-2xl p-5 border border-primary/50 shadow-xl flex flex-col items-center text-center">
+      <div class="w-12 h-12 rounded-full bg-blue-950 text-blue-400 flex items-center justify-center mb-2 border border-blue-700/40">
+        <span class="material-symbols-outlined text-[26px]">ring_volume</span>
+      </div>
+      <span class="px-3 py-0.5 rounded-full bg-warning/20 text-warning text-[10px] font-label font-bold uppercase tracking-wider mb-2">
+        Confirmation Required
+      </span>
+      <h2 class="font-headline text-title-lg font-bold text-on-surface">Confirm Phone Call</h2>
+      <p class="text-body-sm text-on-surface-variant mt-1">
+        MISS ZS received your voice request: <span class="text-tertiary">&#34;Call Dr. Farhan&#34;</span>
+      </p>
+
+      <!-- Target Contact Card -->
+      <div class="w-full bg-surface-container-high rounded-xl p-4 my-4 border border-outline flex items-center justify-between">
+        <div class="flex items-center gap-3 text-left">
+          <div class="w-12 h-12 rounded-full bg-purple-900/60 text-accent font-bold flex items-center justify-center border border-accent/40 text-title-md">
+            DF
+          </div>
+          <div>
+            <h3 class="font-title text-title-md font-bold text-on-surface">Dr. Farhan Siddiqui</h3>
+            <p class="font-code text-body-sm text-on-surface-variant">+92 333 4567890</p>
+            <span class="text-[10px] text-battery-green flex items-center gap-1 mt-0.5">
+              <span class="material-symbols-outlined text-[12px]">verified</span> Primary SIM 1 (Jazz)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verbal Confirmation Audio Note -->
+      <p class="text-body-sm text-pink-300 flex items-center gap-1.5 mb-4">
+        <span class="material-symbols-outlined text-[16px]">record_voice_over</span>
+        &#34;Say &#39;Confirm&#39; or tap the dial button below.&#34;
+      </p>
+
+      <!-- Confirmation CTA Buttons -->
+      <div class="w-full flex items-center gap-3">
+        <button class="flex-1 py-3 rounded-full bg-battery-green hover:bg-emerald-400 text-black font-title text-label-lg font-bold flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(34,197,94,0.4)] active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[20px]">call</span>
+          <span>Place Call</span>
+        </button>
+        <button class="flex-1 py-3 rounded-full bg-surface-container hover:bg-surface-container-high border border-outline text-error font-title text-label-lg font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[20px]">call_end</span>
+          <span>Cancel</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Calling Safeguards & Android Permissions (Requirement: Never use fake buttons, show required permissions) -->
+    <section class="bg-surface-container rounded-xl p-4 border border-outline-variant flex flex-col gap-2">
+      <div class="flex items-center gap-2 text-secondary">
+        <span class="material-symbols-outlined text-[18px]">verified_user</span>
+        <h3 class="font-headline text-label-md font-bold uppercase tracking-wider">Android Calling Permissions</h3>
+      </div>
+      <p class="text-body-sm text-on-surface-variant">
+        Android <code class="text-tertiary">CALL_PHONE</code> &amp; <code class="text-tertiary">READ_CONTACTS</code> runtime permissions are active. MISS ZS will never auto-dial without verbal or tactile approval.
+      </p>
+    </section>
+
+    <!-- Frequent Contacts with Fast Owner Confirmation -->
+    <section>
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-headline text-title-md font-semibold text-on-surface">Emergency &amp; Family Dials</h3>
+        <span class="text-[11px] text-on-surface-variant">One-tap prompt</span>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <div class="bg-surface-container rounded-xl p-3 border border-outline-variant flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-pink-950 text-pink-400 flex items-center justify-center font-bold text-[12px]">
+              AM
+            </div>
+            <div>
+              <span class="text-label-md font-semibold text-on-surface block">Ammi (Home)</span>
+              <span class="text-[11px] text-on-surface-variant font-code">+92 300 8765432</span>
+            </div>
+          </div>
+          <button class="p-2 rounded-full bg-surface-variant hover:bg-surface-container-high text-battery-green border border-outline-variant">
+            <span class="material-symbols-outlined text-[18px]">call</span>
+          </button>
+        </div>
+
+        <div class="bg-surface-container rounded-xl p-3 border border-outline-variant flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-blue-950 text-blue-400 flex items-center justify-center font-bold text-[12px]">
+              BK
+            </div>
+            <div>
+              <span class="text-label-md font-semibold text-on-surface block">Bilal Khan (Work)</span>
+              <span class="text-[11px] text-on-surface-variant font-code">+92 312 3456789</span>
+            </div>
+          </div>
+          <button class="p-2 rounded-full bg-surface-variant hover:bg-surface-container-high text-battery-green border border-outline-variant">
+            <span class="material-symbols-outlined text-[18px]">call</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Android Navigation Bar -->
+  <nav class="fixed bottom-0 left-0 right-0 max-w-[390px] mx-auto bg-surface-variant/95 border-t border-outline/40 backdrop-blur-lg px-4 py-2 flex items-center justify-around z-30">
+    <a href="../main-home/MainHome.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">home</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Home</span>
+    </a>
+
+    <a href="../ai-conversation/AIConversation.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">chat</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Chat</span>
+    </a>
+
+    <a href="../voice-control/VoiceControl.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <div class="w-10 h-10 -mt-5 rounded-full bg-primary flex items-center justify-center text-white shadow-lg border border-accent">
+        <span class="material-symbols-outlined text-[22px]">mic</span>
+      </div>
+      <span class="text-[10px] font-label font-medium mt-0.5">Voice</span>
+    </a>
+
+    <a href="../six-assistants/SixAssistantsDashboard.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">group_work</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Assistants</span>
+    </a>
+
+    <a href="../settings-security/SettingsSecurity.html" class="flex flex-col items-center text-on-surface-variant hover:text-tertiary py-1 transition-colors">
+      <span class="material-symbols-outlined text-[22px]">settings</span>
+      <span class="text-[10px] font-label font-medium mt-0.5">Settings</span>
+    </a>
+  </nav>
+
+  <div class="fixed bottom-1 left-1/2 -translate-x-1/2 w-32 h-1 bg-white/20 rounded-full z-40 pointer-events-none"></div>
+
+
+
+</body></html>
